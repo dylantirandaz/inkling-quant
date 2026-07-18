@@ -74,9 +74,7 @@ Transformers fine-grained-FP8 matrix. Installing an extra makes the adapter impo
 still fails closed unless the immutable model, runtime, explicit device, policy, calibration, and
 hardware/software gates pass. One exact GPTQ/CPU matrix has executed; AWQ, general GPTQ/CUDA, and
 FP8 conversion evidence remain open. The `cuda`, `vllm`, `sglang`, and `multimodal` groups remain
-separate integration boundaries. See
-[ADR-012](docs/adr/ADR-012-production-optional-quantizer-adapters.md) and
-[ADR-027](docs/adr/ADR-027-exact-stories15m-gptqmodel-cpu.md).
+separate integration boundaries.
 
 ```console
 uv sync --extra awq   # GPTQModel AWQ conversion dependencies
@@ -110,14 +108,14 @@ addressed App name must have one exclusive deployer for the run, while the manag
 redeployment before and after call acceptance and requests cancellation on drift. The manager reads
 committed Volume markers to reject completed or out-of-order stages before container startup and
 blocks locally recorded pending duplicates or predecessors, including a predecessor whose success
-marker is already visible.
-See the
-[exact Inkling Modal runbook](docs/inkling-gguf-modal.md) and
-[ADR-028](docs/adr/ADR-028-exact-inkling-gguf-modal-boundary.md) for the stage commands, crash-safe
-receipt checks, separate BF16 projector, explicit MTP omission, and non-claims. The launcher
-enforces configured execution windows and deletion lag. Crash-rescheduled containers that reach
-the ledger consume a new slot through required Modal task identity. The implementation-addressed
-App must be stopped at the cutoff and source/work Volumes deleted promptly after final verification.
+marker is already visible. The checked
+[experiment configuration](configs/experiments/inkling_q3_k_m_modal.yaml),
+[local manager](scripts/manage_inkling_modal.py), and
+[remote stages](scripts/quantize_inkling_modal.py) define the commands, crash-safe receipt checks,
+separate BF16 projector, explicit MTP omission, and non-claims. The launcher enforces configured
+execution windows and deletion lag. Crash-rescheduled containers that reach the ledger consume a
+new slot through required Modal task identity. The implementation-addressed App must be stopped at
+the cutoff and source/work Volumes deleted promptly after final verification.
 
 A deploy-only `--accept-short-initial-window-risk` exception can waive the initial full-sequence
 fit check when its explicit confirmation and minimum-time checks pass. It does not weaken launch,
@@ -137,7 +135,8 @@ IQL_RUN_OPTIONAL_BACKEND_PROBES=1 uv run pytest -q \
 ```
 
 The exception is the exact offline Stories15M CPU GPTQ pilot. It requires the immutable model
-revision to be present in the local Hub cache and the exact dependency matrix recorded in ADR-027:
+revision to be present in the local Hub cache and the exact dependency matrix pinned in
+[`uv.lock`](uv.lock):
 
 ```console
 uv sync --extra dev --extra gptq
@@ -156,8 +155,7 @@ execution also binds its runnable project bytes through `environment.project_sou
 manifest covering `pyproject.toml`, `uv.lock`, and `src/inkling_quant_lab`. The recorded four-sample,
 17-token pilot observed worse candidate loss; it is conversion/reload evidence, not representative
 quality, checkpoint-compression, routing, performance, memory, or energy evidence. See the
-[curated evidence record](docs/experiments/stories15m-gptq-cpu-pilot.json) and
-[ADR-027](docs/adr/ADR-027-exact-stories15m-gptqmodel-cpu.md).
+[curated evidence record](docs/experiments/stories15m-gptq-cpu-pilot.json).
 
 The opt-in offline TC-QUANT-007 representation test has also passed under the exact dependency
 matrix. It proves that all 117 raw checkpoint tensors, including 72 expert tensors, map without
@@ -230,8 +228,7 @@ the exact 8-by-1024 input, 1024-by-1024 weight, and one-thread protocol. INT8 st
 identical; opaque native INT4 state was 0.77% larger. The native INT4 kernel is W4A8 while the
 reference is W4A16, and tiny-MoE end-to-end runs can still be slower when fixed kernel-call costs
 dominate. The host was shared and background load was not controlled. See the
-[benchmark record](docs/experiments/native-cpu-kernels-m3-torch-2.13.json) and
-[ADR-011](docs/adr/ADR-011-native-cpu-quantization-kernels.md).
+[benchmark record](docs/experiments/native-cpu-kernels-m3-torch-2.13.json).
 
 Use the run directory printed by `iql run` for resume, comparison, and report generation:
 
@@ -299,15 +296,14 @@ Three independent executions reproduced all scientific fields exactly. This is p
 evidence on one subset, not expert-weight quantization, full-dataset quality, peak-memory evidence,
 or preservation of learned routing—the checkpoint router is publisher-randomized. See the
 [compact record](docs/experiments/stories15m-moe-native-linear-quality.json) and
-[curated full evidence](docs/experiments/stories15m-moe-native-linear-quality-full-v2.json), plus the
-[reproduction notes](docs/experiments/stories15m-moe-native-linear-quality.md) and
-[ADR-014](docs/adr/ADR-014-public-mixtral-addressable-linear-quantization.md).
+[curated full evidence](docs/experiments/stories15m-moe-native-linear-quality-full-v2.json).
 
-ADR-026's later confirmatory native-INT8 result remains valid for its native fused, attention-only
+The later confirmatory native-INT8 result remains valid for its native fused, attention-only
 scope. An exact audit reconstructed Transformers 5.12's 117-source-tensor to 57-fused-tensor
 conversion and reproduced the state checksum from both confirmatory attempts. The current GPTQ
 source checksum differs because its Defuser model uses unfused expert names/layout, not because the
-native runs omitted experts. The four-sample/17-token GPTQ pilot does not broaden ADR-026's claim.
+native runs omitted experts. The four-sample/17-token GPTQ pilot does not broaden that confirmatory
+result's claim.
 
 The same pinned Stories15M/native-INT8 policy has also completed one governed 14-stage CPU run with
 fresh isolated benchmark workers. The baseline worker (PID 12534) reached 948,174,848 bytes peak
@@ -318,8 +314,7 @@ latency was 185.03 ms versus 160.57 ms, so this run supplies neither a speedup n
 reduction claim. Candidate reconstruction can hold source and candidate state together, and the
 three-prompt/17-loss-token local fixtures are contract data rather than representative quality
 evidence. See the
-[checked run record](docs/experiments/stories15m-native-int8-isolated-peak-m3.json) and
-[ADR-023](docs/adr/ADR-023-public-model-isolated-stage-peak-rss.md).
+[checked run record](docs/experiments/stories15m-native-int8-isolated-peak-m3.json).
 
 After caching that exact revision, reproduce the governed run without network access:
 
@@ -348,8 +343,7 @@ Full routing aligned 126 token-layer events (0.952381 route agreement, 0.976190 
 0.000647304 Jensen-Shannon divergence). The 17-token loss and three-prompt generation fixtures are
 contract data; both exact-match scores were zero while output hashes differed, so this is not
 representative quality preservation. Fused experts remained float32. See the
-[checked record](docs/experiments/stories15m-native-int8-source-weight-free-peak-m3.json) and
-[ADR-024](docs/adr/ADR-024-source-weight-free-candidate-subject-peak-rss.md).
+[checked record](docs/experiments/stories15m-native-int8-source-weight-free-peak-m3.json).
 
 ```console
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 uv run iql run \
@@ -372,17 +366,15 @@ This is a uniform all-eligible-leaf policy: embedding, output head, routers, att
 all change, so no delta is attributed specifically to expert weights. The q8 value is an observed
 single-run subset difference, not an improvement. The publisher-randomized router prevents learned
 specialization claims. This frozen record remains direct MLX evidence rather than SGLang, CUDA, or
-sharding evidence; ADR-018 later promoted only its exact model/software path into the pipeline. See
-the [summary](docs/experiments/stories15m-moe-mlx-full-quantization-m3.md),
-[exact checked record](docs/experiments/stories15m-moe-mlx-full-quantization-m3.json), and
-[ADR-016](docs/adr/ADR-016-full-public-moe-mlx-quantization.md).
+sharding evidence; the later registered pipeline promoted only its exact model/software path. See
+the [exact checked record](docs/experiments/stories15m-moe-mlx-full-quantization-m3.json).
 
 The registered exact path composes `mlx_lm_mixtral`, `mlx_metal`, and `mlx_affine` through ordinary
 pipeline stages. It requires the absolute audited local snapshot, float32 control execution, q4 or
 q8 affine group-size-32 uniform conversion, and Apple Metal. Both checked configs completed loss,
 six-layer full routing, reports, atomic safetensors export, byte audit, reload, and a packed-kernel
 forward. Pipeline benchmarks are rejected because that loop is still PyTorch-specific; use the
-unchanged ADR-016 record for bounded direct-MLX timing observations.
+checked direct-MLX record above for bounded timing observations.
 
 ```console
 uv sync --extra dev --extra mlx
@@ -395,8 +387,7 @@ uv run --extra mlx iql run configs/experiments/mlx_stories15m_moe_q8.yaml \
 The default evaluation/routing inputs are tiny contract fixtures, not representative quality data.
 The uniform policy changes embedding, head, routers, attention, and experts together, and the
 publisher-randomized router prevents learned-specialization claims. See the
-[acceptance note](docs/experiments/stories15m-moe-registered-mlx-pipeline-m3.md) and
-[ADR-018](docs/adr/ADR-018-registered-mlx-public-moe-pipeline.md).
+[registered-pipeline record](docs/experiments/stories15m-moe-registered-mlx-pipeline-m3.json).
 
 The learned-router slice is separate. Its CPU-only contracts restrict an accepted learned-float
 artifact to the six `(4, 288)` gate weights, then represent each gate as affine
@@ -410,14 +401,12 @@ The unchanged ten-step contract did execute on Apple M3 Metal. It reduced held-o
 overall `0.60` and Alice `0.50` accuracy gates (Alice observed `0.35156`). Seven other overall and
 per-domain gates passed. The runner sealed this as a negative result and left the configured success
 path absent: no overlay, lineage, q4/q8 descendant, or retention claim was produced. See the
-[checked negative-result record](docs/experiments/stories15m-router-domain-pair-10step-failed-m3.json)
-and [ADR-022](docs/adr/ADR-022-learned-router-negative-result-retention.md).
+[checked negative-result record](docs/experiments/stories15m-router-domain-pair-10step-failed-m3.json).
 
 The existing uniform MLX results above use the publisher-randomized router and cannot fill the
 learned-behavior evidence gap. Even a future passing learned run supports only its predeclared
 label-conditioned routing statement; packing error and reload success are not retention
-measurements. See the
-[learned-router overlay boundary](docs/post-training-router-overlay.md) and the reviewed
+measurements. See the reviewed
 [preflight configuration](configs/post_training/stories15m_router_10step.yaml).
 
 A separate two-rank CPU/Gloo slice executed every expert block in the pinned Stories15M checkpoint.
@@ -427,9 +416,7 @@ all-reduced outputs matched the single-process reference within the declared tol
 expert-block tensor parallelism only: attention, embeddings, norms, residuals, routers, and the LM
 head were not executed as a sharded end-to-end transformer, and the slice makes no performance,
 peak-memory, energy, training, export, multi-host, or Inkling-checkpoint claim. See the
-[summary](docs/experiments/stories15m-moe-expert-tensor-parallel-m3.md),
-[exact checked record](docs/experiments/stories15m-moe-expert-tensor-parallel-m3.json), and
-[ADR-017](docs/adr/ADR-017-public-moe-expert-tensor-parallel.md).
+[exact checked record](docs/experiments/stories15m-moe-expert-tensor-parallel-m3.json).
 
 SGLang 0.5.15.post1 also served this MoE through MLX on Apple Metal and returned one real HTTP 200
 generation. That is a serving smoke, not a latency distribution or an Inkling Quant Lab runtime.
@@ -469,8 +456,7 @@ uv run python scripts/probe_serving_endpoint.py \
   --seed 17
 ```
 
-See [ADR-013](docs/adr/ADR-013-sglang-mlx-serving-smoke.md) and the
-[one-request record](docs/experiments/sglang-mlx-stories15m-smoke.json) for the exact install
+See the [one-request record](docs/experiments/sglang-mlx-stories15m-smoke.json) for the exact install
 transformation, cache/blob evidence, safety caveats, and failed synthetic-model probe. The initial
 vLLM 0.23.0 Apple-CPU source build imported its native extensions, but the managed environment
 denied the local socket bind required before weight loading; that historical
@@ -478,7 +464,7 @@ denied the local socket bind required before weight loading; that historical
 the restricted environment. A subsequent offline run where single-rank Gloo TCP was permitted used
 an exact checked compatibility patch, loaded the pinned Stories15M MoE safetensors, and produced
 three identical four-token greedy completions whose token-ID hashes exactly matched native
-Transformers. See [ADR-019](docs/adr/ADR-019-patched-vllm-apple-cpu-direct-inference.md) and the
+Transformers. See the
 [execution record](docs/experiments/vllm-0.23.0-apple-cpu-stories15m-inference.json). This is
 external direct-inference evidence, not unpatched upstream compatibility, a project runtime,
 serving, or a performance result.
@@ -504,7 +490,8 @@ Resolution order is component bases, experiment YAML, CLI overrides, then in-mem
 references. The complete resolved config is validated, serialized, saved, and hashed. There are no
 hidden environment-dependent defaults for device, dtype, remote code, or checkpoint safety.
 
-See the [configuration reference](docs/configuration.md) for all fields, policy precedence,
+See the validated [configuration models](src/inkling_quant_lab/config.py) and
+[checked-in configuration fragments](configs/) for fields, policy precedence,
 calibration/evaluation separation, routing modes, and overrides.
 
 ## Run artifacts
@@ -639,7 +626,8 @@ that a candidate is universally best or deployable.
 - Artifact paths must remain under the configured root.
 - Subprocesses use argument arrays with no shell interpolation.
 
-Read [Security notes](docs/security.md) before adding external models, datasets, or backends.
+Review the [security defaults implementation](src/inkling_quant_lab/security.py) before adding
+external models, datasets, or backends.
 
 ## Development commands
 
@@ -655,20 +643,10 @@ uv run pytest -m "not network and not gpu and not slow and not large_model"
 GPU, network, public-model, backend, and large-model tests are opt-in and must pin their external
 revisions and document hardware/software requirements.
 
-## Documentation
+## Repository map
 
-- [Architecture overview](docs/architecture.md)
-- [Configuration reference](docs/configuration.md)
-- [Quantizer backend authoring guide](docs/backend-authoring.md)
-- [Model adapter authoring guide](docs/model-adapters.md)
-- [Reproducibility guide](docs/reproducibility.md)
-- [Learned-router and quantized-overlay boundary](docs/post-training-router-overlay.md)
-- [Benchmark protocol](docs/benchmark-protocol.md)
-- [How to read a report](docs/example-report.md)
-- [Known limitations](docs/known-limitations.md)
-- [Inkling and GPU roadmap](docs/roadmap.md)
-- [Exact Inkling Q3_K_M Modal runbook](docs/inkling-gguf-modal.md)
-- [Architecture decision records](docs/adr/)
-
-Requirements, architecture, and test obligations remain authoritative in [`SPEC.md`](SPEC.md),
-[`SDD.md`](SDD.md), and [`TDD.md`](TDD.md), in that order.
+- [Source package](src/inkling_quant_lab/)
+- [Experiment configurations](configs/)
+- [Operational scripts](scripts/)
+- [Tests](tests/)
+- [Curated experiment records](docs/experiments/)
