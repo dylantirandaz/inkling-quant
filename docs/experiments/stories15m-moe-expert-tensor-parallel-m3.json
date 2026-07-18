@@ -1,0 +1,4113 @@
+{
+  "absolute_local_paths_redacted": true,
+  "command_template": "$PYTHON scripts/run_public_moe_tensor_parallel_smoke.py --snapshot $PINNED_SNAPSHOT --hardware-label $HARDWARE_LABEL --timeout-seconds 120 --absolute-tolerance 1e-7 --relative-tolerance 1e-5 --output $NEW_ARTIFACT_PATH",
+  "created_at_utc": "2026-07-16T16:36:02.562600+00:00",
+  "implementation": {
+    "git_commit": null,
+    "git_unavailable_reason": "workspace has no .git metadata",
+    "module": {
+      "path": "src/inkling_quant_lab/public_moe_tensor_parallel.py",
+      "sha256_at_end": "808393f7a5200fe0b628eb296e57691cd7dd5a7a4f6ba71adb80ee8e3312ca7b",
+      "sha256_at_start": "808393f7a5200fe0b628eb296e57691cd7dd5a7a4f6ba71adb80ee8e3312ca7b"
+    },
+    "runner": {
+      "path": "scripts/run_public_moe_tensor_parallel_smoke.py",
+      "sha256_at_end": "8d957647d7b9a6bd0ed730d288d9a6dc5b294e6d69ea17f20a234d582df04616",
+      "sha256_at_start": "8d957647d7b9a6bd0ed730d288d9a6dc5b294e6d69ea17f20a234d582df04616"
+    }
+  },
+  "limitations": [
+    "The source is a public Stories15M MoE checkpoint, not an Inkling checkpoint.",
+    "Every one of its six expert blocks is executed with sharded expert parameters, but attention, residuals, normalization, embedding lookup, and LM head are not an end-to-end distributed transformer forward.",
+    "This validates numerical execution, exact slice loading, reconstruction, and local Gloo communication; it is not a latency, memory-peak, energy, training, export, multi-host, or fault-tolerance result.",
+    "The publisher router is randomized and each layer/projection repeats expert weights, so this does not establish learned specialization preservation."
+  ],
+  "result": {
+    "absolute_tolerance": 1e-07,
+    "all_public_moe_expert_blocks_tensor_parallel_validated": true,
+    "backend": "gloo",
+    "distributed_training_validated": false,
+    "end_to_end_transformer_forward_validated": false,
+    "execution_dtype": "float32",
+    "experts_per_layer": 4,
+    "hardware": {
+      "logical_cpu_count": 8,
+      "machine": "arm64",
+      "physical_memory_bytes": 17179869184,
+      "processor": "arm",
+      "release": "24.3.0",
+      "system": "Darwin"
+    },
+    "hidden_size": 288,
+    "input_kind": "two_exact_source_embedding_row_ranges",
+    "input_row_count": 64,
+    "input_row_ranges": [
+      [
+        0,
+        32
+      ],
+      [
+        256,
+        288
+      ]
+    ],
+    "input_sha256": "d8da6467829a63310e6e80e40d8fb26a60b608fa9d498680b29c86195191054c",
+    "interface": "lo0",
+    "intermediate_size": 768,
+    "layer_count": 6,
+    "layers": [
+      {
+        "all_experts_executed": true,
+        "distributed_output_sha256": "8fbd95baf7f3e07e8a72c522041ad4bfa5e64d6aa548f52bdd848268e2853d3a",
+        "layer_id": 0,
+        "rank_max_abs_errors": [
+          5.820766091346741e-10,
+          5.820766091346741e-10
+        ],
+        "rank_max_relative_errors": [
+          0.0006884093163534999,
+          0.0006884093163534999
+        ],
+        "rank_max_tolerance_ratios": [
+          0.005427850876003504,
+          0.005427850876003504
+        ],
+        "reference_output_sha256": "01dda857449fc26e3a63b33b971394ab868180038b9aa1121084e7f79b0081fb",
+        "selected_expert_count": 128,
+        "selected_expert_counts": [
+          15,
+          46,
+          51,
+          16
+        ]
+      },
+      {
+        "all_experts_executed": true,
+        "distributed_output_sha256": "92c51d614d8f99591ec9d48864836741e41748a2de317ea5ba2c6b706b676368",
+        "layer_id": 1,
+        "rank_max_abs_errors": [
+          6.402842700481415e-10,
+          6.402842700481415e-10
+        ],
+        "rank_max_relative_errors": [
+          0.00023990888439584523,
+          0.00023990888439584523
+        ],
+        "rank_max_tolerance_ratios": [
+          0.006183878052979708,
+          0.006183878052979708
+        ],
+        "reference_output_sha256": "77840392bdfb37152dddfa367b4bc09ce118b0b64ff531ad33a042318e9e9590",
+        "selected_expert_count": 128,
+        "selected_expert_counts": [
+          47,
+          42,
+          17,
+          22
+        ]
+      },
+      {
+        "all_experts_executed": true,
+        "distributed_output_sha256": "1a461afac870cf9c6b263d55f040d916ee7e6407f2b544e48e985f794c02d61d",
+        "layer_id": 2,
+        "rank_max_abs_errors": [
+          4.0745362639427185e-10,
+          4.0745362639427185e-10
+        ],
+        "rank_max_relative_errors": [
+          0.00013013527495786548,
+          0.00013013527495786548
+        ],
+        "rank_max_tolerance_ratios": [
+          0.003966643940657377,
+          0.003966643940657377
+        ],
+        "reference_output_sha256": "e2fdfa6e0e8cae7d42b3647c1e762cc58eef73f18c2d98bce6ecc1aa892cc0b5",
+        "selected_expert_count": 128,
+        "selected_expert_counts": [
+          48,
+          14,
+          54,
+          12
+        ]
+      },
+      {
+        "all_experts_executed": true,
+        "distributed_output_sha256": "b965df119c25f6fb806335c8b7d2fd19fd63e10298009b76e690519ca126e84a",
+        "layer_id": 3,
+        "rank_max_abs_errors": [
+          1.1641532182693481e-09,
+          1.1641532182693481e-09
+        ],
+        "rank_max_relative_errors": [
+          0.0008361666696146131,
+          0.0008361666696146131
+        ],
+        "rank_max_tolerance_ratios": [
+          0.010361257940530777,
+          0.010361257940530777
+        ],
+        "reference_output_sha256": "980b3a52d5f0ac5ddb50565fdeedd09e511e6839bfa6200e76b49994a890e3ca",
+        "selected_expert_count": 128,
+        "selected_expert_counts": [
+          23,
+          50,
+          8,
+          47
+        ]
+      },
+      {
+        "all_experts_executed": true,
+        "distributed_output_sha256": "10682f67d9cd440bae5e3900d54852d8a41973458e4074713b3e5dae4e70b650",
+        "layer_id": 4,
+        "rank_max_abs_errors": [
+          8.149072527885437e-10,
+          8.149072527885437e-10
+        ],
+        "rank_max_relative_errors": [
+          0.0003644373791757971,
+          0.0003644373791757971
+        ],
+        "rank_max_tolerance_ratios": [
+          0.007699209731072187,
+          0.007699209731072187
+        ],
+        "reference_output_sha256": "1068e6ac748e7c740407738e0cd8603e7e3d8a5c3b3d316cc825ac1aa2486a57",
+        "selected_expert_count": 128,
+        "selected_expert_counts": [
+          14,
+          55,
+          52,
+          7
+        ]
+      },
+      {
+        "all_experts_executed": true,
+        "distributed_output_sha256": "dd9e18d6fb3fcf59d8cd42a34f876fa20352841b18455294daa1e32aa212093d",
+        "layer_id": 5,
+        "rank_max_abs_errors": [
+          4.6566128730773926e-09,
+          4.6566128730773926e-09
+        ],
+        "rank_max_relative_errors": [
+          0.00039804604602977633,
+          0.00039804604602977633
+        ],
+        "rank_max_tolerance_ratios": [
+          0.036244358867406845,
+          0.036244358867406845
+        ],
+        "reference_output_sha256": "5e45bbe6ae172da65e3327a83c29b883a1ebfd15817c091508f2b2c462a3ae15",
+        "selected_expert_count": 128,
+        "selected_expert_counts": [
+          22,
+          44,
+          44,
+          18
+        ]
+      }
+    ],
+    "multi_host_validated": false,
+    "operator_declared_hardware_label": "Apple M3 MacBook Air, 16 GB unified memory",
+    "parameter_sharded_forward_validated": true,
+    "performance_validated": false,
+    "process_start_method": "spawn",
+    "public_checkpoint_executed": true,
+    "ranks": [
+      {
+        "device": "cpu",
+        "forward_loaded_only_rank_local_expert_slices": true,
+        "full_float32_expert_parameter_bytes": 63700992,
+        "full_tensor_reconstruction_timing": "after_local_projection_forward",
+        "input_sha256": "d8da6467829a63310e6e80e40d8fb26a60b608fa9d498680b29c86195191054c",
+        "interop_threads": 1,
+        "intraop_threads": 1,
+        "layer_output_sha256": [
+          "8fbd95baf7f3e07e8a72c522041ad4bfa5e64d6aa548f52bdd848268e2853d3a",
+          "92c51d614d8f99591ec9d48864836741e41748a2de317ea5ba2c6b706b676368",
+          "1a461afac870cf9c6b263d55f040d916ee7e6407f2b544e48e985f794c02d61d",
+          "b965df119c25f6fb806335c8b7d2fd19fd63e10298009b76e690519ca126e84a",
+          "10682f67d9cd440bae5e3900d54852d8a41973458e4074713b3e5dae4e70b650",
+          "dd9e18d6fb3fcf59d8cd42a34f876fa20352841b18455294daa1e32aa212093d"
+        ],
+        "local_expert_parameter_bytes": 31850496,
+        "local_fraction": 0.5,
+        "rank": 0,
+        "shard_evidence": [
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "288012056109286e913c26dcfb8a514863a22d5f484e4331232a8aa6b76c9c6f",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "fa14780738f9529aa010257774f4adae4a020cb6845bf327d7eee9862b8e35b4",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "fa14780738f9529aa010257774f4adae4a020cb6845bf327d7eee9862b8e35b4",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "02515589f0cc34245e9f4ee23e990a6e47d6f5ca4b7e55b022afc906d88a7e28",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.0.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "51f61866d969775cd86fc3106edd22eccbfcf0b2bc3169ddbce5f0713079ee21",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "58b5bc5f5c398d50a2509528f76c4675398d396ae48dcedfc4e22a81d961d5f3",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "58b5bc5f5c398d50a2509528f76c4675398d396ae48dcedfc4e22a81d961d5f3",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "fc47d811b576ca40a08cf6b8ad63cadbf9ba7dd46e80e25533753e2d7471cbf2",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.0.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "0180f09a2312c6891695402f92c4d19fe9ac379a7c92d6d232887e6f57e01ca6",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "91def8d0c552a1760c5bc2d02effcb25a0b4fdca21c26d78a80154c9e5ec58e7",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "91def8d0c552a1760c5bc2d02effcb25a0b4fdca21c26d78a80154c9e5ec58e7",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "f2f62d287a7c2125e0757c33c48bc000fea17ac3e701ad4c3e83b80c3bf3c137",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.0.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "288012056109286e913c26dcfb8a514863a22d5f484e4331232a8aa6b76c9c6f",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "fa14780738f9529aa010257774f4adae4a020cb6845bf327d7eee9862b8e35b4",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "fa14780738f9529aa010257774f4adae4a020cb6845bf327d7eee9862b8e35b4",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "02515589f0cc34245e9f4ee23e990a6e47d6f5ca4b7e55b022afc906d88a7e28",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.1.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "51f61866d969775cd86fc3106edd22eccbfcf0b2bc3169ddbce5f0713079ee21",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "58b5bc5f5c398d50a2509528f76c4675398d396ae48dcedfc4e22a81d961d5f3",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "58b5bc5f5c398d50a2509528f76c4675398d396ae48dcedfc4e22a81d961d5f3",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "fc47d811b576ca40a08cf6b8ad63cadbf9ba7dd46e80e25533753e2d7471cbf2",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.1.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "0180f09a2312c6891695402f92c4d19fe9ac379a7c92d6d232887e6f57e01ca6",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "91def8d0c552a1760c5bc2d02effcb25a0b4fdca21c26d78a80154c9e5ec58e7",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "91def8d0c552a1760c5bc2d02effcb25a0b4fdca21c26d78a80154c9e5ec58e7",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "f2f62d287a7c2125e0757c33c48bc000fea17ac3e701ad4c3e83b80c3bf3c137",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.1.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "288012056109286e913c26dcfb8a514863a22d5f484e4331232a8aa6b76c9c6f",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "fa14780738f9529aa010257774f4adae4a020cb6845bf327d7eee9862b8e35b4",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "fa14780738f9529aa010257774f4adae4a020cb6845bf327d7eee9862b8e35b4",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "02515589f0cc34245e9f4ee23e990a6e47d6f5ca4b7e55b022afc906d88a7e28",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.2.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "51f61866d969775cd86fc3106edd22eccbfcf0b2bc3169ddbce5f0713079ee21",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "58b5bc5f5c398d50a2509528f76c4675398d396ae48dcedfc4e22a81d961d5f3",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "58b5bc5f5c398d50a2509528f76c4675398d396ae48dcedfc4e22a81d961d5f3",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "fc47d811b576ca40a08cf6b8ad63cadbf9ba7dd46e80e25533753e2d7471cbf2",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.2.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "0180f09a2312c6891695402f92c4d19fe9ac379a7c92d6d232887e6f57e01ca6",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "91def8d0c552a1760c5bc2d02effcb25a0b4fdca21c26d78a80154c9e5ec58e7",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "91def8d0c552a1760c5bc2d02effcb25a0b4fdca21c26d78a80154c9e5ec58e7",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "f2f62d287a7c2125e0757c33c48bc000fea17ac3e701ad4c3e83b80c3bf3c137",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.2.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "288012056109286e913c26dcfb8a514863a22d5f484e4331232a8aa6b76c9c6f",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "fa14780738f9529aa010257774f4adae4a020cb6845bf327d7eee9862b8e35b4",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "fa14780738f9529aa010257774f4adae4a020cb6845bf327d7eee9862b8e35b4",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "02515589f0cc34245e9f4ee23e990a6e47d6f5ca4b7e55b022afc906d88a7e28",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.3.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "51f61866d969775cd86fc3106edd22eccbfcf0b2bc3169ddbce5f0713079ee21",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "58b5bc5f5c398d50a2509528f76c4675398d396ae48dcedfc4e22a81d961d5f3",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "58b5bc5f5c398d50a2509528f76c4675398d396ae48dcedfc4e22a81d961d5f3",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "fc47d811b576ca40a08cf6b8ad63cadbf9ba7dd46e80e25533753e2d7471cbf2",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.3.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "0180f09a2312c6891695402f92c4d19fe9ac379a7c92d6d232887e6f57e01ca6",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "91def8d0c552a1760c5bc2d02effcb25a0b4fdca21c26d78a80154c9e5ec58e7",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "91def8d0c552a1760c5bc2d02effcb25a0b4fdca21c26d78a80154c9e5ec58e7",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "f2f62d287a7c2125e0757c33c48bc000fea17ac3e701ad4c3e83b80c3bf3c137",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.3.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "58025c437792c561ce3873696e333c7549d76fdfc69eb969785b99a3517bb173",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "eedcb32ec3f0482d2b3623bafc61e5073c74a69a74650a92c451bdc0b8d59cf2",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "eedcb32ec3f0482d2b3623bafc61e5073c74a69a74650a92c451bdc0b8d59cf2",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "dddea45e162af4c754685f76ed01cfb90a046154894e62d895b082b4862ca5b2",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.0.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "28dd0ca7c8d1e418cc403e4b131cfa9d30fcf643e054196924e4c8b5078dc3e7",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "1170efd5d701d6854befc5e6dff08dc0fa688f835cd6e806b5bf82401913d067",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "1170efd5d701d6854befc5e6dff08dc0fa688f835cd6e806b5bf82401913d067",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "938d54c030d9b60bd25b253014de5c96a6cdd62b19987b8536d9427d67f4aad4",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.0.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "75ed7236f670461800c0b339fc811f102c653da1c24d46d9083572c8bfd52549",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "882a3ce9e104f74d578e4c00ea0399a2e8d540d7b65ba0d6b18160d7c0b9477f",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "882a3ce9e104f74d578e4c00ea0399a2e8d540d7b65ba0d6b18160d7c0b9477f",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "867bedf4e7b387c9fb2f0bdec7ab161f91671b519db1344bdee681088b41bf95",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.0.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "58025c437792c561ce3873696e333c7549d76fdfc69eb969785b99a3517bb173",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "eedcb32ec3f0482d2b3623bafc61e5073c74a69a74650a92c451bdc0b8d59cf2",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "eedcb32ec3f0482d2b3623bafc61e5073c74a69a74650a92c451bdc0b8d59cf2",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "dddea45e162af4c754685f76ed01cfb90a046154894e62d895b082b4862ca5b2",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.1.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "28dd0ca7c8d1e418cc403e4b131cfa9d30fcf643e054196924e4c8b5078dc3e7",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "1170efd5d701d6854befc5e6dff08dc0fa688f835cd6e806b5bf82401913d067",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "1170efd5d701d6854befc5e6dff08dc0fa688f835cd6e806b5bf82401913d067",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "938d54c030d9b60bd25b253014de5c96a6cdd62b19987b8536d9427d67f4aad4",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.1.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "75ed7236f670461800c0b339fc811f102c653da1c24d46d9083572c8bfd52549",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "882a3ce9e104f74d578e4c00ea0399a2e8d540d7b65ba0d6b18160d7c0b9477f",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "882a3ce9e104f74d578e4c00ea0399a2e8d540d7b65ba0d6b18160d7c0b9477f",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "867bedf4e7b387c9fb2f0bdec7ab161f91671b519db1344bdee681088b41bf95",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.1.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "58025c437792c561ce3873696e333c7549d76fdfc69eb969785b99a3517bb173",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "eedcb32ec3f0482d2b3623bafc61e5073c74a69a74650a92c451bdc0b8d59cf2",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "eedcb32ec3f0482d2b3623bafc61e5073c74a69a74650a92c451bdc0b8d59cf2",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "dddea45e162af4c754685f76ed01cfb90a046154894e62d895b082b4862ca5b2",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.2.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "28dd0ca7c8d1e418cc403e4b131cfa9d30fcf643e054196924e4c8b5078dc3e7",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "1170efd5d701d6854befc5e6dff08dc0fa688f835cd6e806b5bf82401913d067",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "1170efd5d701d6854befc5e6dff08dc0fa688f835cd6e806b5bf82401913d067",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "938d54c030d9b60bd25b253014de5c96a6cdd62b19987b8536d9427d67f4aad4",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.2.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "75ed7236f670461800c0b339fc811f102c653da1c24d46d9083572c8bfd52549",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "882a3ce9e104f74d578e4c00ea0399a2e8d540d7b65ba0d6b18160d7c0b9477f",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "882a3ce9e104f74d578e4c00ea0399a2e8d540d7b65ba0d6b18160d7c0b9477f",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "867bedf4e7b387c9fb2f0bdec7ab161f91671b519db1344bdee681088b41bf95",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.2.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "58025c437792c561ce3873696e333c7549d76fdfc69eb969785b99a3517bb173",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "eedcb32ec3f0482d2b3623bafc61e5073c74a69a74650a92c451bdc0b8d59cf2",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "eedcb32ec3f0482d2b3623bafc61e5073c74a69a74650a92c451bdc0b8d59cf2",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "dddea45e162af4c754685f76ed01cfb90a046154894e62d895b082b4862ca5b2",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.3.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "28dd0ca7c8d1e418cc403e4b131cfa9d30fcf643e054196924e4c8b5078dc3e7",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "1170efd5d701d6854befc5e6dff08dc0fa688f835cd6e806b5bf82401913d067",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "1170efd5d701d6854befc5e6dff08dc0fa688f835cd6e806b5bf82401913d067",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "938d54c030d9b60bd25b253014de5c96a6cdd62b19987b8536d9427d67f4aad4",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.3.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "75ed7236f670461800c0b339fc811f102c653da1c24d46d9083572c8bfd52549",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "882a3ce9e104f74d578e4c00ea0399a2e8d540d7b65ba0d6b18160d7c0b9477f",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "882a3ce9e104f74d578e4c00ea0399a2e8d540d7b65ba0d6b18160d7c0b9477f",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "867bedf4e7b387c9fb2f0bdec7ab161f91671b519db1344bdee681088b41bf95",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.3.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "576ac874808eb798955c6cd623d71ab7cd7f003b0b7ce5ab61d090c59c1e135b",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "1e64a53c71554da913e9be5d7eb9598649de3465e3ee3f733a2a6abe10d302b4",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "1e64a53c71554da913e9be5d7eb9598649de3465e3ee3f733a2a6abe10d302b4",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "7f8027104865863c7e34c428a7844578eafeed27ee2e79d9706d85d7d132a258",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.0.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "1b96764c8919b81dbbeef026eeeb9cdd3c522ae658f0cece73684aa201edbff4",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "918b9e5966eedb091f80485742fd3b9ddf24c515b23f5f632bee1a83825f7771",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "918b9e5966eedb091f80485742fd3b9ddf24c515b23f5f632bee1a83825f7771",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "32f0a205ad53522e399f92ec566a313113a13ee8e763fce7d86cdaf96d84ac6b",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.0.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "c62e214bf823aca905f797e4241306f789006bfdc15393ac610575fb74d6f277",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "ec7bcfba25443d526b08307e40d723fdba9a150946a15747b63857f3b727065e",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "ec7bcfba25443d526b08307e40d723fdba9a150946a15747b63857f3b727065e",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "bd90055df086ded8ae7f7d46eabb76c1915b02b709c962285c52829d6237bbeb",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.0.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "576ac874808eb798955c6cd623d71ab7cd7f003b0b7ce5ab61d090c59c1e135b",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "1e64a53c71554da913e9be5d7eb9598649de3465e3ee3f733a2a6abe10d302b4",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "1e64a53c71554da913e9be5d7eb9598649de3465e3ee3f733a2a6abe10d302b4",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "7f8027104865863c7e34c428a7844578eafeed27ee2e79d9706d85d7d132a258",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.1.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "1b96764c8919b81dbbeef026eeeb9cdd3c522ae658f0cece73684aa201edbff4",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "918b9e5966eedb091f80485742fd3b9ddf24c515b23f5f632bee1a83825f7771",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "918b9e5966eedb091f80485742fd3b9ddf24c515b23f5f632bee1a83825f7771",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "32f0a205ad53522e399f92ec566a313113a13ee8e763fce7d86cdaf96d84ac6b",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.1.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "c62e214bf823aca905f797e4241306f789006bfdc15393ac610575fb74d6f277",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "ec7bcfba25443d526b08307e40d723fdba9a150946a15747b63857f3b727065e",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "ec7bcfba25443d526b08307e40d723fdba9a150946a15747b63857f3b727065e",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "bd90055df086ded8ae7f7d46eabb76c1915b02b709c962285c52829d6237bbeb",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.1.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "576ac874808eb798955c6cd623d71ab7cd7f003b0b7ce5ab61d090c59c1e135b",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "1e64a53c71554da913e9be5d7eb9598649de3465e3ee3f733a2a6abe10d302b4",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "1e64a53c71554da913e9be5d7eb9598649de3465e3ee3f733a2a6abe10d302b4",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "7f8027104865863c7e34c428a7844578eafeed27ee2e79d9706d85d7d132a258",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.2.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "1b96764c8919b81dbbeef026eeeb9cdd3c522ae658f0cece73684aa201edbff4",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "918b9e5966eedb091f80485742fd3b9ddf24c515b23f5f632bee1a83825f7771",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "918b9e5966eedb091f80485742fd3b9ddf24c515b23f5f632bee1a83825f7771",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "32f0a205ad53522e399f92ec566a313113a13ee8e763fce7d86cdaf96d84ac6b",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.2.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "c62e214bf823aca905f797e4241306f789006bfdc15393ac610575fb74d6f277",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "ec7bcfba25443d526b08307e40d723fdba9a150946a15747b63857f3b727065e",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "ec7bcfba25443d526b08307e40d723fdba9a150946a15747b63857f3b727065e",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "bd90055df086ded8ae7f7d46eabb76c1915b02b709c962285c52829d6237bbeb",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.2.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "576ac874808eb798955c6cd623d71ab7cd7f003b0b7ce5ab61d090c59c1e135b",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "1e64a53c71554da913e9be5d7eb9598649de3465e3ee3f733a2a6abe10d302b4",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "1e64a53c71554da913e9be5d7eb9598649de3465e3ee3f733a2a6abe10d302b4",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "7f8027104865863c7e34c428a7844578eafeed27ee2e79d9706d85d7d132a258",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.3.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "1b96764c8919b81dbbeef026eeeb9cdd3c522ae658f0cece73684aa201edbff4",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "918b9e5966eedb091f80485742fd3b9ddf24c515b23f5f632bee1a83825f7771",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "918b9e5966eedb091f80485742fd3b9ddf24c515b23f5f632bee1a83825f7771",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "32f0a205ad53522e399f92ec566a313113a13ee8e763fce7d86cdaf96d84ac6b",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.3.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "c62e214bf823aca905f797e4241306f789006bfdc15393ac610575fb74d6f277",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "ec7bcfba25443d526b08307e40d723fdba9a150946a15747b63857f3b727065e",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "ec7bcfba25443d526b08307e40d723fdba9a150946a15747b63857f3b727065e",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "bd90055df086ded8ae7f7d46eabb76c1915b02b709c962285c52829d6237bbeb",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.3.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "1616df6ba8265b051d1c63d0d38f7f706b992a104ae52a7ed29bbf418bd0400a",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "5b7b6398287c735736efe2a1bff81e719378e593ac9ceccb00b0e84318d2d277",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "5b7b6398287c735736efe2a1bff81e719378e593ac9ceccb00b0e84318d2d277",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "22bd59744b2b7036e4c6f89da44829c95286416b2fc905b1e573407559c05004",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.0.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "d0ab842d4e18a11768bbeea3028fdffbc1f716ec701eee11ae444f739703396e",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "1efd917a9fdb305a777db4d3c825ecf41427192b2f0e491d2f65c061d785daac",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "1efd917a9fdb305a777db4d3c825ecf41427192b2f0e491d2f65c061d785daac",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "4baf458a44b2325dfc4d773575c122bee748ad36f8e18e743dd9a6634444d0d8",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.0.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "8d1417d5d3a95136c1aef7e3f8c6fefda1d93c277a1fb6109cd65700717674c9",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "9c43f64c8aeca86fec6fed000844d0ff2174a1d8b0255a15c4dbad9e71cd2534",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "9c43f64c8aeca86fec6fed000844d0ff2174a1d8b0255a15c4dbad9e71cd2534",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "66b0edbcf21fc58aa0cef3f1693a02422be2c43893ae7802f36af4e55dd115de",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.0.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "1616df6ba8265b051d1c63d0d38f7f706b992a104ae52a7ed29bbf418bd0400a",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "5b7b6398287c735736efe2a1bff81e719378e593ac9ceccb00b0e84318d2d277",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "5b7b6398287c735736efe2a1bff81e719378e593ac9ceccb00b0e84318d2d277",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "22bd59744b2b7036e4c6f89da44829c95286416b2fc905b1e573407559c05004",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.1.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "d0ab842d4e18a11768bbeea3028fdffbc1f716ec701eee11ae444f739703396e",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "1efd917a9fdb305a777db4d3c825ecf41427192b2f0e491d2f65c061d785daac",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "1efd917a9fdb305a777db4d3c825ecf41427192b2f0e491d2f65c061d785daac",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "4baf458a44b2325dfc4d773575c122bee748ad36f8e18e743dd9a6634444d0d8",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.1.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "8d1417d5d3a95136c1aef7e3f8c6fefda1d93c277a1fb6109cd65700717674c9",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "9c43f64c8aeca86fec6fed000844d0ff2174a1d8b0255a15c4dbad9e71cd2534",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "9c43f64c8aeca86fec6fed000844d0ff2174a1d8b0255a15c4dbad9e71cd2534",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "66b0edbcf21fc58aa0cef3f1693a02422be2c43893ae7802f36af4e55dd115de",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.1.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "1616df6ba8265b051d1c63d0d38f7f706b992a104ae52a7ed29bbf418bd0400a",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "5b7b6398287c735736efe2a1bff81e719378e593ac9ceccb00b0e84318d2d277",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "5b7b6398287c735736efe2a1bff81e719378e593ac9ceccb00b0e84318d2d277",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "22bd59744b2b7036e4c6f89da44829c95286416b2fc905b1e573407559c05004",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.2.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "d0ab842d4e18a11768bbeea3028fdffbc1f716ec701eee11ae444f739703396e",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "1efd917a9fdb305a777db4d3c825ecf41427192b2f0e491d2f65c061d785daac",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "1efd917a9fdb305a777db4d3c825ecf41427192b2f0e491d2f65c061d785daac",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "4baf458a44b2325dfc4d773575c122bee748ad36f8e18e743dd9a6634444d0d8",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.2.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "8d1417d5d3a95136c1aef7e3f8c6fefda1d93c277a1fb6109cd65700717674c9",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "9c43f64c8aeca86fec6fed000844d0ff2174a1d8b0255a15c4dbad9e71cd2534",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "9c43f64c8aeca86fec6fed000844d0ff2174a1d8b0255a15c4dbad9e71cd2534",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "66b0edbcf21fc58aa0cef3f1693a02422be2c43893ae7802f36af4e55dd115de",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.2.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "1616df6ba8265b051d1c63d0d38f7f706b992a104ae52a7ed29bbf418bd0400a",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "5b7b6398287c735736efe2a1bff81e719378e593ac9ceccb00b0e84318d2d277",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "5b7b6398287c735736efe2a1bff81e719378e593ac9ceccb00b0e84318d2d277",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "22bd59744b2b7036e4c6f89da44829c95286416b2fc905b1e573407559c05004",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.3.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "d0ab842d4e18a11768bbeea3028fdffbc1f716ec701eee11ae444f739703396e",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "1efd917a9fdb305a777db4d3c825ecf41427192b2f0e491d2f65c061d785daac",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "1efd917a9fdb305a777db4d3c825ecf41427192b2f0e491d2f65c061d785daac",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "4baf458a44b2325dfc4d773575c122bee748ad36f8e18e743dd9a6634444d0d8",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.3.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "8d1417d5d3a95136c1aef7e3f8c6fefda1d93c277a1fb6109cd65700717674c9",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "9c43f64c8aeca86fec6fed000844d0ff2174a1d8b0255a15c4dbad9e71cd2534",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "9c43f64c8aeca86fec6fed000844d0ff2174a1d8b0255a15c4dbad9e71cd2534",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "66b0edbcf21fc58aa0cef3f1693a02422be2c43893ae7802f36af4e55dd115de",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.3.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "04f0250dcab78ee033a0ccb5322a03b3594c5b1a5ef06f88ad450b97588bfb1e",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "3210de725b1afae220753a1434e43b670c4cad31504887d020d1951806cef0ad",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "3210de725b1afae220753a1434e43b670c4cad31504887d020d1951806cef0ad",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "12d9928596d439edd0e66077234bf63edf867c153eb8e574b5bf33b73bed6575",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.0.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "cd75f93b628faf8966969a3efa85a40bae90f88ee3356c8577b0fd4ba9738b79",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "753159d67fcb157254dc2d68c29a9e914e5e25006da60b138289832cd0ed99a3",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "753159d67fcb157254dc2d68c29a9e914e5e25006da60b138289832cd0ed99a3",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "8f5e60eb6c27b90bd56595dd9f7aef9db454826a05924d741283fdef5d410426",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.0.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "d9c31b14435d44492107f8e2b6782b38749903f5d8dfe3d19e4e60c704a81be4",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "ce38dde9f2675a987bafc5bf69050225c357735f7de056ce7d5350999479b1ba",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "ce38dde9f2675a987bafc5bf69050225c357735f7de056ce7d5350999479b1ba",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "a6354854a411d5236652157ef90a43e706dbc4ab7ef35f28d66258b13fa12153",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.0.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "04f0250dcab78ee033a0ccb5322a03b3594c5b1a5ef06f88ad450b97588bfb1e",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "3210de725b1afae220753a1434e43b670c4cad31504887d020d1951806cef0ad",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "3210de725b1afae220753a1434e43b670c4cad31504887d020d1951806cef0ad",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "12d9928596d439edd0e66077234bf63edf867c153eb8e574b5bf33b73bed6575",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.1.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "cd75f93b628faf8966969a3efa85a40bae90f88ee3356c8577b0fd4ba9738b79",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "753159d67fcb157254dc2d68c29a9e914e5e25006da60b138289832cd0ed99a3",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "753159d67fcb157254dc2d68c29a9e914e5e25006da60b138289832cd0ed99a3",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "8f5e60eb6c27b90bd56595dd9f7aef9db454826a05924d741283fdef5d410426",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.1.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "d9c31b14435d44492107f8e2b6782b38749903f5d8dfe3d19e4e60c704a81be4",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "ce38dde9f2675a987bafc5bf69050225c357735f7de056ce7d5350999479b1ba",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "ce38dde9f2675a987bafc5bf69050225c357735f7de056ce7d5350999479b1ba",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "a6354854a411d5236652157ef90a43e706dbc4ab7ef35f28d66258b13fa12153",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.1.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "04f0250dcab78ee033a0ccb5322a03b3594c5b1a5ef06f88ad450b97588bfb1e",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "3210de725b1afae220753a1434e43b670c4cad31504887d020d1951806cef0ad",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "3210de725b1afae220753a1434e43b670c4cad31504887d020d1951806cef0ad",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "12d9928596d439edd0e66077234bf63edf867c153eb8e574b5bf33b73bed6575",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.2.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "cd75f93b628faf8966969a3efa85a40bae90f88ee3356c8577b0fd4ba9738b79",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "753159d67fcb157254dc2d68c29a9e914e5e25006da60b138289832cd0ed99a3",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "753159d67fcb157254dc2d68c29a9e914e5e25006da60b138289832cd0ed99a3",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "8f5e60eb6c27b90bd56595dd9f7aef9db454826a05924d741283fdef5d410426",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.2.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "d9c31b14435d44492107f8e2b6782b38749903f5d8dfe3d19e4e60c704a81be4",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "ce38dde9f2675a987bafc5bf69050225c357735f7de056ce7d5350999479b1ba",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "ce38dde9f2675a987bafc5bf69050225c357735f7de056ce7d5350999479b1ba",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "a6354854a411d5236652157ef90a43e706dbc4ab7ef35f28d66258b13fa12153",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.2.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "04f0250dcab78ee033a0ccb5322a03b3594c5b1a5ef06f88ad450b97588bfb1e",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "3210de725b1afae220753a1434e43b670c4cad31504887d020d1951806cef0ad",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "3210de725b1afae220753a1434e43b670c4cad31504887d020d1951806cef0ad",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "12d9928596d439edd0e66077234bf63edf867c153eb8e574b5bf33b73bed6575",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.3.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "cd75f93b628faf8966969a3efa85a40bae90f88ee3356c8577b0fd4ba9738b79",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "753159d67fcb157254dc2d68c29a9e914e5e25006da60b138289832cd0ed99a3",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "753159d67fcb157254dc2d68c29a9e914e5e25006da60b138289832cd0ed99a3",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "8f5e60eb6c27b90bd56595dd9f7aef9db454826a05924d741283fdef5d410426",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.3.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "d9c31b14435d44492107f8e2b6782b38749903f5d8dfe3d19e4e60c704a81be4",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "ce38dde9f2675a987bafc5bf69050225c357735f7de056ce7d5350999479b1ba",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "ce38dde9f2675a987bafc5bf69050225c357735f7de056ce7d5350999479b1ba",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "a6354854a411d5236652157ef90a43e706dbc4ab7ef35f28d66258b13fa12153",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.3.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "ac489346a48388416ccfb52433e15296f202bed5acfa82f4af7d64e78247ea47",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "ae79307fc54f12f2649040c22dae5033cc599991eaa02fe8d9e90fd813ceb360",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "ae79307fc54f12f2649040c22dae5033cc599991eaa02fe8d9e90fd813ceb360",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "a2f7b0752af139e192a1d520fc0339cdbf8b4659ce63a96d437725be37db9d27",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.0.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "1d6ad7da4d7fdae02cb5fc6417a5ba3851ee16f45473caa63485fbee25732a24",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "ddec399144ad2a9f80bf55b5314e2a75c2570d022f5aad6d1512abe88bd5d6f5",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "ddec399144ad2a9f80bf55b5314e2a75c2570d022f5aad6d1512abe88bd5d6f5",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "59d80c268f9edf38376bf05e96a1affa285d06659855405c80fd51e1892d4b7a",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.0.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "b09afc63a18e8e9df4de5cd071d38ee839e9e82efe52f98aadee65c56ec2c210",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "d32cf911256f725b8b7d9ace9ae875b1d6a733eb3b852cab1b5af8e11b911ddd",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "d32cf911256f725b8b7d9ace9ae875b1d6a733eb3b852cab1b5af8e11b911ddd",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "9673861241773d3c0cee405c0c70193f56c9abc557998d232263efde7f2d8b87",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.0.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "ac489346a48388416ccfb52433e15296f202bed5acfa82f4af7d64e78247ea47",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "ae79307fc54f12f2649040c22dae5033cc599991eaa02fe8d9e90fd813ceb360",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "ae79307fc54f12f2649040c22dae5033cc599991eaa02fe8d9e90fd813ceb360",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "a2f7b0752af139e192a1d520fc0339cdbf8b4659ce63a96d437725be37db9d27",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.1.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "1d6ad7da4d7fdae02cb5fc6417a5ba3851ee16f45473caa63485fbee25732a24",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "ddec399144ad2a9f80bf55b5314e2a75c2570d022f5aad6d1512abe88bd5d6f5",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "ddec399144ad2a9f80bf55b5314e2a75c2570d022f5aad6d1512abe88bd5d6f5",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "59d80c268f9edf38376bf05e96a1affa285d06659855405c80fd51e1892d4b7a",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.1.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "b09afc63a18e8e9df4de5cd071d38ee839e9e82efe52f98aadee65c56ec2c210",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "d32cf911256f725b8b7d9ace9ae875b1d6a733eb3b852cab1b5af8e11b911ddd",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "d32cf911256f725b8b7d9ace9ae875b1d6a733eb3b852cab1b5af8e11b911ddd",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "9673861241773d3c0cee405c0c70193f56c9abc557998d232263efde7f2d8b87",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.1.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "ac489346a48388416ccfb52433e15296f202bed5acfa82f4af7d64e78247ea47",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "ae79307fc54f12f2649040c22dae5033cc599991eaa02fe8d9e90fd813ceb360",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "ae79307fc54f12f2649040c22dae5033cc599991eaa02fe8d9e90fd813ceb360",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "a2f7b0752af139e192a1d520fc0339cdbf8b4659ce63a96d437725be37db9d27",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.2.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "1d6ad7da4d7fdae02cb5fc6417a5ba3851ee16f45473caa63485fbee25732a24",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "ddec399144ad2a9f80bf55b5314e2a75c2570d022f5aad6d1512abe88bd5d6f5",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "ddec399144ad2a9f80bf55b5314e2a75c2570d022f5aad6d1512abe88bd5d6f5",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "59d80c268f9edf38376bf05e96a1affa285d06659855405c80fd51e1892d4b7a",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.2.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "b09afc63a18e8e9df4de5cd071d38ee839e9e82efe52f98aadee65c56ec2c210",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "d32cf911256f725b8b7d9ace9ae875b1d6a733eb3b852cab1b5af8e11b911ddd",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "d32cf911256f725b8b7d9ace9ae875b1d6a733eb3b852cab1b5af8e11b911ddd",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "9673861241773d3c0cee405c0c70193f56c9abc557998d232263efde7f2d8b87",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.2.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "ac489346a48388416ccfb52433e15296f202bed5acfa82f4af7d64e78247ea47",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "ae79307fc54f12f2649040c22dae5033cc599991eaa02fe8d9e90fd813ceb360",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "ae79307fc54f12f2649040c22dae5033cc599991eaa02fe8d9e90fd813ceb360",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "a2f7b0752af139e192a1d520fc0339cdbf8b4659ce63a96d437725be37db9d27",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.3.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "1d6ad7da4d7fdae02cb5fc6417a5ba3851ee16f45473caa63485fbee25732a24",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "ddec399144ad2a9f80bf55b5314e2a75c2570d022f5aad6d1512abe88bd5d6f5",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "ddec399144ad2a9f80bf55b5314e2a75c2570d022f5aad6d1512abe88bd5d6f5",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "59d80c268f9edf38376bf05e96a1affa285d06659855405c80fd51e1892d4b7a",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.3.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "b09afc63a18e8e9df4de5cd071d38ee839e9e82efe52f98aadee65c56ec2c210",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "d32cf911256f725b8b7d9ace9ae875b1d6a733eb3b852cab1b5af8e11b911ddd",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              384
+            ],
+            "source_float32_sha256": "d32cf911256f725b8b7d9ace9ae875b1d6a733eb3b852cab1b5af8e11b911ddd",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "9673861241773d3c0cee405c0c70193f56c9abc557998d232263efde7f2d8b87",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.3.w3.weight"
+          }
+        ],
+        "source_loading_api": "safetensors.safe_open.get_slice"
+      },
+      {
+        "device": "cpu",
+        "forward_loaded_only_rank_local_expert_slices": true,
+        "full_float32_expert_parameter_bytes": 63700992,
+        "full_tensor_reconstruction_timing": "after_local_projection_forward",
+        "input_sha256": "d8da6467829a63310e6e80e40d8fb26a60b608fa9d498680b29c86195191054c",
+        "interop_threads": 1,
+        "intraop_threads": 1,
+        "layer_output_sha256": [
+          "8fbd95baf7f3e07e8a72c522041ad4bfa5e64d6aa548f52bdd848268e2853d3a",
+          "92c51d614d8f99591ec9d48864836741e41748a2de317ea5ba2c6b706b676368",
+          "1a461afac870cf9c6b263d55f040d916ee7e6407f2b544e48e985f794c02d61d",
+          "b965df119c25f6fb806335c8b7d2fd19fd63e10298009b76e690519ca126e84a",
+          "10682f67d9cd440bae5e3900d54852d8a41973458e4074713b3e5dae4e70b650",
+          "dd9e18d6fb3fcf59d8cd42a34f876fa20352841b18455294daa1e32aa212093d"
+        ],
+        "local_expert_parameter_bytes": 31850496,
+        "local_fraction": 0.5,
+        "rank": 1,
+        "shard_evidence": [
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "2ac254575bf2062672efa4b246b12eda873d68657e45cdb0b1a6d32bbf07126c",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "fa14780738f9529aa010257774f4adae4a020cb6845bf327d7eee9862b8e35b4",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "fa14780738f9529aa010257774f4adae4a020cb6845bf327d7eee9862b8e35b4",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "02515589f0cc34245e9f4ee23e990a6e47d6f5ca4b7e55b022afc906d88a7e28",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.0.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "74c2853545b4d7acd72c692acbf98f80b673be18b29fe9fdf8a1b26cfe8edcdd",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "58b5bc5f5c398d50a2509528f76c4675398d396ae48dcedfc4e22a81d961d5f3",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "58b5bc5f5c398d50a2509528f76c4675398d396ae48dcedfc4e22a81d961d5f3",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "fc47d811b576ca40a08cf6b8ad63cadbf9ba7dd46e80e25533753e2d7471cbf2",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.0.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "3f9fc49bbeb09e1c38edaab617be1af2637a8e5a6f3d121491278c2615946b54",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "91def8d0c552a1760c5bc2d02effcb25a0b4fdca21c26d78a80154c9e5ec58e7",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "91def8d0c552a1760c5bc2d02effcb25a0b4fdca21c26d78a80154c9e5ec58e7",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "f2f62d287a7c2125e0757c33c48bc000fea17ac3e701ad4c3e83b80c3bf3c137",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.0.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "2ac254575bf2062672efa4b246b12eda873d68657e45cdb0b1a6d32bbf07126c",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "fa14780738f9529aa010257774f4adae4a020cb6845bf327d7eee9862b8e35b4",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "fa14780738f9529aa010257774f4adae4a020cb6845bf327d7eee9862b8e35b4",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "02515589f0cc34245e9f4ee23e990a6e47d6f5ca4b7e55b022afc906d88a7e28",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.1.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "74c2853545b4d7acd72c692acbf98f80b673be18b29fe9fdf8a1b26cfe8edcdd",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "58b5bc5f5c398d50a2509528f76c4675398d396ae48dcedfc4e22a81d961d5f3",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "58b5bc5f5c398d50a2509528f76c4675398d396ae48dcedfc4e22a81d961d5f3",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "fc47d811b576ca40a08cf6b8ad63cadbf9ba7dd46e80e25533753e2d7471cbf2",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.1.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "3f9fc49bbeb09e1c38edaab617be1af2637a8e5a6f3d121491278c2615946b54",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "91def8d0c552a1760c5bc2d02effcb25a0b4fdca21c26d78a80154c9e5ec58e7",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "91def8d0c552a1760c5bc2d02effcb25a0b4fdca21c26d78a80154c9e5ec58e7",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "f2f62d287a7c2125e0757c33c48bc000fea17ac3e701ad4c3e83b80c3bf3c137",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.1.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "2ac254575bf2062672efa4b246b12eda873d68657e45cdb0b1a6d32bbf07126c",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "fa14780738f9529aa010257774f4adae4a020cb6845bf327d7eee9862b8e35b4",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "fa14780738f9529aa010257774f4adae4a020cb6845bf327d7eee9862b8e35b4",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "02515589f0cc34245e9f4ee23e990a6e47d6f5ca4b7e55b022afc906d88a7e28",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.2.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "74c2853545b4d7acd72c692acbf98f80b673be18b29fe9fdf8a1b26cfe8edcdd",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "58b5bc5f5c398d50a2509528f76c4675398d396ae48dcedfc4e22a81d961d5f3",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "58b5bc5f5c398d50a2509528f76c4675398d396ae48dcedfc4e22a81d961d5f3",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "fc47d811b576ca40a08cf6b8ad63cadbf9ba7dd46e80e25533753e2d7471cbf2",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.2.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "3f9fc49bbeb09e1c38edaab617be1af2637a8e5a6f3d121491278c2615946b54",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "91def8d0c552a1760c5bc2d02effcb25a0b4fdca21c26d78a80154c9e5ec58e7",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "91def8d0c552a1760c5bc2d02effcb25a0b4fdca21c26d78a80154c9e5ec58e7",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "f2f62d287a7c2125e0757c33c48bc000fea17ac3e701ad4c3e83b80c3bf3c137",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.2.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "2ac254575bf2062672efa4b246b12eda873d68657e45cdb0b1a6d32bbf07126c",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "fa14780738f9529aa010257774f4adae4a020cb6845bf327d7eee9862b8e35b4",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "fa14780738f9529aa010257774f4adae4a020cb6845bf327d7eee9862b8e35b4",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "02515589f0cc34245e9f4ee23e990a6e47d6f5ca4b7e55b022afc906d88a7e28",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.3.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "74c2853545b4d7acd72c692acbf98f80b673be18b29fe9fdf8a1b26cfe8edcdd",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "58b5bc5f5c398d50a2509528f76c4675398d396ae48dcedfc4e22a81d961d5f3",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "58b5bc5f5c398d50a2509528f76c4675398d396ae48dcedfc4e22a81d961d5f3",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "fc47d811b576ca40a08cf6b8ad63cadbf9ba7dd46e80e25533753e2d7471cbf2",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.3.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 0,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "3f9fc49bbeb09e1c38edaab617be1af2637a8e5a6f3d121491278c2615946b54",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "91def8d0c552a1760c5bc2d02effcb25a0b4fdca21c26d78a80154c9e5ec58e7",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "91def8d0c552a1760c5bc2d02effcb25a0b4fdca21c26d78a80154c9e5ec58e7",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "f2f62d287a7c2125e0757c33c48bc000fea17ac3e701ad4c3e83b80c3bf3c137",
+            "tensor_name": "model.layers.0.block_sparse_moe.experts.3.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "04d4db1ca9c65048807a41bc373fa10bff4a9238811fb5d82a7db9d61f25ddf8",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "eedcb32ec3f0482d2b3623bafc61e5073c74a69a74650a92c451bdc0b8d59cf2",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "eedcb32ec3f0482d2b3623bafc61e5073c74a69a74650a92c451bdc0b8d59cf2",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "dddea45e162af4c754685f76ed01cfb90a046154894e62d895b082b4862ca5b2",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.0.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "6f801f4ee488b70b60fe444341200c1b35c016161610fd53f999644d65a18072",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "1170efd5d701d6854befc5e6dff08dc0fa688f835cd6e806b5bf82401913d067",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "1170efd5d701d6854befc5e6dff08dc0fa688f835cd6e806b5bf82401913d067",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "938d54c030d9b60bd25b253014de5c96a6cdd62b19987b8536d9427d67f4aad4",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.0.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "9f5f7bcccd80952551ecccc59354468fc02b5f59774510cd77bf801fda73007d",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "882a3ce9e104f74d578e4c00ea0399a2e8d540d7b65ba0d6b18160d7c0b9477f",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "882a3ce9e104f74d578e4c00ea0399a2e8d540d7b65ba0d6b18160d7c0b9477f",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "867bedf4e7b387c9fb2f0bdec7ab161f91671b519db1344bdee681088b41bf95",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.0.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "04d4db1ca9c65048807a41bc373fa10bff4a9238811fb5d82a7db9d61f25ddf8",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "eedcb32ec3f0482d2b3623bafc61e5073c74a69a74650a92c451bdc0b8d59cf2",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "eedcb32ec3f0482d2b3623bafc61e5073c74a69a74650a92c451bdc0b8d59cf2",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "dddea45e162af4c754685f76ed01cfb90a046154894e62d895b082b4862ca5b2",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.1.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "6f801f4ee488b70b60fe444341200c1b35c016161610fd53f999644d65a18072",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "1170efd5d701d6854befc5e6dff08dc0fa688f835cd6e806b5bf82401913d067",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "1170efd5d701d6854befc5e6dff08dc0fa688f835cd6e806b5bf82401913d067",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "938d54c030d9b60bd25b253014de5c96a6cdd62b19987b8536d9427d67f4aad4",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.1.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "9f5f7bcccd80952551ecccc59354468fc02b5f59774510cd77bf801fda73007d",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "882a3ce9e104f74d578e4c00ea0399a2e8d540d7b65ba0d6b18160d7c0b9477f",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "882a3ce9e104f74d578e4c00ea0399a2e8d540d7b65ba0d6b18160d7c0b9477f",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "867bedf4e7b387c9fb2f0bdec7ab161f91671b519db1344bdee681088b41bf95",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.1.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "04d4db1ca9c65048807a41bc373fa10bff4a9238811fb5d82a7db9d61f25ddf8",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "eedcb32ec3f0482d2b3623bafc61e5073c74a69a74650a92c451bdc0b8d59cf2",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "eedcb32ec3f0482d2b3623bafc61e5073c74a69a74650a92c451bdc0b8d59cf2",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "dddea45e162af4c754685f76ed01cfb90a046154894e62d895b082b4862ca5b2",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.2.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "6f801f4ee488b70b60fe444341200c1b35c016161610fd53f999644d65a18072",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "1170efd5d701d6854befc5e6dff08dc0fa688f835cd6e806b5bf82401913d067",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "1170efd5d701d6854befc5e6dff08dc0fa688f835cd6e806b5bf82401913d067",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "938d54c030d9b60bd25b253014de5c96a6cdd62b19987b8536d9427d67f4aad4",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.2.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "9f5f7bcccd80952551ecccc59354468fc02b5f59774510cd77bf801fda73007d",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "882a3ce9e104f74d578e4c00ea0399a2e8d540d7b65ba0d6b18160d7c0b9477f",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "882a3ce9e104f74d578e4c00ea0399a2e8d540d7b65ba0d6b18160d7c0b9477f",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "867bedf4e7b387c9fb2f0bdec7ab161f91671b519db1344bdee681088b41bf95",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.2.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "04d4db1ca9c65048807a41bc373fa10bff4a9238811fb5d82a7db9d61f25ddf8",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "eedcb32ec3f0482d2b3623bafc61e5073c74a69a74650a92c451bdc0b8d59cf2",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "eedcb32ec3f0482d2b3623bafc61e5073c74a69a74650a92c451bdc0b8d59cf2",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "dddea45e162af4c754685f76ed01cfb90a046154894e62d895b082b4862ca5b2",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.3.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "6f801f4ee488b70b60fe444341200c1b35c016161610fd53f999644d65a18072",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "1170efd5d701d6854befc5e6dff08dc0fa688f835cd6e806b5bf82401913d067",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "1170efd5d701d6854befc5e6dff08dc0fa688f835cd6e806b5bf82401913d067",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "938d54c030d9b60bd25b253014de5c96a6cdd62b19987b8536d9427d67f4aad4",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.3.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 1,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "9f5f7bcccd80952551ecccc59354468fc02b5f59774510cd77bf801fda73007d",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "882a3ce9e104f74d578e4c00ea0399a2e8d540d7b65ba0d6b18160d7c0b9477f",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "882a3ce9e104f74d578e4c00ea0399a2e8d540d7b65ba0d6b18160d7c0b9477f",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "867bedf4e7b387c9fb2f0bdec7ab161f91671b519db1344bdee681088b41bf95",
+            "tensor_name": "model.layers.1.block_sparse_moe.experts.3.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "b6c920f0fcbdd23399a389b3dfb84855beb1b0209f9e9f394c7aa880765fd409",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "1e64a53c71554da913e9be5d7eb9598649de3465e3ee3f733a2a6abe10d302b4",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "1e64a53c71554da913e9be5d7eb9598649de3465e3ee3f733a2a6abe10d302b4",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "7f8027104865863c7e34c428a7844578eafeed27ee2e79d9706d85d7d132a258",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.0.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "c2627cbfe7013eb8ceac27c1d37deaabb8f0e459d541a2dbe9a8574159a3c373",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "918b9e5966eedb091f80485742fd3b9ddf24c515b23f5f632bee1a83825f7771",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "918b9e5966eedb091f80485742fd3b9ddf24c515b23f5f632bee1a83825f7771",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "32f0a205ad53522e399f92ec566a313113a13ee8e763fce7d86cdaf96d84ac6b",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.0.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "4090f254358d119a30453f8583449bcd648b99c80bda869f1a0c787e3e778700",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "ec7bcfba25443d526b08307e40d723fdba9a150946a15747b63857f3b727065e",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "ec7bcfba25443d526b08307e40d723fdba9a150946a15747b63857f3b727065e",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "bd90055df086ded8ae7f7d46eabb76c1915b02b709c962285c52829d6237bbeb",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.0.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "b6c920f0fcbdd23399a389b3dfb84855beb1b0209f9e9f394c7aa880765fd409",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "1e64a53c71554da913e9be5d7eb9598649de3465e3ee3f733a2a6abe10d302b4",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "1e64a53c71554da913e9be5d7eb9598649de3465e3ee3f733a2a6abe10d302b4",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "7f8027104865863c7e34c428a7844578eafeed27ee2e79d9706d85d7d132a258",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.1.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "c2627cbfe7013eb8ceac27c1d37deaabb8f0e459d541a2dbe9a8574159a3c373",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "918b9e5966eedb091f80485742fd3b9ddf24c515b23f5f632bee1a83825f7771",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "918b9e5966eedb091f80485742fd3b9ddf24c515b23f5f632bee1a83825f7771",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "32f0a205ad53522e399f92ec566a313113a13ee8e763fce7d86cdaf96d84ac6b",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.1.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "4090f254358d119a30453f8583449bcd648b99c80bda869f1a0c787e3e778700",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "ec7bcfba25443d526b08307e40d723fdba9a150946a15747b63857f3b727065e",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "ec7bcfba25443d526b08307e40d723fdba9a150946a15747b63857f3b727065e",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "bd90055df086ded8ae7f7d46eabb76c1915b02b709c962285c52829d6237bbeb",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.1.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "b6c920f0fcbdd23399a389b3dfb84855beb1b0209f9e9f394c7aa880765fd409",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "1e64a53c71554da913e9be5d7eb9598649de3465e3ee3f733a2a6abe10d302b4",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "1e64a53c71554da913e9be5d7eb9598649de3465e3ee3f733a2a6abe10d302b4",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "7f8027104865863c7e34c428a7844578eafeed27ee2e79d9706d85d7d132a258",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.2.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "c2627cbfe7013eb8ceac27c1d37deaabb8f0e459d541a2dbe9a8574159a3c373",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "918b9e5966eedb091f80485742fd3b9ddf24c515b23f5f632bee1a83825f7771",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "918b9e5966eedb091f80485742fd3b9ddf24c515b23f5f632bee1a83825f7771",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "32f0a205ad53522e399f92ec566a313113a13ee8e763fce7d86cdaf96d84ac6b",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.2.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "4090f254358d119a30453f8583449bcd648b99c80bda869f1a0c787e3e778700",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "ec7bcfba25443d526b08307e40d723fdba9a150946a15747b63857f3b727065e",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "ec7bcfba25443d526b08307e40d723fdba9a150946a15747b63857f3b727065e",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "bd90055df086ded8ae7f7d46eabb76c1915b02b709c962285c52829d6237bbeb",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.2.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "b6c920f0fcbdd23399a389b3dfb84855beb1b0209f9e9f394c7aa880765fd409",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "1e64a53c71554da913e9be5d7eb9598649de3465e3ee3f733a2a6abe10d302b4",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "1e64a53c71554da913e9be5d7eb9598649de3465e3ee3f733a2a6abe10d302b4",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "7f8027104865863c7e34c428a7844578eafeed27ee2e79d9706d85d7d132a258",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.3.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "c2627cbfe7013eb8ceac27c1d37deaabb8f0e459d541a2dbe9a8574159a3c373",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "918b9e5966eedb091f80485742fd3b9ddf24c515b23f5f632bee1a83825f7771",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "918b9e5966eedb091f80485742fd3b9ddf24c515b23f5f632bee1a83825f7771",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "32f0a205ad53522e399f92ec566a313113a13ee8e763fce7d86cdaf96d84ac6b",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.3.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 2,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "4090f254358d119a30453f8583449bcd648b99c80bda869f1a0c787e3e778700",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "ec7bcfba25443d526b08307e40d723fdba9a150946a15747b63857f3b727065e",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "ec7bcfba25443d526b08307e40d723fdba9a150946a15747b63857f3b727065e",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "bd90055df086ded8ae7f7d46eabb76c1915b02b709c962285c52829d6237bbeb",
+            "tensor_name": "model.layers.2.block_sparse_moe.experts.3.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "3239506faf5310042bcdf260a348731273f4cc57764d62993290c599f3879dc0",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "5b7b6398287c735736efe2a1bff81e719378e593ac9ceccb00b0e84318d2d277",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "5b7b6398287c735736efe2a1bff81e719378e593ac9ceccb00b0e84318d2d277",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "22bd59744b2b7036e4c6f89da44829c95286416b2fc905b1e573407559c05004",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.0.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "a491f741858502cdbb248bbb46716c96ea0f3368b694cd68a2eaf6c732c4cf07",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "1efd917a9fdb305a777db4d3c825ecf41427192b2f0e491d2f65c061d785daac",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "1efd917a9fdb305a777db4d3c825ecf41427192b2f0e491d2f65c061d785daac",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "4baf458a44b2325dfc4d773575c122bee748ad36f8e18e743dd9a6634444d0d8",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.0.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "a3c7e61a48d75446aa0aeee540b58e7c92bd20f86510d8ae04927fe9aa85448d",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "9c43f64c8aeca86fec6fed000844d0ff2174a1d8b0255a15c4dbad9e71cd2534",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "9c43f64c8aeca86fec6fed000844d0ff2174a1d8b0255a15c4dbad9e71cd2534",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "66b0edbcf21fc58aa0cef3f1693a02422be2c43893ae7802f36af4e55dd115de",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.0.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "3239506faf5310042bcdf260a348731273f4cc57764d62993290c599f3879dc0",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "5b7b6398287c735736efe2a1bff81e719378e593ac9ceccb00b0e84318d2d277",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "5b7b6398287c735736efe2a1bff81e719378e593ac9ceccb00b0e84318d2d277",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "22bd59744b2b7036e4c6f89da44829c95286416b2fc905b1e573407559c05004",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.1.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "a491f741858502cdbb248bbb46716c96ea0f3368b694cd68a2eaf6c732c4cf07",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "1efd917a9fdb305a777db4d3c825ecf41427192b2f0e491d2f65c061d785daac",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "1efd917a9fdb305a777db4d3c825ecf41427192b2f0e491d2f65c061d785daac",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "4baf458a44b2325dfc4d773575c122bee748ad36f8e18e743dd9a6634444d0d8",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.1.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "a3c7e61a48d75446aa0aeee540b58e7c92bd20f86510d8ae04927fe9aa85448d",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "9c43f64c8aeca86fec6fed000844d0ff2174a1d8b0255a15c4dbad9e71cd2534",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "9c43f64c8aeca86fec6fed000844d0ff2174a1d8b0255a15c4dbad9e71cd2534",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "66b0edbcf21fc58aa0cef3f1693a02422be2c43893ae7802f36af4e55dd115de",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.1.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "3239506faf5310042bcdf260a348731273f4cc57764d62993290c599f3879dc0",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "5b7b6398287c735736efe2a1bff81e719378e593ac9ceccb00b0e84318d2d277",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "5b7b6398287c735736efe2a1bff81e719378e593ac9ceccb00b0e84318d2d277",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "22bd59744b2b7036e4c6f89da44829c95286416b2fc905b1e573407559c05004",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.2.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "a491f741858502cdbb248bbb46716c96ea0f3368b694cd68a2eaf6c732c4cf07",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "1efd917a9fdb305a777db4d3c825ecf41427192b2f0e491d2f65c061d785daac",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "1efd917a9fdb305a777db4d3c825ecf41427192b2f0e491d2f65c061d785daac",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "4baf458a44b2325dfc4d773575c122bee748ad36f8e18e743dd9a6634444d0d8",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.2.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "a3c7e61a48d75446aa0aeee540b58e7c92bd20f86510d8ae04927fe9aa85448d",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "9c43f64c8aeca86fec6fed000844d0ff2174a1d8b0255a15c4dbad9e71cd2534",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "9c43f64c8aeca86fec6fed000844d0ff2174a1d8b0255a15c4dbad9e71cd2534",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "66b0edbcf21fc58aa0cef3f1693a02422be2c43893ae7802f36af4e55dd115de",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.2.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "3239506faf5310042bcdf260a348731273f4cc57764d62993290c599f3879dc0",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "5b7b6398287c735736efe2a1bff81e719378e593ac9ceccb00b0e84318d2d277",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "5b7b6398287c735736efe2a1bff81e719378e593ac9ceccb00b0e84318d2d277",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "22bd59744b2b7036e4c6f89da44829c95286416b2fc905b1e573407559c05004",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.3.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "a491f741858502cdbb248bbb46716c96ea0f3368b694cd68a2eaf6c732c4cf07",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "1efd917a9fdb305a777db4d3c825ecf41427192b2f0e491d2f65c061d785daac",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "1efd917a9fdb305a777db4d3c825ecf41427192b2f0e491d2f65c061d785daac",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "4baf458a44b2325dfc4d773575c122bee748ad36f8e18e743dd9a6634444d0d8",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.3.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 3,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "a3c7e61a48d75446aa0aeee540b58e7c92bd20f86510d8ae04927fe9aa85448d",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "9c43f64c8aeca86fec6fed000844d0ff2174a1d8b0255a15c4dbad9e71cd2534",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "9c43f64c8aeca86fec6fed000844d0ff2174a1d8b0255a15c4dbad9e71cd2534",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "66b0edbcf21fc58aa0cef3f1693a02422be2c43893ae7802f36af4e55dd115de",
+            "tensor_name": "model.layers.3.block_sparse_moe.experts.3.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "eb5f0e7e5c35cbd4bec6fabd13b1b991a1b0c92413dd3702a292c3fb87800cee",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "3210de725b1afae220753a1434e43b670c4cad31504887d020d1951806cef0ad",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "3210de725b1afae220753a1434e43b670c4cad31504887d020d1951806cef0ad",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "12d9928596d439edd0e66077234bf63edf867c153eb8e574b5bf33b73bed6575",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.0.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "f93073e50b23f267b96668e9092966c3f3ad2dfddc9cb7681d442ca9aefbf820",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "753159d67fcb157254dc2d68c29a9e914e5e25006da60b138289832cd0ed99a3",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "753159d67fcb157254dc2d68c29a9e914e5e25006da60b138289832cd0ed99a3",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "8f5e60eb6c27b90bd56595dd9f7aef9db454826a05924d741283fdef5d410426",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.0.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "596305cd50640bd369803d1f8e4112eebabd0dc8a679cb4cb1b5875be2c8bf46",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "ce38dde9f2675a987bafc5bf69050225c357735f7de056ce7d5350999479b1ba",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "ce38dde9f2675a987bafc5bf69050225c357735f7de056ce7d5350999479b1ba",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "a6354854a411d5236652157ef90a43e706dbc4ab7ef35f28d66258b13fa12153",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.0.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "eb5f0e7e5c35cbd4bec6fabd13b1b991a1b0c92413dd3702a292c3fb87800cee",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "3210de725b1afae220753a1434e43b670c4cad31504887d020d1951806cef0ad",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "3210de725b1afae220753a1434e43b670c4cad31504887d020d1951806cef0ad",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "12d9928596d439edd0e66077234bf63edf867c153eb8e574b5bf33b73bed6575",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.1.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "f93073e50b23f267b96668e9092966c3f3ad2dfddc9cb7681d442ca9aefbf820",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "753159d67fcb157254dc2d68c29a9e914e5e25006da60b138289832cd0ed99a3",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "753159d67fcb157254dc2d68c29a9e914e5e25006da60b138289832cd0ed99a3",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "8f5e60eb6c27b90bd56595dd9f7aef9db454826a05924d741283fdef5d410426",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.1.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "596305cd50640bd369803d1f8e4112eebabd0dc8a679cb4cb1b5875be2c8bf46",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "ce38dde9f2675a987bafc5bf69050225c357735f7de056ce7d5350999479b1ba",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "ce38dde9f2675a987bafc5bf69050225c357735f7de056ce7d5350999479b1ba",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "a6354854a411d5236652157ef90a43e706dbc4ab7ef35f28d66258b13fa12153",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.1.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "eb5f0e7e5c35cbd4bec6fabd13b1b991a1b0c92413dd3702a292c3fb87800cee",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "3210de725b1afae220753a1434e43b670c4cad31504887d020d1951806cef0ad",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "3210de725b1afae220753a1434e43b670c4cad31504887d020d1951806cef0ad",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "12d9928596d439edd0e66077234bf63edf867c153eb8e574b5bf33b73bed6575",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.2.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "f93073e50b23f267b96668e9092966c3f3ad2dfddc9cb7681d442ca9aefbf820",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "753159d67fcb157254dc2d68c29a9e914e5e25006da60b138289832cd0ed99a3",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "753159d67fcb157254dc2d68c29a9e914e5e25006da60b138289832cd0ed99a3",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "8f5e60eb6c27b90bd56595dd9f7aef9db454826a05924d741283fdef5d410426",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.2.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "596305cd50640bd369803d1f8e4112eebabd0dc8a679cb4cb1b5875be2c8bf46",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "ce38dde9f2675a987bafc5bf69050225c357735f7de056ce7d5350999479b1ba",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "ce38dde9f2675a987bafc5bf69050225c357735f7de056ce7d5350999479b1ba",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "a6354854a411d5236652157ef90a43e706dbc4ab7ef35f28d66258b13fa12153",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.2.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "eb5f0e7e5c35cbd4bec6fabd13b1b991a1b0c92413dd3702a292c3fb87800cee",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "3210de725b1afae220753a1434e43b670c4cad31504887d020d1951806cef0ad",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "3210de725b1afae220753a1434e43b670c4cad31504887d020d1951806cef0ad",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "12d9928596d439edd0e66077234bf63edf867c153eb8e574b5bf33b73bed6575",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.3.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "f93073e50b23f267b96668e9092966c3f3ad2dfddc9cb7681d442ca9aefbf820",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "753159d67fcb157254dc2d68c29a9e914e5e25006da60b138289832cd0ed99a3",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "753159d67fcb157254dc2d68c29a9e914e5e25006da60b138289832cd0ed99a3",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "8f5e60eb6c27b90bd56595dd9f7aef9db454826a05924d741283fdef5d410426",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.3.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 4,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "596305cd50640bd369803d1f8e4112eebabd0dc8a679cb4cb1b5875be2c8bf46",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "ce38dde9f2675a987bafc5bf69050225c357735f7de056ce7d5350999479b1ba",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "ce38dde9f2675a987bafc5bf69050225c357735f7de056ce7d5350999479b1ba",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "a6354854a411d5236652157ef90a43e706dbc4ab7ef35f28d66258b13fa12153",
+            "tensor_name": "model.layers.4.block_sparse_moe.experts.3.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "279026c79622da099c4f8b20dcd7d2f2d0f46ca48c3041462b1963b3b7ad9973",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "ae79307fc54f12f2649040c22dae5033cc599991eaa02fe8d9e90fd813ceb360",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "ae79307fc54f12f2649040c22dae5033cc599991eaa02fe8d9e90fd813ceb360",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "a2f7b0752af139e192a1d520fc0339cdbf8b4659ce63a96d437725be37db9d27",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.0.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "793751d82dc93b0f9d72b8455f2c06f286b3f412289fd9e10487be4ed508155b",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "ddec399144ad2a9f80bf55b5314e2a75c2570d022f5aad6d1512abe88bd5d6f5",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "ddec399144ad2a9f80bf55b5314e2a75c2570d022f5aad6d1512abe88bd5d6f5",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "59d80c268f9edf38376bf05e96a1affa285d06659855405c80fd51e1892d4b7a",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.0.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 0,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "86bdcd286d94e878c4bbfc2eb2668ed782177a82e8540807b46f5c59f62e8b0d",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "d32cf911256f725b8b7d9ace9ae875b1d6a733eb3b852cab1b5af8e11b911ddd",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "d32cf911256f725b8b7d9ace9ae875b1d6a733eb3b852cab1b5af8e11b911ddd",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "9673861241773d3c0cee405c0c70193f56c9abc557998d232263efde7f2d8b87",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.0.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "279026c79622da099c4f8b20dcd7d2f2d0f46ca48c3041462b1963b3b7ad9973",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "ae79307fc54f12f2649040c22dae5033cc599991eaa02fe8d9e90fd813ceb360",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "ae79307fc54f12f2649040c22dae5033cc599991eaa02fe8d9e90fd813ceb360",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "a2f7b0752af139e192a1d520fc0339cdbf8b4659ce63a96d437725be37db9d27",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.1.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "793751d82dc93b0f9d72b8455f2c06f286b3f412289fd9e10487be4ed508155b",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "ddec399144ad2a9f80bf55b5314e2a75c2570d022f5aad6d1512abe88bd5d6f5",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "ddec399144ad2a9f80bf55b5314e2a75c2570d022f5aad6d1512abe88bd5d6f5",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "59d80c268f9edf38376bf05e96a1affa285d06659855405c80fd51e1892d4b7a",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.1.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 1,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "86bdcd286d94e878c4bbfc2eb2668ed782177a82e8540807b46f5c59f62e8b0d",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "d32cf911256f725b8b7d9ace9ae875b1d6a733eb3b852cab1b5af8e11b911ddd",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "d32cf911256f725b8b7d9ace9ae875b1d6a733eb3b852cab1b5af8e11b911ddd",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "9673861241773d3c0cee405c0c70193f56c9abc557998d232263efde7f2d8b87",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.1.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "279026c79622da099c4f8b20dcd7d2f2d0f46ca48c3041462b1963b3b7ad9973",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "ae79307fc54f12f2649040c22dae5033cc599991eaa02fe8d9e90fd813ceb360",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "ae79307fc54f12f2649040c22dae5033cc599991eaa02fe8d9e90fd813ceb360",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "a2f7b0752af139e192a1d520fc0339cdbf8b4659ce63a96d437725be37db9d27",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.2.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "793751d82dc93b0f9d72b8455f2c06f286b3f412289fd9e10487be4ed508155b",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "ddec399144ad2a9f80bf55b5314e2a75c2570d022f5aad6d1512abe88bd5d6f5",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "ddec399144ad2a9f80bf55b5314e2a75c2570d022f5aad6d1512abe88bd5d6f5",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "59d80c268f9edf38376bf05e96a1affa285d06659855405c80fd51e1892d4b7a",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.2.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 2,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "86bdcd286d94e878c4bbfc2eb2668ed782177a82e8540807b46f5c59f62e8b0d",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "d32cf911256f725b8b7d9ace9ae875b1d6a733eb3b852cab1b5af8e11b911ddd",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "d32cf911256f725b8b7d9ace9ae875b1d6a733eb3b852cab1b5af8e11b911ddd",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "9673861241773d3c0cee405c0c70193f56c9abc557998d232263efde7f2d8b87",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.2.w3.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "279026c79622da099c4f8b20dcd7d2f2d0f46ca48c3041462b1963b3b7ad9973",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w1",
+            "reconstructed_float32_sha256": "ae79307fc54f12f2649040c22dae5033cc599991eaa02fe8d9e90fd813ceb360",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "ae79307fc54f12f2649040c22dae5033cc599991eaa02fe8d9e90fd813ceb360",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "a2f7b0752af139e192a1d520fc0339cdbf8b4659ce63a96d437725be37db9d27",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.3.w1.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              288,
+              768
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "793751d82dc93b0f9d72b8455f2c06f286b3f412289fd9e10487be4ed508155b",
+            "local_shape": [
+              288,
+              384
+            ],
+            "projection": "w2",
+            "reconstructed_float32_sha256": "ddec399144ad2a9f80bf55b5314e2a75c2570d022f5aad6d1512abe88bd5d6f5",
+            "shard_dim": 1,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "ddec399144ad2a9f80bf55b5314e2a75c2570d022f5aad6d1512abe88bd5d6f5",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "59d80c268f9edf38376bf05e96a1affa285d06659855405c80fd51e1892d4b7a",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.3.w2.weight"
+          },
+          {
+            "execution_dtype": "float32",
+            "expert_id": 3,
+            "global_shape": [
+              768,
+              288
+            ],
+            "layer_id": 5,
+            "local_execution_bytes": 442368,
+            "local_float32_sha256": "86bdcd286d94e878c4bbfc2eb2668ed782177a82e8540807b46f5c59f62e8b0d",
+            "local_shape": [
+              384,
+              288
+            ],
+            "projection": "w3",
+            "reconstructed_float32_sha256": "d32cf911256f725b8b7d9ace9ae875b1d6a733eb3b852cab1b5af8e11b911ddd",
+            "shard_dim": 0,
+            "shard_range": [
+              384,
+              768
+            ],
+            "source_float32_sha256": "d32cf911256f725b8b7d9ace9ae875b1d6a733eb3b852cab1b5af8e11b911ddd",
+            "source_storage_dtype": "float16",
+            "source_tensor_sha256": "9673861241773d3c0cee405c0c70193f56c9abc557998d232263efde7f2d8b87",
+            "tensor_name": "model.layers.5.block_sparse_moe.experts.3.w3.weight"
+          }
+        ],
+        "source_loading_api": "safetensors.safe_open.get_slice"
+      }
+    ],
+    "relative_tolerance": 1e-05,
+    "rendezvous": "ephemeral_file",
+    "schema_version": "public-moe-expert-tensor-parallel-v1",
+    "scope": "two-rank local CPU Gloo tensor parallel over every expert block in the pinned public Stories15M MoE; each rank reads only its exact intermediate-dimension safetensors slices for forward execution and all-reduces partial expert outputs; this is not an end-to-end transformer forward, generic sharded loader, performance result, or multi-host runtime",
+    "sharded_checkpoint_export_validated": false,
+    "software": {
+      "python": "3.12.13",
+      "safetensors": "0.8.0",
+      "torch": "2.13.0",
+      "torch_git_version": "cf30153c4c131c8164ee7798e5022d810682e2cb"
+    },
+    "source": {
+      "config_sha256": "e901e012953d1df93574b2cc3d7db5ed4758d52f8bd4a7dd4b647936e32261be",
+      "file_inventory": [
+        {
+          "path": "config.json",
+          "sha256": "e901e012953d1df93574b2cc3d7db5ed4758d52f8bd4a7dd4b647936e32261be",
+          "size_bytes": 711,
+          "symlink": true
+        },
+        {
+          "path": "data.txt",
+          "sha256": "8aba9f75ac88b48a9576935995a26b806f3d2cd75f6ca9267fe0fba79cd3f64f",
+          "size_bytes": 66884,
+          "symlink": true
+        },
+        {
+          "path": "generation_config.json",
+          "sha256": "295aa491adda22ab9fbdecdda9e8121e8348fd0eea0529d8802993426ab0892c",
+          "size_bytes": 115,
+          "symlink": true
+        },
+        {
+          "path": "model.safetensors",
+          "sha256": "dbfa0289f68a8dd721d10eb12d8bd82e098455682027f6f9986ba548913f9082",
+          "size_bytes": 72744704,
+          "symlink": true
+        },
+        {
+          "path": "model.safetensors.index.json",
+          "sha256": "cd4af1df494f42e9099c1bdf9ea8487c06166c8ca60f6264a617497a8151fd31",
+          "size_bytes": 8890,
+          "symlink": true
+        },
+        {
+          "path": "moe_shakespeare15M/checkpoint-400/adapter_config.json",
+          "sha256": "bc7a694ce0155d5ca6f7601f00fd61017b2f67615a5338745b5b5c97c43e89bb",
+          "size_bytes": 723,
+          "symlink": true
+        },
+        {
+          "path": "moe_shakespeare15M/checkpoint-400/trainer_state.json",
+          "sha256": "91d96f6b1afb85e0f28ca7da468409d8585a0dc4384cbf84d5560a0b8ee1e122",
+          "size_bytes": 3693,
+          "symlink": true
+        },
+        {
+          "path": "moe_shakespeare15M/checkpoint-500/adapter_config.json",
+          "sha256": "bc7a694ce0155d5ca6f7601f00fd61017b2f67615a5338745b5b5c97c43e89bb",
+          "size_bytes": 723,
+          "symlink": true
+        },
+        {
+          "path": "moe_shakespeare15M/checkpoint-500/trainer_state.json",
+          "sha256": "f612e4f0b86fa83474b917d064ae4997750d28487d3e7edd1697ecd26ac85ddc",
+          "size_bytes": 4416,
+          "symlink": true
+        },
+        {
+          "path": "special_tokens_map.json",
+          "sha256": "ff3b4a612c4e447acb02d40071bddd989fe0da87eb5b7fe0dbadfc4f74de7531",
+          "size_bytes": 411,
+          "symlink": true
+        },
+        {
+          "path": "tokenizer.json",
+          "sha256": "8eea70c4866c4f1320ba096fc986ac82038a8374dbe135212ba7628835b4a6f1",
+          "size_bytes": 1842764,
+          "symlink": true
+        },
+        {
+          "path": "tokenizer_config.json",
+          "sha256": "33d29c87e41f7dd1efb0434d852730320c82970f292be452d820539bce417052",
+          "size_bytes": 686,
+          "symlink": true
+        }
+      ],
+      "location": "local_huggingface_cache_snapshot",
+      "model_id": "ggml-org/stories15M_MOE",
+      "native_file_count": 0,
+      "pickle_file_count": 0,
+      "python_file_count": 0,
+      "remote_code_executed": false,
+      "revision": "b6dd737497465570b5f5e962dbc9d9454ed1e0eb",
+      "safetensors_tensor_count": 117,
+      "tokenizer_config_sha256": "33d29c87e41f7dd1efb0434d852730320c82970f292be452d820539bce417052",
+      "tokenizer_sha256": "8eea70c4866c4f1320ba096fc986ac82038a8374dbe135212ba7628835b4a6f1",
+      "weight_sha256": "dbfa0289f68a8dd721d10eb12d8bd82e098455682027f6f9986ba548913f9082",
+      "weight_size_bytes": 72744704
+    },
+    "source_expert_storage_dtype": "float16",
+    "top_k": 2,
+    "world_size": 2
+  },
+  "schema_version": "public-moe-expert-tensor-parallel-evidence-v1"
+}

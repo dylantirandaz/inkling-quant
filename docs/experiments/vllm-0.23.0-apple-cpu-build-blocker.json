@@ -1,0 +1,153 @@
+{
+  "schema_version": "external-runtime-probe-v1",
+  "recorded_at": "2026-07-16T03:29:39Z",
+  "status": "build_and_import_succeeded_inference_blocked_by_execution_sandbox",
+  "claims": {
+    "source_build_succeeded": true,
+    "native_extensions_imported": true,
+    "runtime_platform_resolved": "cpu",
+    "public_model_architecture_resolved": "MixtralForCausalLM",
+    "model_weights_loaded": false,
+    "generation_executed": false,
+    "vllm_metal_used": false,
+    "project_runtime_promoted": false
+  },
+  "sources": {
+    "release": "https://github.com/vllm-project/vllm/releases/tag/v0.23.0",
+    "apple_cpu_build_documentation": "https://docs.vllm.ai/en/v0.23.0/getting_started/installation/cpu/",
+    "offline_llm_api": "https://docs.vllm.ai/en/v0.23.0/api/vllm/entrypoints/llm/"
+  },
+  "source_checkout": {
+    "repository": "https://github.com/vllm-project/vllm.git",
+    "tag": "v0.23.0",
+    "commit": "0fc695fc6d1d82e9a5ac6835ac8e4e1c83703665",
+    "clone_command": "gh repo clone vllm-project/vllm /private/tmp/iql-vllm-v0.23.0 -- --branch v0.23.0 --depth 1",
+    "working_tree_after_build": "clean_except_ignored_build_outputs_and_virtual_environment"
+  },
+  "host": {
+    "hardware": "Apple M3 MacBook Air (Mac15,12)",
+    "cpu_cores": 8,
+    "memory_gib": 16,
+    "machine": "arm64",
+    "os": "macOS 15.3.1 (24D70)",
+    "kernel": "Darwin 24.3.0"
+  },
+  "toolchain": {
+    "python": "3.12.13",
+    "uv": "0.11.7",
+    "xcode": "16.1 (16B40)",
+    "apple_clang": "16.0.0 (clang-1600.0.26.4)",
+    "cxx17_probe": "201703L",
+    "cmake": "4.3.3",
+    "ninja_cli": "1.13.2",
+    "rustc_prebuild": "1.91.1 (ed61e7d7e 2025-11-07)",
+    "rustc_postbuild": "1.95.0 (59807616e 2026-04-14); changed concurrently on the shared host"
+  },
+  "isolated_environment": {
+    "root": "/private/tmp/iql-vllm-v0.23.0/.venv",
+    "cache_root": "/private/tmp/iql-vllm-cache",
+    "project_environment_modified": false,
+    "packages": {
+      "vllm": "0.23.0+cpu",
+      "torch": "2.11.0",
+      "torchvision": "0.26.0",
+      "torchaudio": "2.11.0",
+      "transformers": "5.14.0",
+      "huggingface_hub": "1.23.0",
+      "safetensors": "0.8.0",
+      "numpy": "2.3.5",
+      "tokenizers": "0.22.2",
+      "ninja_python": "1.13.0",
+      "setuptools": "77.0.3"
+    }
+  },
+  "build": {
+    "dependency_command": "UV_CACHE_DIR=/private/tmp/iql-vllm-cache uv pip install --python /private/tmp/iql-vllm-v0.23.0/.venv/bin/python -r requirements/cpu.txt --index-strategy unsafe-best-match",
+    "install_command": "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer UV_CACHE_DIR=/private/tmp/iql-vllm-cache VLLM_TARGET_DEVICE=cpu uv pip install --python /private/tmp/iql-vllm-v0.23.0/.venv/bin/python -e .",
+    "elapsed": "6m47s",
+    "exit_code": 0,
+    "result": "Built vllm and installed editable distribution vllm==0.23.0+cpu",
+    "native_extensions": [
+      {
+        "path": "vllm/_C.abi3.so",
+        "bytes": 1705320,
+        "sha256": "6a3d3ba92fdc98327e740bc047a5fac2438e591da82b6468649d7a4bb3ead0de"
+      },
+      {
+        "path": "vllm/spinloop.abi3.so",
+        "bytes": 51536,
+        "sha256": "e99d8c676232d6f282b4ee0e5b542fd2c4588a4c50160cd641b657a2a3b5b505"
+      }
+    ]
+  },
+  "import_probe": {
+    "exit_code": 0,
+    "native_extension_imports": [
+      "vllm._C",
+      "vllm.spinloop"
+    ],
+    "vllm": "0.23.0",
+    "torch": "2.11.0",
+    "transformers": "5.14.0",
+    "python": "3.12.13",
+    "current_platform_class": "vllm.platforms.cpu.CpuPlatform",
+    "device_type": "cpu",
+    "torch_cuda_available": false
+  },
+  "model_attempt": {
+    "model_id": "yujiepan/mixtral-tiny-random",
+    "revision": "c2faa23d97931c5481999c382d79163b02c4793c",
+    "license": "not declared by the model repository; contract execution only",
+    "weight_file": "model.safetensors",
+    "weight_bytes": 522688,
+    "weight_sha256": "cac5af0aa32d322c4dbd8e2fa6460e74749ca8b6d58632f794f7f3af1192b271",
+    "trust_remote_code": false,
+    "dtype": "float32",
+    "device": "cpu",
+    "tensor_parallel_size": 1,
+    "max_model_len": 64,
+    "kv_cache_memory_bytes": 67108864,
+    "enforce_eager": true,
+    "seed": 271828,
+    "requested_generated_tokens": 4,
+    "prompt_persisted": false,
+    "prompt_sha256": "e286222c229ec73b1bc520d88583191572ae0cbbaa66ea68053994a5e50ac87a"
+  },
+  "execution_attempts": [
+    {
+      "engine_mode": "default_v1_multiprocessing",
+      "result": "failed_before_model_weight_load",
+      "resolved_architecture": "MixtralForCausalLM",
+      "resolved_device_config": "cpu",
+      "error_type": "zmq.error.ZMQError",
+      "error": "Operation not permitted while binding ipc:///var/folders/.../T/<uuid>"
+    },
+    {
+      "engine_mode": "v1_in_process",
+      "environment": "VLLM_ENABLE_V1_MULTIPROCESSING=0",
+      "result": "failed_before_model_weight_load",
+      "resolved_architecture": "MixtralForCausalLM",
+      "resolved_device_config": "cpu",
+      "error_type": "PermissionError",
+      "error": "[Errno 1] Operation not permitted at socket.bind((\"\", 0)) while constructing the single-process distributed initialization method"
+    }
+  ],
+  "offline_reproducer": {
+    "prerequisite": "The exact model snapshot must already exist at the immutable Hugging Face cache path.",
+    "command": "XDG_CACHE_HOME=/private/tmp/iql-vllm-xdg-cache HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 VLLM_NO_USAGE_STATS=1 VLLM_ENABLE_V1_MULTIPROCESSING=0 /private/tmp/iql-vllm-v0.23.0/.venv/bin/python -c 'from vllm import LLM; revision=\"c2faa23d97931c5481999c382d79163b02c4793c\"; snapshot=\"/Users/dylantirandaz/.cache/huggingface/hub/models--yujiepan--mixtral-tiny-random/snapshots/\"+revision; LLM(model=snapshot, tokenizer=snapshot, trust_remote_code=False, dtype=\"float32\", tensor_parallel_size=1, seed=271828, max_model_len=64, kv_cache_memory_bytes=67108864, enforce_eager=True, disable_log_stats=True)'"
+  },
+  "blocker": {
+    "category": "execution_environment_local_socket_policy",
+    "detail": "Both vLLM V1 engine modes require a local socket during initialization. This managed sandbox denies Unix IPC and TCP bind operations, including loopback-style rendezvous setup.",
+    "unsandboxed_retry": "requested_but_not_executed",
+    "approval_result": "The approval reviewer rejected the unsandboxed offline command because the session usage limit was reached and explicitly prohibited a workaround or retry without user approval.",
+    "required_next_evidence": "Run the offline reproducer in an environment permitted to bind local IPC/TCP sockets, then record completed weight loading and non-empty generated token IDs before promoting a vLLM CPU runtime."
+  },
+  "limitations": [
+    "This record proves a pinned native Apple-Silicon CPU build and import only.",
+    "Architecture resolution is not model-weight loading or inference.",
+    "No generated tokens, latency, throughput, memory, routing, or quality metric is reported.",
+    "No vLLM-Metal plugin was installed or used.",
+    "No Inkling Quant Lab runtime adapter, optional dependency extra, config, or support claim was added."
+  ]
+}

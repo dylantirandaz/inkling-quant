@@ -1,0 +1,16 @@
+extends:
+  - tiny_moe_native_int8.yaml
+schema_version: "1.0"
+name: tiny-moe-native-int8-isolated-peak
+benchmark:
+  enabled: true
+  protocol_version: cpu-isolated-stage-peak-v1
+  warmup_iterations: 2
+  repetitions: 7
+  synchronize: true
+  measure_energy: false
+  host_memory_mode: isolated_stage_worker_peak_rss
+  worker_timeout_seconds: 600.0
+output:
+  root: artifacts
+  run_prefix: tiny-moe-native-int8-isolated-peak

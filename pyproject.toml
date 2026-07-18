@@ -1,0 +1,156 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "inkling-quant-lab"
+version = "0.1.0"
+description = "Reproducible CPU-first experiments for quantizing and evaluating MoE models"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Inkling Quant Lab contributors" }]
+dependencies = [
+  "click>=8.1,<9",
+  "numpy>=1.26,<2.3; python_version < '3.14'",
+  "numpy>=2.3,<3; python_version >= '3.14'",
+  "pydantic>=2.10,<3",
+  "pyyaml>=6.0.2,<7",
+  "safetensors>=0.5,<1",
+  "torch>=2.5,<3",
+  "typer>=0.15,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "hypothesis>=6.120,<7",
+  "mypy>=1.14,<2",
+  "pytest>=8.3,<10",
+  "pytest-cov>=6,<8",
+  "ruff>=0.9,<1",
+  "types-pyyaml>=6.0.12.20241230",
+]
+hf = [
+  "accelerate>=1.2,<2",
+  "transformers>=4.48,<6",
+]
+cuda = []
+awq = [
+  "accelerate>=1.13,<2",
+  "defuser==0.0.23",
+  "gptqmodel==5.8.0",
+  "huggingface-hub>=0.34.4,<2",
+  "kernels==0.14.1",
+  "safetensors>=0.7,<1",
+  "torch>=2.8,<3",
+  "transformers>=5.3,<6",
+]
+gptq = [
+  "accelerate>=1.13,<2",
+  "defuser==0.0.23",
+  "gptqmodel==5.8.0",
+  "huggingface-hub>=0.34.4,<2",
+  "kernels==0.14.1",
+  "safetensors>=0.7,<1",
+  "torch>=2.8,<3",
+  "transformers>=5.3,<6",
+]
+fp8 = [
+  "accelerate>=1.13,<2",
+  "safetensors>=0.7,<1",
+  "torch>=2.8,<3",
+  "transformers>=5.4,<6",
+]
+mlx = [
+  "mlx==0.32.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "mlx-lm==0.31.3; sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "mlx-metal==0.32.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "safetensors==0.8.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "transformers==5.12.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+vllm = []
+sglang = []
+multimodal = []
+modal = [
+  "modal==1.5.0",
+]
+
+[tool.uv]
+conflicts = [
+  [
+    { extra = "modal" },
+    { extra = "awq" },
+  ],
+  [
+    { extra = "modal" },
+    { extra = "gptq" },
+  ],
+]
+
+[project.scripts]
+iql = "inkling_quant_lab.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/inkling_quant_lab"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+  "unit: pure or isolated unit tests",
+  "contract: shared component contract tests",
+  "integration: local multi-component tests",
+  "network: tests requiring network access",
+  "gpu: tests requiring a GPU",
+  "slow: tests excluded from the default development loop",
+  "backend_awq: AWQ backend tests",
+  "backend_gptq: GPTQ backend tests",
+  "backend_fp8: FP8 backend tests",
+  "model_public: tests downloading a public model",
+  "large_model: tests requiring a large checkpoint",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["inkling_quant_lab"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "@overload",
+  '\.\.\.',
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "PIE", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+pretty = true
+show_error_codes = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = [
+  "yaml.*",
+  "torch.*",
+  "safetensors.*",
+  "mlx.*",
+  "mlx_lm.*",
+  "gptqmodel.*",
+  "defuser.*",
+]
+ignore_missing_imports = true

@@ -1,0 +1,232 @@
+{
+  "schema_version": "local-cpu-tensor-parallel-evidence-v1",
+  "executed_at_utc": "2026-07-16T13:55:15Z",
+  "command": ".venv/bin/python scripts/run_cpu_tensor_parallel_smoke.py --hardware-label \"Apple M3 MacBook Air (8 CPU cores: 4 performance + 4 efficiency; 16 GB)\"",
+  "provenance": {
+    "git_revision": null,
+    "git_revision_unavailable_reason": "This workspace is not a Git checkout.",
+    "executed_implementation_files": [
+      {
+        "path": "src/inkling_quant_lab/distributed.py",
+        "sha256": "fa0345324cefb7e7db50207497f5fbb20e148e61fb07d04d0df4201b92f67143"
+      },
+      {
+        "path": "scripts/run_cpu_tensor_parallel_smoke.py",
+        "sha256": "17704da531af40f734cac70d835d81644c842f52c3c1e44c2762849129269e34"
+      }
+    ],
+    "canonical_result": {
+      "path": "docs/experiments/cpu-tensor-parallel-tiny-mlp-torch-2.13.result.canonical.json",
+      "canonicalization": "jq -cS result JSON with one trailing LF",
+      "sha256": "44f788e57cf3886dce900d1f11ebaa68bb9660d0be3379aa635f5a29070d9d8f",
+      "independent_reexecution_matched": true
+    }
+  },
+  "managed_execution_boundary": {
+    "default_sandbox": {
+      "command": ".venv/bin/python scripts/run_cpu_tensor_parallel_smoke.py --hardware-label \"Apple M3 MacBook Air (8 CPU cores: 4 performance + 4 efficiency; 16 GB)\"",
+      "exit_code": 1,
+      "worker_exit_codes": [-6, -6],
+      "stderr": "uv_bind: operation not permitted",
+      "classification": "managed sandbox denied the local Gloo socket bind before process-group initialization"
+    },
+    "approved_local_only_execution": {
+      "same_command": true,
+      "network_scope": "two child processes binding loopback lo0 through an ephemeral file rendezvous; no external network access",
+      "exit_code": 0,
+      "result_sha256": "44f788e57cf3886dce900d1f11ebaa68bb9660d0be3379aa635f5a29070d9d8f"
+    }
+  },
+  "hardware_source": {
+    "command": "/usr/sbin/system_profiler SPHardwareDataType -json",
+    "retained_non_unique_fields_only": true,
+    "machine_name": "MacBook Air",
+    "machine_model": "Mac15,12",
+    "chip": "Apple M3",
+    "cpu_cores": 8,
+    "performance_cores": 4,
+    "efficiency_cores": 4,
+    "physical_memory": "16 GB",
+    "operating_system": "macOS 15.3.1 (24D70)"
+  },
+  "result": {
+    "absolute_tolerance": 1e-06,
+    "api": "torch.distributed.tensor.parallel.parallelize_module",
+    "backend": "gloo",
+    "checkpointing_validated": false,
+    "checksum_contract": "sha256(torch dtype ASCII + NUL + compact JSON shape + NUL + contiguous CPU tensor bytes)",
+    "device_mesh": "1d_cpu_mesh_named_tp",
+    "distributed_training_validated": false,
+    "dtype": "float32",
+    "hardware": {
+      "logical_cpu_count": 8,
+      "machine": "arm64",
+      "physical_memory_bytes": 17179869184,
+      "processor": "arm",
+      "release": "24.3.0",
+      "system": "Darwin"
+    },
+    "input_sha256": "e53b9b3f092c0de9fdc51813e521dce6f31f5385338f22e9b9b34a4be3731dea",
+    "input_shape": [
+      3,
+      8
+    ],
+    "interface": "lo0",
+    "model": {
+      "architecture": "Linear(8,12,bias=False)->ReLU->Linear(12,5,bias=False)",
+      "down_parallel_style": "RowwiseParallel",
+      "down_weight_placement": "Shard(dim=1)",
+      "name": "tiny_tensor_parallel_mlp",
+      "output_layout": "replicated_local_tensor",
+      "parameter_count": 156,
+      "up_parallel_style": "ColwiseParallel",
+      "up_weight_placement": "Shard(dim=0)"
+    },
+    "multi_host_validated": false,
+    "operator_declared_hardware_label": "Apple M3 MacBook Air (8 CPU cores: 4 performance + 4 efficiency; 16 GB)",
+    "parameter_sharding_executed": true,
+    "performance_validated": false,
+    "process_start_method": "spawn",
+    "public_model_sharding_validated": false,
+    "rank_results": [
+      {
+        "device": "cpu",
+        "interop_threads": 1,
+        "intraop_threads": 1,
+        "max_abs_error": 2.9802322387695312e-08,
+        "max_relative_error": 8.55024993029474e-08,
+        "mesh_coordinate": [
+          0
+        ],
+        "outputs_match_reference": true,
+        "parameter_shards": [
+          {
+            "global_numel": 96,
+            "global_shape": [
+              12,
+              8
+            ],
+            "local_numel": 48,
+            "local_sha256": "43778e841345f7dc5b97c758f006358f89473448169fefb54aae6b2207c8272b",
+            "local_shape": [
+              6,
+              8
+            ],
+            "parameter_name": "up.weight",
+            "placement": "Shard(dim=0)",
+            "reconstructed_sha256": "7f8e572fb22f0ce397fc12a04523bd43a80c4c2bb22a6f422949cde7f4c1272f",
+            "shard_dim": 0,
+            "shard_range": [
+              0,
+              6
+            ],
+            "source_full_sha256": "7f8e572fb22f0ce397fc12a04523bd43a80c4c2bb22a6f422949cde7f4c1272f"
+          },
+          {
+            "global_numel": 60,
+            "global_shape": [
+              5,
+              12
+            ],
+            "local_numel": 30,
+            "local_sha256": "cf96d63d64f69407f84b275e5ff9cf8fa7fd0ebe187d70582d1e0564a70a9619",
+            "local_shape": [
+              5,
+              6
+            ],
+            "parameter_name": "down.weight",
+            "placement": "Shard(dim=1)",
+            "reconstructed_sha256": "ff552f77b9db2b29df078ca83750131f41bd4bbbd86814cfb19eaaccf7015a64",
+            "shard_dim": 1,
+            "shard_range": [
+              0,
+              6
+            ],
+            "source_full_sha256": "ff552f77b9db2b29df078ca83750131f41bd4bbbd86814cfb19eaaccf7015a64"
+          }
+        ],
+        "rank": 0,
+        "reference_output_sha256": "ed1fd11cab0bc6519bfe009d4d82ada3abbedee574dce4a26077f7423fd8982a",
+        "tensor_parallel_output_sha256": "83d4ebaa9ec3603290720a25fdc11f2d021404e8c1aa3d61ecaebd3354f1112f"
+      },
+      {
+        "device": "cpu",
+        "interop_threads": 1,
+        "intraop_threads": 1,
+        "max_abs_error": 2.9802322387695312e-08,
+        "max_relative_error": 8.55024993029474e-08,
+        "mesh_coordinate": [
+          1
+        ],
+        "outputs_match_reference": true,
+        "parameter_shards": [
+          {
+            "global_numel": 96,
+            "global_shape": [
+              12,
+              8
+            ],
+            "local_numel": 48,
+            "local_sha256": "78c2cb18d881cad5ee01695581010e6b7baf60405fbc59c4f9c40b2dac18530b",
+            "local_shape": [
+              6,
+              8
+            ],
+            "parameter_name": "up.weight",
+            "placement": "Shard(dim=0)",
+            "reconstructed_sha256": "7f8e572fb22f0ce397fc12a04523bd43a80c4c2bb22a6f422949cde7f4c1272f",
+            "shard_dim": 0,
+            "shard_range": [
+              6,
+              12
+            ],
+            "source_full_sha256": "7f8e572fb22f0ce397fc12a04523bd43a80c4c2bb22a6f422949cde7f4c1272f"
+          },
+          {
+            "global_numel": 60,
+            "global_shape": [
+              5,
+              12
+            ],
+            "local_numel": 30,
+            "local_sha256": "c2ca2cbf2e8dec3ed3e6b5584e83734bf94e82ac1dc4fc66af15749894b26d17",
+            "local_shape": [
+              5,
+              6
+            ],
+            "parameter_name": "down.weight",
+            "placement": "Shard(dim=1)",
+            "reconstructed_sha256": "ff552f77b9db2b29df078ca83750131f41bd4bbbd86814cfb19eaaccf7015a64",
+            "shard_dim": 1,
+            "shard_range": [
+              6,
+              12
+            ],
+            "source_full_sha256": "ff552f77b9db2b29df078ca83750131f41bd4bbbd86814cfb19eaaccf7015a64"
+          }
+        ],
+        "rank": 1,
+        "reference_output_sha256": "ed1fd11cab0bc6519bfe009d4d82ada3abbedee574dce4a26077f7423fd8982a",
+        "tensor_parallel_output_sha256": "83d4ebaa9ec3603290720a25fdc11f2d021404e8c1aa3d61ecaebd3354f1112f"
+      }
+    ],
+    "relative_tolerance": 1e-06,
+    "rendezvous": "ephemeral_file",
+    "routing_validated": false,
+    "schema_version": "local-cpu-tensor-parallel-smoke-v1",
+    "scope": "local two-process CPU DTensor tensor-parallel forward for one deterministic tiny MLP; validates that its two linear parameters are sharded, reconstructed, and numerically equivalent to a local float32 reference; does not validate public-model or MoE sharding, distributed training, routing, checkpointing, performance, fault tolerance, or multi-host execution",
+    "seed": 20260716,
+    "software": {
+      "python": "3.12.13",
+      "torch": "2.13.0",
+      "torch_git_version": "cf30153c4c131c8164ee7798e5022d810682e2cb"
+    },
+    "source_data_rank": 0,
+    "tiny_model_forward_validated": true,
+    "world_size": 2
+  },
+  "interpretation": {
+    "measured_fact": "Both CPU ranks held one half of each linear parameter, collectively reconstructed byte-identical full parameters, and produced the same replicated output within the declared float32 tolerance.",
+    "boundary": "This is a tiny local tensor-parallel forward contract, not evidence for public Mixtral/MoE sharding, distributed training, routing, checkpointing, throughput, latency, fault tolerance, or multi-host execution."
+  }
+}

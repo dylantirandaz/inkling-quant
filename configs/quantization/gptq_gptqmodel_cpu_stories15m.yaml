@@ -1,0 +1,65 @@
+# Runnable only for the exact pinned Stories15M CPU/GPTQModel 5.8.0 contract.
+quantization:
+  backend: gptq
+  method: gptq
+  calibration:
+    dataset: local://fixtures/gptq-calibration
+    revision: gptq-calibration-v1
+    split: calibration
+    sample_ids:
+      - gptq-calibration-001
+      - gptq-calibration-002
+      - gptq-calibration-003
+      - gptq-calibration-004
+    max_samples: 4
+  policy:
+    type: uniform
+    default_precision: float32
+    explicit_overrides:
+      model.layers.0.self_attn.q_proj: int4
+      model.layers.0.self_attn.k_proj: int4
+      model.layers.0.self_attn.v_proj: int4
+      model.layers.0.self_attn.o_proj: int4
+      model.layers.1.self_attn.q_proj: int4
+      model.layers.1.self_attn.k_proj: int4
+      model.layers.1.self_attn.v_proj: int4
+      model.layers.1.self_attn.o_proj: int4
+      model.layers.2.self_attn.q_proj: int4
+      model.layers.2.self_attn.k_proj: int4
+      model.layers.2.self_attn.v_proj: int4
+      model.layers.2.self_attn.o_proj: int4
+      model.layers.3.self_attn.q_proj: int4
+      model.layers.3.self_attn.k_proj: int4
+      model.layers.3.self_attn.v_proj: int4
+      model.layers.3.self_attn.o_proj: int4
+      model.layers.4.self_attn.q_proj: int4
+      model.layers.4.self_attn.k_proj: int4
+      model.layers.4.self_attn.v_proj: int4
+      model.layers.4.self_attn.o_proj: int4
+      model.layers.5.self_attn.q_proj: int4
+      model.layers.5.self_attn.k_proj: int4
+      model.layers.5.self_attn.v_proj: int4
+      model.layers.5.self_attn.o_proj: int4
+    preserve_router_precision: true
+    router_precision: float32
+    preserve_output_head: true
+    output_head_precision: float32
+    preserve_embeddings: true
+    embedding_precision: float32
+    preserve_multimodal_projectors: true
+    multimodal_projector_precision: float32
+  export:
+    enabled: true
+    format: safetensors
+    destination: candidate
+  parameters:
+    local_files_only: true
+    device: cpu
+    bits: 4
+    group_size: 32
+    sym: true
+    batch_size: 1
+    format: gptq
+    desc_act: false
+    act_group_aware: true
+    damp_percent: 0.1

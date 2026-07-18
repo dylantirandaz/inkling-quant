@@ -1,0 +1,239 @@
+{
+  "schema_version": "mlx-router-preflight-failed-evidence-curated-v1",
+  "created_at_utc": "2026-07-16T19:25:48.422607+00:00",
+  "status": "failed",
+  "failure_code": "held_out_acceptance_failed",
+  "run_id": "stories15m-router-domain-pair-10step.failed-20260716T192548422607Z-a983d848",
+  "source_artifact": {
+    "relative_path": "artifacts/research-slices/stories15m-router-domain-pair-10step.failed-20260716T192548422607Z-a983d848",
+    "read_only_directory_mode": "0555",
+    "read_only_file_mode": "0444",
+    "failure_record_sha256": "c55dd4d08affca52ce16906cd1dbc03ea00a86f112fa382e3301226a5d7ec405",
+    "metrics_sha256": "e75249af67a6e2a1a39f061754f7b10c2ca918709ccab64ed95c05cb9963c70c",
+    "evidence_sha256": "1df2b50a15bfe83ad281fda20872fbf9d32fee8d208b68e35caf3418004add4a",
+    "file_count_excluding_failure_seal": 5,
+    "semantic_binding_verification_passed": true
+  },
+  "bindings": {
+    "resolved_config_sha256": "a983d848f9964ebe561503e597e1894338350484e538945b7e0f25f651df0a2b",
+    "corpus_contract_sha256": "2e81eccaf564946a63a6e53a6d62995701239074941f48a724e7ae4597f9de65",
+    "environment_sha256": "f2bed91be0d87c26fa213990243780b78a03f17e79f5de1b745b07fbe498908b",
+    "hardware_identity_sha256": "69c8365212846dec9bd0e4b3a18939943f395d8efdfeed836963b046d9cb49de",
+    "source_bundle_sha256": "54c488a4985f257233d49915e69b0b110124795599c2b7614632225a1ae9195d",
+    "dependency_lock_sha256": "2a2243f6376fb63e17722d50f1982ba3708847c0a600214bc3e0e45b1bbcc9a4"
+  },
+  "model": {
+    "model_id": "ggml-org/stories15M_MOE",
+    "revision": "b6dd737497465570b5f5e962dbc9d9454ed1e0eb",
+    "architecture": "MixtralForCausalLM",
+    "weights_sha256": "dbfa0289f68a8dd721d10eb12d8bd82e098455682027f6f9986ba548913f9082",
+    "weights_size_bytes": 72744704,
+    "trust_remote_code": false,
+    "source_snapshot_audited_before_mlx_import": true,
+    "experts_byte_identical_within_all_18_layer_projection_groups": true,
+    "causal_lm_router_specialization_identifiable": false
+  },
+  "corpora": [
+    {
+      "domain_id": "alice",
+      "dataset_id": "project-gutenberg/pg11",
+      "revision": "pg11-2025-06-26",
+      "declared_license": "Project Gutenberg License; public-domain status varies by jurisdiction",
+      "size_bytes": 174311,
+      "sha256": "01b38ea4c710a84bc18d0bd41271a5a1a92b94e97b2812f4dece97d4a694725e",
+      "parser_version": "gutenberg-paragraph-documents-v1",
+      "document_count": 735,
+      "train_document_count": 586,
+      "validation_document_count": 149,
+      "selected_train_tokens": 320,
+      "selected_validation_tokens": 256,
+      "target_expert_pair": [
+        0,
+        1
+      ]
+    },
+    {
+      "domain_id": "sherlock",
+      "dataset_id": "project-gutenberg/pg1661",
+      "revision": "pg1661-2023-10-10",
+      "declared_license": "Project Gutenberg License; public-domain status varies by jurisdiction",
+      "size_bytes": 607606,
+      "sha256": "922e2a12ccb43a4c9544c260b2166c6ad2097aeb5957faeee113f173bb857cd0",
+      "parser_version": "gutenberg-paragraph-documents-v1",
+      "document_count": 1919,
+      "train_document_count": 1532,
+      "validation_document_count": 387,
+      "selected_train_tokens": 320,
+      "selected_validation_tokens": 256,
+      "target_expert_pair": [
+        2,
+        3
+      ]
+    }
+  ],
+  "execution": {
+    "framework": "mlx",
+    "device": "Device(gpu, 0)",
+    "device_name": "Apple M3",
+    "device_architecture": "applegpu_g15g",
+    "host": "Apple M3",
+    "system": "Darwin",
+    "release": "24.3.0",
+    "machine": "arm64",
+    "logical_cpu_count": 8,
+    "python": "3.12.13",
+    "mlx": "0.32.0",
+    "mlx_lm": "0.31.3",
+    "mlx_metal": "0.32.0",
+    "transformers": "5.12.1",
+    "safetensors": "0.8.0",
+    "numpy": "2.2.6",
+    "torch": "2.13.0",
+    "seed": 20260716,
+    "dtype": "float32",
+    "optimizer": "adamw",
+    "optimizer_steps": 10,
+    "learning_rate": 0.01,
+    "betas": [
+      0.9,
+      0.999
+    ],
+    "epsilon": 1e-08,
+    "weight_decay": 0.0,
+    "bias_correction": false,
+    "trainable_parameter_count": 6912,
+    "changed_router_tensor_count": 6,
+    "unchanged_nonrouter_tensor_count": 57,
+    "unchanged_nonrouter_aggregate_sha256": "06ff42cc33091a5483ffc3da5c03c4920c9c35f89b72ae8b9dda30c495fd0ebf"
+  },
+  "metrics": {
+    "source_router_control": {
+      "mean_cross_entropy": 6.338077262043953,
+      "exact_top2_pair_accuracy": 0.14615885416666666,
+      "route_sha256": "ba73fbaff3dc620bdc5295ccc271e6ab9a0995d8591446945ebfbd4423b6093f",
+      "per_domain": {
+        "alice": {
+          "mean_cross_entropy": 7.060590535402298,
+          "exact_top2_pair_accuracy": 0.10091145833333333
+        },
+        "sherlock": {
+          "mean_cross_entropy": 5.615563988685608,
+          "exact_top2_pair_accuracy": 0.19140625
+        }
+      }
+    },
+    "ten_step_router": {
+      "mean_cross_entropy": 4.419520822664102,
+      "exact_top2_pair_accuracy": 0.4817708333333333,
+      "route_sha256": "8f48005106a4adde54c3dddf66c313e88b00d62aa2270e6362590da86528c142",
+      "per_domain": {
+        "alice": {
+          "mean_cross_entropy": 5.740526934464772,
+          "exact_top2_pair_accuracy": 0.3515625
+        },
+        "sherlock": {
+          "mean_cross_entropy": 3.0985147108634314,
+          "exact_top2_pair_accuracy": 0.6119791666666666
+        }
+      }
+    },
+    "deltas": {
+      "validation_cross_entropy_reduction": 1.9185564393798513,
+      "validation_accuracy_gain_over_source_router": 0.33561197916666663,
+      "per_domain": {
+        "alice": {
+          "validation_cross_entropy_reduction": 1.3200636009375257,
+          "validation_accuracy_gain_over_source_router": 0.2506510416666667
+        },
+        "sherlock": {
+          "validation_cross_entropy_reduction": 2.5170492778221765,
+          "validation_accuracy_gain_over_source_router": 0.42057291666666663
+        }
+      }
+    },
+    "timing_seconds": {
+      "model_load": 4.472624249989167,
+      "before_evaluation": 0.08685762505047023,
+      "training": 0.20642929198220372,
+      "after_evaluation": 0.08938816608861089
+    },
+    "mlx_allocator_at_failed_acceptance": {
+      "peak_bytes": 218776520,
+      "active_bytes": 145846208,
+      "cache_bytes": 141174652
+    }
+  },
+  "acceptance": {
+    "passed": false,
+    "passed_check_count": 7,
+    "total_check_count": 9,
+    "failed_checks": [
+      {
+        "check_id": "overall.validation_exact_top2_pair_accuracy",
+        "observed": 0.4817708333333333,
+        "threshold": 0.6
+      },
+      {
+        "check_id": "domain.alice.validation_exact_top2_pair_accuracy",
+        "observed": 0.3515625,
+        "threshold": 0.5
+      }
+    ],
+    "passed_checks": {
+      "overall_validation_cross_entropy_reduction": {
+        "observed": 1.9185564393798513,
+        "threshold": 0.05
+      },
+      "overall_accuracy_gain_over_source_router": {
+        "observed": 0.33561197916666663,
+        "threshold": 0.2
+      },
+      "alice_validation_cross_entropy_reduction": {
+        "observed": 1.3200636009375257,
+        "threshold": 0.02
+      },
+      "alice_accuracy_gain_over_source_router": {
+        "observed": 0.2506510416666667,
+        "threshold": 0.15
+      },
+      "sherlock_validation_cross_entropy_reduction": {
+        "observed": 2.5170492778221765,
+        "threshold": 0.02
+      },
+      "sherlock_validation_exact_top2_pair_accuracy": {
+        "observed": 0.6119791666666666,
+        "threshold": 0.5
+      },
+      "sherlock_accuracy_gain_over_source_router": {
+        "observed": 0.42057291666666663,
+        "threshold": 0.15
+      }
+    }
+  },
+  "artifact_outcome": {
+    "configured_success_path_absent": true,
+    "router_overlay_exported": false,
+    "typed_router_lineage_created": false,
+    "quantized_q4_or_q8_descendant_created": false,
+    "fresh_overlay_reload_executed": false,
+    "raw_text_or_token_ids_persisted": false
+  },
+  "claims": {
+    "real_public_model_executed_on_apple_metal": true,
+    "exactly_ten_supervised_router_updates_executed": true,
+    "exactly_six_router_tensors_changed": true,
+    "all_nonrouter_parameter_bytes_unchanged": true,
+    "learned_domain_supervised_routing_accepted": false,
+    "quantized_learned_router_retention": false,
+    "causal_lm_specialization": false,
+    "output_quality_retention": false
+  },
+  "limitations": [
+    "The ten-step contract missed two predeclared exact-top-2 accuracy gates and is a measured negative result, not an accepted learned-router artifact.",
+    "No router overlay or lineage was published, so q4/q8 descendants and retention comparisons were correctly suppressed.",
+    "This one seed, two-domain corpus, short token budget, and Apple M3 do not establish a general training conclusion.",
+    "The source experts are byte-identical within every layer/projection group, so label-conditioned routing does not establish expert semantic specialization or causal-language improvement.",
+    "The MLX allocator peak is process-allocator scoped and not whole-device or whole-system unified-memory usage.",
+    "The workspace has no Git metadata; source bundle and dependency-lock hashes replace, but do not equal, clean-checkout provenance."
+  ]
+}

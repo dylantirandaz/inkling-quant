@@ -1,0 +1,3 @@
+# Release-command compatibility alias. The underscore-named file is canonical.
+extends:
+  - tiny_moe_int8.yaml

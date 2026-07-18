@@ -1,0 +1,15 @@
+model:
+  model_id: yujiepan/mixtral-tiny-random
+  revision: c2faa23d97931c5481999c382d79163b02c4793c
+  adapter: hf_causal_lm
+  tokenizer_id: null
+  dtype: float32
+  trust_remote_code: false
+  local_files_only: false
+  checkpoint_format: safetensors
+
+routing:
+  mode: full_trace
+  required: true
+  capture_router_logits: true
+

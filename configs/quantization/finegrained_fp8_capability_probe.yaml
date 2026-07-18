@@ -1,0 +1,26 @@
+# Capability-probe fragment only; not a runnable conversion experiment.
+quantization:
+  backend: fp8
+  method: fp8
+  policy:
+    type: uniform
+    default_precision: fp8
+    preserve_router_precision: true
+    router_precision: float32
+    preserve_output_head: true
+    output_head_precision: float32
+    preserve_embeddings: true
+    embedding_precision: float32
+    preserve_multimodal_projectors: true
+    multimodal_projector_precision: float32
+  export:
+    enabled: true
+    format: safetensors
+    destination: candidate
+  parameters:
+    local_files_only: false
+    device: cuda:0
+    activation_scheme: dynamic
+    weight_block_rows: 128
+    weight_block_columns: 128
+    scale_fmt: float

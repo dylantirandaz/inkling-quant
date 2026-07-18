@@ -1,0 +1,27 @@
+extends:
+  - hf_stories15m_tinystories_native_quality.yaml
+  - ../quantization/native_int4_kleidiai.yaml
+schema_version: "1.0"
+name: hf-stories15m-tinystories-native-int4-quality
+quantization:
+  policy:
+    type: uniform
+    default_precision: float32
+    module_class_rules:
+      - name: quantize-addressable-linear
+        pattern: torch.nn.modules.linear.Linear
+        precision: int4
+    preserve_router_precision: true
+    router_precision: float32
+    preserve_output_head: true
+    output_head_precision: float32
+    preserve_embeddings: true
+    embedding_precision: float32
+    preserve_multimodal_projectors: true
+    multimodal_projector_precision: float32
+  export:
+    enabled: false
+    format: safetensors
+    destination: candidate
+output:
+  run_prefix: hf-stories15m-native-int4-quality

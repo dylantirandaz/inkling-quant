@@ -1,0 +1,14 @@
+extends:
+  - tiny_moe_baseline.yaml
+schema_version: "1.0"
+name: tiny-moe-cuda-baseline
+benchmark:
+  protocol_version: cuda-eager-v1
+runtime:
+  backend: torch_eager_cuda
+  device: cuda
+  dtype: float32
+  device_map: single
+output:
+  root: artifacts
+  run_prefix: tiny-moe-cuda-baseline

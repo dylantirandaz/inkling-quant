@@ -1,0 +1,40 @@
+extends:
+  - ../models/tiny_dense.yaml
+  - ../quantization/dynamic_int8.yaml
+  - ../evaluations/tiny_cpu.yaml
+schema_version: "1.0"
+name: tiny-dense-int8
+seed: 17
+routing:
+  mode: aggregate
+  required: false
+  capture_router_logits: false
+  dataset: local://fixtures/routing-prompts
+  dataset_revision: fixture-data-v1
+  dataset_split: routing-evaluation
+benchmark:
+  enabled: true
+  protocol_version: cpu-v1
+  warmup_iterations: 1
+  repetitions: 3
+  synchronize: true
+  measure_energy: false
+runtime:
+  backend: torch_eager_cpu
+  device: cpu
+  dtype: float32
+  device_map: single
+output:
+  root: artifacts
+  run_prefix: tiny-dense-int8
+security:
+  allow_remote_code: false
+  allow_pickle_weights: false
+  allow_uploads: false
+  log_prompts: false
+  log_model_outputs: false
+reporting:
+  markdown: true
+  html: false
+  plots: true
+

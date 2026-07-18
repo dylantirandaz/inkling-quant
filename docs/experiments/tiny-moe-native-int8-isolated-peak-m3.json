@@ -1,0 +1,93 @@
+{
+  "schema_version": "isolated-benchmark-stage-peak-rss-v1",
+  "created_at_utc": "2026-07-16T17:41:00Z",
+  "run": {
+    "run_id": "tiny-moe-native-int8-isolated-peak-20260716T174042966276Z-e3c3e52e-7c8a64",
+    "status": "success",
+    "config_hash": "e3c3e52e27d9dfea34047060787b3dffdd264beb6ab877e6ef5dd56f38b2e210",
+    "completed_at_utc": "2026-07-16T17:40:46.169001Z",
+    "successful_stage_count": 14,
+    "declared_output_count": 34
+  },
+  "environment": {
+    "platform": {
+      "system": "Darwin",
+      "release": "24.3.0",
+      "machine": "arm64"
+    },
+    "python": "3.12.13",
+    "torch": "2.13.0",
+    "logical_cpu_count": 8,
+    "device": "cpu"
+  },
+  "model": {
+    "id": "local://fixtures/tiny-moe",
+    "revision": "tiny-moe-fixture-v1",
+    "architecture": "tiny_moe_causal_lm_v1",
+    "checksum": "770a6a5ba25e350ed506e5171841e4fbce1dac5c8055605de81cce2f4f5983df"
+  },
+  "candidate": {
+    "backend": "torch_native_dynamic_int8",
+    "backend_version": "2.13.0",
+    "method": "native_dynamic_w8a8",
+    "kernel": "quantized::linear_dynamic",
+    "quantized_engine": "qnnpack",
+    "serialized_size_bytes": 23997
+  },
+  "benchmark_contract": {
+    "protocol_version": "cpu-isolated-stage-peak-v1",
+    "host_memory_mode": "isolated_stage_worker_peak_rss",
+    "measurement_kind": "benchmark_stage_worker_process_peak_rss",
+    "scope": "OS process high-water RSS through the final governed benchmark boundary, sampled immediately after measured trials; includes one fresh spawned Python process, interpreter startup, imports, model load or candidate reconstruction, serialized-size accounting, warm-up, and measured trials",
+    "excluded_scope": "parent pipeline, prior stages, post-read runtime cleanup, result serialization/IPC, process-exit work, and any final-through-exit, steady-state-only, or candidate-attributable-memory interpretation",
+    "warmup_iterations": 2,
+    "repetitions": 7
+  },
+  "measurements": {
+    "baseline": {
+      "worker_pid": 83237,
+      "peak_rss_bytes": 214384640,
+      "median_end_to_end_ms": 5.2912498358637094,
+      "median_throughput_tokens_per_second": 2267.8951802020133,
+      "benchmark_sha256": "bbd3fbebd1d007f2dc74e9c50e7dc3b1b8410261f7f138f9d1f3658e09a1e0fe"
+    },
+    "candidate": {
+      "worker_pid": 83238,
+      "peak_rss_bytes": 215482368,
+      "median_end_to_end_ms": 16.2199588958174,
+      "median_throughput_tokens_per_second": 739.8292484634107,
+      "benchmark_sha256": "7d488bd2f707fe941920fdd8dd78c6f2d70471f4ee8e301be5bb0de02cd1f0ae"
+    },
+    "candidate_minus_baseline_peak_rss_bytes": 1097728
+  },
+  "hashes": {
+    "manifest_sha256": "d3d5714460b62eaf5bf7942d43d381bfe2e23424eed90a33f7f082a05b27342a",
+    "completion_sha256": "e045e0a495160d3bbaf7c5182dbefcd0be7fffc2de2d5a1904370cd6a678b2aa",
+    "resolved_config_sha256": "d51a25e47d7f147246364079adbea4b7a3c045ae8c0ae98b094c81bc5994860a",
+    "environment_sha256": "07b19189c871235153d21004cd73b646e49249483bdd3346558447fba5c65e2a",
+    "quantization_manifest_sha256": "08c48ff5714460889ed54013dbfe341fb2afa065d915eed5f5c49ba809602dd8",
+    "baseline_summary_sha256": "15033d835ebe557259af9c72af74e7000b41d85ef3cb610b561fdbcdc78d0c9b",
+    "candidate_summary_sha256": "1f579a3b71a7d020a11d0108fc8997fb1dfdbc9dd1f587aa97134f412d2e161e",
+    "memory_module_sha256": "75916b24fa1dc38e8f6b0e94d49958324d4def7202a879398a6365b4c1b96905",
+    "worker_module_sha256": "087687d31ab423ab9a67648cefd8dfcb99b13e3d5046d82a5b6fa7dcbcd42add",
+    "runner_module_sha256": "ce379a06959418422e76593770e9d6423950f05aed918a84c2fe106013890951",
+    "experiment_config_sha256": "8fa5b242e672b48ed42311007b68b38fcbd3d214d9cb3f13cdd5ad190447bab1"
+  },
+  "hash_provenance": "Artifact, source-module, and config digests identify the exact execution-time bytes used by this governed run; they are historical evidence rather than assertions that later working-tree files remain unchanged.",
+  "claims": {
+    "baseline_and_candidate_used_distinct_processes": true,
+    "os_process_high_water_rss_through_read_point_measured": true,
+    "each_peak_is_scoped_to_one_governed_benchmark_stage": true,
+    "parent_pipeline_and_prior_stages_excluded": true,
+    "optimized_native_int8_candidate_executed": true,
+    "all_manifest_outputs_verified": true,
+    "steady_state_only_peak_claim": false,
+    "candidate_attributable_memory_claim": false,
+    "deployed_checkpoint_loader_peak_claim": false,
+    "final_process_through_exit_peak_claim": false,
+    "post_read_cleanup_or_result_transport_included": false,
+    "public_model_memory_claim": false,
+    "speedup_claim": false,
+    "energy_claim": false
+  }
+}

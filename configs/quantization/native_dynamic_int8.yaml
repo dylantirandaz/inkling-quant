@@ -1,0 +1,26 @@
+quantization:
+  backend: torch_native_dynamic_int8
+  method: native_dynamic_w8a8
+  policy:
+    type: uniform
+    default_precision: int8
+    module_class_rules:
+      - name: preserve-normalization
+        pattern: "*LayerNorm"
+        precision: float32
+    preserve_router_precision: true
+    router_precision: float32
+    preserve_output_head: true
+    output_head_precision: float32
+    preserve_embeddings: true
+    embedding_precision: float32
+    preserve_multimodal_projectors: true
+    multimodal_projector_precision: float32
+  export:
+    enabled: true
+    format: safetensors
+    destination: candidate
+  parameters:
+    quantized_engine: qnnpack
+    activation_granularity: per_call_tensor
+    weight_granularity: per_output_channel

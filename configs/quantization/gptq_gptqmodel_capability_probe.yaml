@@ -1,0 +1,40 @@
+# Capability-probe fragment only; not a runnable conversion experiment.
+quantization:
+  backend: gptq
+  method: gptq
+  calibration:
+    dataset: local://fixtures/calibration
+    revision: fixture-data-v1
+    split: calibration
+    sample_ids:
+      - calibration-001
+      - calibration-002
+      - calibration-003
+      - calibration-004
+    max_samples: 4
+  policy:
+    type: uniform
+    default_precision: int4
+    preserve_router_precision: true
+    router_precision: float32
+    preserve_output_head: true
+    output_head_precision: float32
+    preserve_embeddings: true
+    embedding_precision: float32
+    preserve_multimodal_projectors: true
+    multimodal_projector_precision: float32
+  export:
+    enabled: true
+    format: safetensors
+    destination: candidate
+  parameters:
+    local_files_only: false
+    device: cuda:0
+    bits: 4
+    group_size: 128
+    sym: true
+    batch_size: 1
+    format: gptq
+    desc_act: false
+    act_group_aware: true
+    damp_percent: 0.1

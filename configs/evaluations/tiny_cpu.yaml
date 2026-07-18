@@ -1,0 +1,27 @@
+evaluation:
+  allow_partial: true
+  suites:
+    - type: perplexity
+      dataset: local://fixtures/tiny-corpus
+      revision: fixture-data-v1
+      split: evaluation
+      prompt_template: "{text}"
+    - type: generation_regression
+      dataset: local://fixtures/generation-prompts
+      revision: fixture-data-v1
+      split: evaluation
+      prompt_template: "{text}"
+      decode:
+        max_new_tokens: 4
+        do_sample: false
+        temperature: 1.0
+    - type: behavioral_retention
+      dataset: local://fixtures/behavior-prompts
+      revision: fixture-data-v1
+      split: evaluation
+      prompt_template: "{text}"
+      decode:
+        max_new_tokens: 1
+        do_sample: false
+        temperature: 1.0
+

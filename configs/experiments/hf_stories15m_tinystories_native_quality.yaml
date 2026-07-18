@@ -1,0 +1,106 @@
+extends:
+  - ../models/hf_stories15m_moe.yaml
+schema_version: "1.0"
+name: hf-stories15m-tinystories-native-quality-baseline
+seed: 20260715
+quantization:
+  backend: noop
+  method: none
+  policy:
+    type: uniform
+    default_precision: float32
+    preserve_router_precision: true
+    router_precision: float32
+    preserve_output_head: true
+    output_head_precision: float32
+    preserve_embeddings: true
+    embedding_precision: float32
+    preserve_multimodal_projectors: true
+    multimodal_projector_precision: float32
+  export:
+    enabled: false
+    format: safetensors
+    destination: candidate
+evaluation:
+  allow_partial: false
+  suites:
+    - type: perplexity
+      dataset: hf://datasets/roneneldan/TinyStories/TinyStories-valid.txt
+      revision: f54c09fd23315a6f9c86f9dc80f725de7d8f9c64
+      split: validation
+      prompt_template: "{text}"
+      sample_ids:
+        - story-000001
+        - story-000002
+        - story-000003
+        - story-000004
+        - story-000005
+        - story-000006
+        - story-000007
+        - story-000008
+        - story-000009
+        - story-000010
+        - story-000011
+        - story-000012
+        - story-000013
+        - story-000014
+        - story-000015
+        - story-000016
+        - story-000017
+        - story-000018
+        - story-000019
+        - story-000020
+        - story-000021
+        - story-000022
+        - story-000023
+        - story-000024
+        - story-000025
+        - story-000026
+        - story-000027
+        - story-000028
+        - story-000029
+        - story-000030
+        - story-000031
+        - story-000032
+    - type: generation_regression
+      dataset: hf://datasets/roneneldan/TinyStories/TinyStories-valid.txt
+      revision: f54c09fd23315a6f9c86f9dc80f725de7d8f9c64
+      split: validation
+      prompt_template: "{text}"
+      decode:
+        max_new_tokens: 8
+        do_sample: false
+        temperature: 1.0
+      sample_ids:
+        - story-000001
+        - story-000008
+        - story-000016
+        - story-000024
+routing:
+  mode: full_trace
+  required: true
+  capture_router_logits: false
+  dataset: hf://datasets/roneneldan/TinyStories/TinyStories-valid.txt
+  dataset_revision: f54c09fd23315a6f9c86f9dc80f725de7d8f9c64
+  dataset_split: validation
+benchmark:
+  enabled: false
+runtime:
+  backend: torch_eager_cpu
+  device: cpu
+  dtype: float32
+  device_map: single
+output:
+  root: artifacts
+  run_prefix: hf-stories15m-native-quality
+security:
+  allow_remote_code: false
+  allow_pickle_weights: false
+  allow_uploads: false
+  log_prompts: false
+  log_model_outputs: false
+reporting:
+  markdown: false
+  html: false
+  plots: false
+  include_interpretation: false

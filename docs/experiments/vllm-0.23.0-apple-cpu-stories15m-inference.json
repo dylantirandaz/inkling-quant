@@ -1,0 +1,279 @@
+{
+  "claims": {
+    "generated_tokens_match_transformers_reference": true,
+    "loss_evaluation_executed": false,
+    "performance_benchmark_executed": false,
+    "pinned_public_moe_weights_loaded": true,
+    "project_runtime_promoted": false,
+    "quantized_checkpoint_executed": false,
+    "repeated_generation_deterministic": true,
+    "routing_capture_executed": false,
+    "upstream_vllm_unmodified_supported": false,
+    "vllm_generation_executed": true
+  },
+  "dataset": {
+    "dataset_id": "hf://datasets/roneneldan/TinyStories/TinyStories-valid.txt",
+    "file_sha256": "94e431816c4cce81ff71e4408ff8d3bda9a42e8d2663986697c3954288cb38b4",
+    "file_size_bytes": 19447282,
+    "prompt_selection": "first 32 tokenizer IDs from the selected sample, including tokenizer-configured special tokens",
+    "revision": "f54c09fd23315a6f9c86f9dc80f725de7d8f9c64",
+    "sample_content_sha256": "0bc7ef95cfe33c4f5dfda7d8042eb8b64759c6804d173b63a603670bafe883db",
+    "sample_id": "story-000001",
+    "split": "validation"
+  },
+  "evaluator": {
+    "file": "scripts/evaluate_vllm_public_moe_cpu.py",
+    "sha256_at_end": "2bc5b3aca9e843866feb02ac0be31f2d18aa9538aab2a278422fc28eabeee3ca",
+    "sha256_at_start": "2bc5b3aca9e843866feb02ac0be31f2d18aa9538aab2a278422fc28eabeee3ca",
+    "worker_attested_start_and_end": true
+  },
+  "execution": {
+    "all_vllm_repetitions_identical": true,
+    "compatibility_paths_executed": {
+      "darwin_arm_eager_sampler": true,
+      "static_native_silu": true,
+      "vec16_head_dimension_48_attention": true
+    },
+    "distributed_rendezvous": "single-rank local Gloo TCP",
+    "dtype": "float32",
+    "enforce_eager": true,
+    "engine_mode": "V1 in-process UniProcExecutor",
+    "evaluator_sha256_at_end": "2bc5b3aca9e843866feb02ac0be31f2d18aa9538aab2a278422fc28eabeee3ca",
+    "evaluator_sha256_at_start": "2bc5b3aca9e843866feb02ac0be31f2d18aa9538aab2a278422fc28eabeee3ca",
+    "finish_reasons": [
+      "length",
+      "length",
+      "length"
+    ],
+    "generated_token_count": 4,
+    "http_server_started": false,
+    "kv_cache_memory_bytes": 67108864,
+    "load_format": "safetensors",
+    "max_model_len": 64,
+    "multiprocessing_enabled": false,
+    "native_extensions_imported": [
+      "vllm._C",
+      "vllm.spinloop"
+    ],
+    "prefix_caching": false,
+    "prompt_token_count": 32,
+    "prompt_token_ids_sha256": "6c96b6b667b108422d923aec4112be456af5220a8f10896c8ca68f2e4bbdaadb",
+    "repetitions": 3,
+    "resolved_architecture": "MixtralForCausalLM",
+    "runtime_platform": "cpu",
+    "runtime_versions": {
+      "huggingface-hub": "1.23.0",
+      "numpy": "2.3.5",
+      "psutil": "7.2.2",
+      "safetensors": "0.8.0",
+      "tokenizers": "0.22.2",
+      "torch": "2.11.0",
+      "transformers": "5.14.0",
+      "vllm": "0.23.1.dev0+g0fc695fc6.d20260716.cpu"
+    },
+    "sampling": {
+      "detokenize": false,
+      "method": "greedy",
+      "seed": 271828,
+      "temperature": 0.0
+    },
+    "tensor_parallel_size": 1,
+    "transformers_generated_token_ids_sha256": "8cad579c5970c8c00d5970a222afa6ad53169fb9525acf0441546edce1f4ebdc",
+    "trust_remote_code": false,
+    "vllm_generated_token_ids_sha256": [
+      "8cad579c5970c8c00d5970a222afa6ad53169fb9525acf0441546edce1f4ebdc",
+      "8cad579c5970c8c00d5970a222afa6ad53169fb9525acf0441546edce1f4ebdc",
+      "8cad579c5970c8c00d5970a222afa6ad53169fb9525acf0441546edce1f4ebdc"
+    ],
+    "vllm_matches_transformers_exactly": true,
+    "zmq_transport_started": false
+  },
+  "host": {
+    "hardware_label": "Apple M3 MacBook Air (Mac15,12), 8 CPU cores, 16 GB memory",
+    "logical_cpu_count": 8,
+    "machine": "arm64",
+    "python": "3.12.13",
+    "release": "24.3.0",
+    "system": "Darwin"
+  },
+  "limitations": [
+    "This is an external direct-vLLM smoke, not an Inkling Quant Lab RuntimeBackend or governed pipeline run.",
+    "The exact vLLM source requires the recorded compatibility patch; unmodified v0.23.0 fails on this model/host.",
+    "The tiny yujiepan random checkpoint remains unsupported because its synthetic attention head dimension is one.",
+    "Three identical four-token greedy generations prove deterministic execution for one prompt only; they are not a quality study.",
+    "No latency, throughput, memory, energy, routing, loss, quantization, HTTP serving, concurrency, or multi-device claim is made.",
+    "The model publisher repeated expert tensors and randomly initialized routers, so this does not evidence learned expert specialization.",
+    "Although HTTP, ZMQ, and engine multiprocessing were disabled, vLLM still required one local Gloo TCP rendezvous for world size one.",
+    "The native extension checksum is specific to the recorded Apple/compiler/PyTorch build and is not a universal binary-support claim."
+  ],
+  "model": {
+    "architecture": "MixtralForCausalLM",
+    "attention_head_dimension": 48,
+    "attention_heads": 6,
+    "experts_per_layer": 4,
+    "file_inventory": [
+      {
+        "path": "config.json",
+        "sha256": "e901e012953d1df93574b2cc3d7db5ed4758d52f8bd4a7dd4b647936e32261be",
+        "size_bytes": 711,
+        "symlink": true
+      },
+      {
+        "path": "data.txt",
+        "sha256": "8aba9f75ac88b48a9576935995a26b806f3d2cd75f6ca9267fe0fba79cd3f64f",
+        "size_bytes": 66884,
+        "symlink": true
+      },
+      {
+        "path": "generation_config.json",
+        "sha256": "295aa491adda22ab9fbdecdda9e8121e8348fd0eea0529d8802993426ab0892c",
+        "size_bytes": 115,
+        "symlink": true
+      },
+      {
+        "path": "model.safetensors",
+        "sha256": "dbfa0289f68a8dd721d10eb12d8bd82e098455682027f6f9986ba548913f9082",
+        "size_bytes": 72744704,
+        "symlink": true
+      },
+      {
+        "path": "model.safetensors.index.json",
+        "sha256": "cd4af1df494f42e9099c1bdf9ea8487c06166c8ca60f6264a617497a8151fd31",
+        "size_bytes": 8890,
+        "symlink": true
+      },
+      {
+        "path": "moe_shakespeare15M/checkpoint-400/adapter_config.json",
+        "sha256": "bc7a694ce0155d5ca6f7601f00fd61017b2f67615a5338745b5b5c97c43e89bb",
+        "size_bytes": 723,
+        "symlink": true
+      },
+      {
+        "path": "moe_shakespeare15M/checkpoint-400/trainer_state.json",
+        "sha256": "91d96f6b1afb85e0f28ca7da468409d8585a0dc4384cbf84d5560a0b8ee1e122",
+        "size_bytes": 3693,
+        "symlink": true
+      },
+      {
+        "path": "moe_shakespeare15M/checkpoint-500/adapter_config.json",
+        "sha256": "bc7a694ce0155d5ca6f7601f00fd61017b2f67615a5338745b5b5c97c43e89bb",
+        "size_bytes": 723,
+        "symlink": true
+      },
+      {
+        "path": "moe_shakespeare15M/checkpoint-500/trainer_state.json",
+        "sha256": "f612e4f0b86fa83474b917d064ae4997750d28487d3e7edd1697ecd26ac85ddc",
+        "size_bytes": 4416,
+        "symlink": true
+      },
+      {
+        "path": "special_tokens_map.json",
+        "sha256": "ff3b4a612c4e447acb02d40071bddd989fe0da87eb5b7fe0dbadfc4f74de7531",
+        "size_bytes": 411,
+        "symlink": true
+      },
+      {
+        "path": "tokenizer.json",
+        "sha256": "8eea70c4866c4f1320ba096fc986ac82038a8374dbe135212ba7628835b4a6f1",
+        "size_bytes": 1842764,
+        "symlink": true
+      },
+      {
+        "path": "tokenizer_config.json",
+        "sha256": "33d29c87e41f7dd1efb0434d852730320c82970f292be452d820539bce417052",
+        "size_bytes": 686,
+        "symlink": true
+      }
+    ],
+    "hidden_size": 288,
+    "layers": 6,
+    "license": "MIT",
+    "model_id": "ggml-org/stories15M_MOE",
+    "model_type": "mixtral",
+    "pickle_capable_weight_count": 0,
+    "python_file_count": 0,
+    "revision": "b6dd737497465570b5f5e962dbc9d9454ed1e0eb",
+    "safetensors_metadata": {
+      "format": "pt"
+    },
+    "safetensors_tensor_count": 117,
+    "source_location": "immutable_local_huggingface_cache_snapshot",
+    "top_k": 2,
+    "trust_remote_code": false,
+    "weight_file": "model.safetensors",
+    "weight_sha256": "dbfa0289f68a8dd721d10eb12d8bd82e098455682027f6f9986ba548913f9082",
+    "weight_size_bytes": 72744704
+  },
+  "offline_controls": {
+    "dataset_path_local": true,
+    "hf_hub_offline": true,
+    "model_and_tokenizer_paths_local": true,
+    "network_download_attempted": false,
+    "remote_code_disabled": true,
+    "safetensors_required": true,
+    "transformers_offline": true,
+    "vllm_usage_stats_disabled": true
+  },
+  "privacy": {
+    "generated_text_persisted": false,
+    "generated_token_ids_persisted": false,
+    "hashes_and_counts_only": true,
+    "prompt_text_persisted": false,
+    "prompt_token_ids_persisted": false
+  },
+  "recorded_at": "2026-07-16T16:47:10.235084+00:00",
+  "reproduction": {
+    "build": "VLLM_TARGET_DEVICE=cpu uv pip install --no-build-isolation --python <isolated-python> -e <vllm-source>",
+    "evaluation": "python scripts/evaluate_vllm_public_moe_cpu.py --runtime-python <isolated-python> --vllm-source <patched-source> --snapshot <immutable-snapshot> --dataset <pinned-validation-file> --hardware-label '<host>' --output artifacts/research-slices/<new-record>.json",
+    "execution_requirement": "the process must be allowed to bind vLLM's single-rank local Gloo TCP rendezvous",
+    "source_patch": "git apply scripts/patches/vllm-0.23.0-apple-cpu-stories15m.patch"
+  },
+  "schema_version": "external-vllm-public-moe-inference-v2",
+  "status": "success",
+  "vllm_source_and_build": {
+    "commit": "0fc695fc6d1d82e9a5ac6835ac8e4e1c83703665",
+    "native_extensions": [
+      {
+        "contains_head_dim_48_dispatch": true,
+        "path": "vllm/_C.abi3.so",
+        "sha256": "a0fa2177581f2a64a32fd0a095d5245f5551a4f5d6639181af2bbec75ced239c"
+      },
+      {
+        "path": "vllm/spinloop.abi3.so",
+        "sha256": "366fbae0d889893075c0216f95f3ad7c0cba5709d86b0d34c1f8034bba2bed06"
+      }
+    ],
+    "patch_file": "scripts/patches/vllm-0.23.0-apple-cpu-stories15m.patch",
+    "patch_scopes": [
+      "instantiate the existing static native SiLU function without constructing a CustomOp during forward",
+      "instantiate and advertise the existing VEC16 CPU attention template for head dimension 48",
+      "select vLLM's exact eager sampler implementation on Darwin ARM instead of a torch.compile dylib with an unresolved libc++ rpath"
+    ],
+    "patch_sha256": "3ef5849f3f2f6d63fa10c2aacf224bf755fd87392771531bba82ffeff9fc4a2e",
+    "patched_source_files": [
+      {
+        "patched_sha256": "bfca86c453c981656213cd26f4ba3f431944431e7136c9e88230105ac7d826c1",
+        "path": "csrc/cpu/generate_cpu_attn_dispatch.py",
+        "upstream_sha256": "e16671a1d24d42e4f4b9a8360e4e9299727d807e56299df07a44730a6fb188d9"
+      },
+      {
+        "patched_sha256": "bee528904d4f742830644244781115d7cd8363413f897b382a962ecc4cccc92f",
+        "path": "vllm/model_executor/layers/fused_moe/cpu_fused_moe.py",
+        "upstream_sha256": "89b18a221302cdc705636b5c0647c55a4c0635cd2daaa2d23f2bd96c002c26ef"
+      },
+      {
+        "patched_sha256": "0e78e096885c5674fab6aed52798e3c22a96a114aa3231046e465fdd3d26d075",
+        "path": "vllm/v1/attention/backends/cpu_attn.py",
+        "upstream_sha256": "824ed83e61a2683dd1675fab62739f5083423ade73bc6d3d3a76c9b59aff9fc8"
+      },
+      {
+        "patched_sha256": "fe10d51b04f1eb91b951a81179a4990d5d4e53093d166097a4ff5cc534c1a2c1",
+        "path": "vllm/v1/sample/ops/topk_topp_sampler.py",
+        "upstream_sha256": "d0edfc9a1322afadf04a7819fc360d3f8a66cfb44f77d7f190e9d257d24c416f"
+      }
+    ],
+    "repository": "https://github.com/vllm-project/vllm.git",
+    "tag": "v0.23.0",
+    "tracked_diff_exactly_matches_patch": true
+  }
+}

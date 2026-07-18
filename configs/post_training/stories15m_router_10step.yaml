@@ -1,0 +1,87 @@
+# Reviewed input contract, not an execution record.
+# Status on 2026-07-16: the unchanged ten-step contract executed on Apple M3 Metal but failed the
+# overall and Alice exact-top-2 accuracy gates. Its immutable `.failed-*` sibling is recorded in
+# docs/experiments/stories15m-router-domain-pair-10step-failed-m3.json; the configured success path
+# remains absent. No learned-float overlay, quantized learned-router run, or retention comparison
+# completed.
+# After a successful learned-float run, the separate CPU overlay contract permits only affine g32:
+# q4 = six x {uint32[4,36] weight, float32[4,9] scales, float32[4,9] biases} = 5,184 bytes;
+# q8 changes weight to uint32[4,72] = 8,640 bytes total. Either form has exactly 18 tensors and
+# must bind the learned-float lineage hash. These comments do not authorize or record that step.
+schema_version: mlx-router-preflight-v1
+name: stories15m-router-domain-pair-10step
+seed: 20260716
+model:
+  model_id: ggml-org/stories15M_MOE
+  revision: b6dd737497465570b5f5e962dbc9d9454ed1e0eb
+  architecture: MixtralForCausalLM
+  snapshot_path: ~/.cache/huggingface/hub/models--ggml-org--stories15M_MOE/snapshots/b6dd737497465570b5f5e962dbc9d9454ed1e0eb
+  weights_sha256: dbfa0289f68a8dd721d10eb12d8bd82e098455682027f6f9986ba548913f9082
+  device: metal
+  dtype: float32
+  trust_remote_code: false
+corpora:
+  - domain_id: alice
+    dataset_id: project-gutenberg/pg11
+    revision: pg11-2025-06-26
+    title: Alice's Adventures in Wonderland
+    author: Lewis Carroll
+    provenance_url: https://www.gutenberg.org/ebooks/11
+    download_url: https://www.gutenberg.org/cache/epub/11/pg11.txt
+    declared_license: Project Gutenberg License; public-domain status varies by jurisdiction
+    local_path: /private/tmp/manifoldmix-corpora/alice-pg11.txt
+    size_bytes: 174311
+    sha256: 01b38ea4c710a84bc18d0bd41271a5a1a92b94e97b2812f4dece97d4a694725e
+    start_marker: "*** START OF THE PROJECT GUTENBERG EBOOK ALICE'S ADVENTURES IN WONDERLAND ***"
+    end_marker: "*** END OF THE PROJECT GUTENBERG EBOOK ALICE'S ADVENTURES IN WONDERLAND ***"
+    target_expert_pair: [0, 1]
+  - domain_id: sherlock
+    dataset_id: project-gutenberg/pg1661
+    revision: pg1661-2023-10-10
+    title: The Adventures of Sherlock Holmes
+    author: Arthur Conan Doyle
+    provenance_url: https://www.gutenberg.org/ebooks/1661
+    download_url: https://www.gutenberg.org/cache/epub/1661/pg1661.txt
+    declared_license: Project Gutenberg License; public-domain status varies by jurisdiction
+    local_path: /private/tmp/manifoldmix-corpora/sherlock-pg1661.txt
+    size_bytes: 607606
+    sha256: 922e2a12ccb43a4c9544c260b2166c6ad2097aeb5957faeee113f173bb857cd0
+    start_marker: "*** START OF THE PROJECT GUTENBERG EBOOK THE ADVENTURES OF SHERLOCK HOLMES ***"
+    end_marker: "*** END OF THE PROJECT GUTENBERG EBOOK THE ADVENTURES OF SHERLOCK HOLMES ***"
+    target_expert_pair: [2, 3]
+data:
+  parser_version: gutenberg-paragraph-documents-v1
+  split_method: sha256-seed-content-modulo-v1
+  split_modulus: 5
+  validation_bucket: 0
+  sequence_length: 64
+  train_tokens_per_domain: 320
+  validation_tokens_per_domain: 256
+training:
+  optimizer: adamw
+  steps: 10
+  batch_size: 1
+  learning_rate: 0.01
+  betas: [0.9, 0.999]
+  epsilon: 1.0e-8
+  weight_decay: 0.0
+  bias_correction: false
+  objective_name: domain_pair_soft_target_cross_entropy
+  objective_version: top2-domain-pair-ce-v1
+  expected_router_tensor_count: 6
+  expected_trainable_parameter_count: 6912
+acceptance:
+  minimum_validation_cross_entropy_reduction: 0.05
+  minimum_validation_exact_top2_pair_accuracy: 0.60
+  minimum_accuracy_gain_over_source_router: 0.20
+  minimum_per_domain_cross_entropy_reduction: 0.02
+  minimum_per_domain_exact_top2_pair_accuracy: 0.50
+  minimum_per_domain_accuracy_gain_over_source_router: 0.15
+output_path: artifacts/research-slices/stories15m-router-domain-pair-10step
+# `true` below is the threshold-gated statement this run may make after successful held-out
+# acceptance; it is not a statement that training has executed or that quantization retained it.
+claim_boundary:
+  learned_domain_supervised_routing: true
+  causal_lm_specialization_claimed: false
+  output_quality_retention_claimed: false
+  raw_text_or_tokens_persisted: false

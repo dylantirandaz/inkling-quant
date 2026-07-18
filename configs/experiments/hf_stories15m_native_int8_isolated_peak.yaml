@@ -1,0 +1,67 @@
+extends:
+  - ../models/hf_stories15m_moe.yaml
+  - ../quantization/native_dynamic_int8.yaml
+  - ../evaluations/public_moe_cpu_contract.yaml
+schema_version: "1.0"
+name: hf-stories15m-native-int8-isolated-peak
+seed: 20260716
+model:
+  local_files_only: true
+quantization:
+  policy:
+    type: uniform
+    default_precision: float32
+    module_class_rules:
+      - name: quantize-addressable-linear
+        pattern: torch.nn.modules.linear.Linear
+        precision: int8
+    preserve_router_precision: true
+    router_precision: float32
+    preserve_output_head: true
+    output_head_precision: float32
+    preserve_embeddings: true
+    embedding_precision: float32
+    preserve_multimodal_projectors: true
+    multimodal_projector_precision: float32
+  export:
+    enabled: true
+    format: safetensors
+    destination: candidate
+routing:
+  mode: full_trace
+  required: true
+  capture_router_logits: false
+  dataset: local://fixtures/routing-prompts
+  dataset_revision: fixture-data-v1
+  dataset_split: routing-evaluation
+benchmark:
+  enabled: true
+  protocol_version: public-moe-cpu-isolated-stage-peak-v1
+  warmup_iterations: 1
+  repetitions: 3
+  synchronize: true
+  measure_energy: false
+  # This is the worker's OS high-water RSS through the post-trial read. Candidate reconstruction
+  # may retain source and candidate state together; it is not source-free deployment residency.
+  host_memory_mode: isolated_stage_worker_peak_rss
+  worker_timeout_seconds: 900.0
+runtime:
+  backend: torch_eager_cpu
+  device: cpu
+  dtype: float32
+  device_map: single
+  sharding: null
+output:
+  root: artifacts
+  run_prefix: hf-stories15m-native-int8-isolated-peak
+security:
+  allow_remote_code: false
+  allow_pickle_weights: false
+  allow_uploads: false
+  log_prompts: false
+  log_model_outputs: false
+reporting:
+  markdown: true
+  html: false
+  plots: true
+  include_interpretation: true

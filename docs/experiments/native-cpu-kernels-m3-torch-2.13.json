@@ -1,0 +1,160 @@
+{
+  "latency": {
+    "float32": {
+      "mean_ms": 0.570719280909091,
+      "median_ms": 0.41847375,
+      "p10_ms": 0.39161833,
+      "p90_ms": 0.8840225,
+      "stdev_ms": 0.29642708976768656,
+      "trial_count": 11,
+      "trials_ms": [
+        0.387035,
+        0.422095,
+        0.45030292,
+        0.8840225,
+        0.41847375,
+        1.36083084,
+        0.41039333,
+        0.40049458,
+        0.75492209,
+        0.39161833,
+        0.39772375
+      ]
+    },
+    "native_dynamic_int4_kleidiai": {
+      "mean_ms": 0.07994147636363637,
+      "median_ms": 0.07188667,
+      "p10_ms": 0.06537333000000001,
+      "p90_ms": 0.10803833,
+      "stdev_ms": 0.02150943669643091,
+      "trial_count": 11,
+      "trials_ms": [
+        0.07458833000000001,
+        0.07188667,
+        0.06855583999999999,
+        0.10803833,
+        0.07136167,
+        0.06337541000000001,
+        0.06537333000000001,
+        0.0694375,
+        0.13772917,
+        0.07643791,
+        0.07257208
+      ]
+    },
+    "native_dynamic_int8": {
+      "mean_ms": 0.2758441681818182,
+      "median_ms": 0.27055542,
+      "p10_ms": 0.26038167,
+      "p90_ms": 0.27801042,
+      "stdev_ms": 0.018900575160788018,
+      "trial_count": 11,
+      "trials_ms": [
+        0.33213084000000004,
+        0.2745,
+        0.27787042,
+        0.27777292,
+        0.26430625,
+        0.26982040999999996,
+        0.27055542,
+        0.26038167,
+        0.26955625,
+        0.25938125,
+        0.27801042
+      ]
+    },
+    "reference_dynamic_int8": {
+      "mean_ms": 1.8054451900000001,
+      "median_ms": 1.81390167,
+      "p10_ms": 1.546875,
+      "p90_ms": 2.02548125,
+      "stdev_ms": 0.3038945860475428,
+      "trial_count": 11,
+      "trials_ms": [
+        1.8287683300000002,
+        2.02548125,
+        1.84234542,
+        2.5965108399999997,
+        1.95523917,
+        1.6008745800000002,
+        1.6217020800000002,
+        1.546875,
+        1.81390167,
+        1.4639941699999999,
+        1.5642045800000002
+      ]
+    },
+    "reference_weight_only_int4": {
+      "mean_ms": 2.922741099090909,
+      "median_ms": 2.82905834,
+      "p10_ms": 2.6195845899999997,
+      "p90_ms": 3.30329542,
+      "stdev_ms": 0.28565832240602673,
+      "trial_count": 11,
+      "trials_ms": [
+        2.6409841600000004,
+        2.84818375,
+        2.7237025,
+        3.4400416600000003,
+        3.30329542,
+        3.28407,
+        2.82905834,
+        2.78964208,
+        3.0555108399999997,
+        2.61607875,
+        2.6195845899999997
+      ]
+    }
+  },
+  "max_abs_error_vs_float32": {
+    "native_dynamic_int4_kleidiai": 0.15558815002441406,
+    "native_dynamic_int8": 0.02214902639389038,
+    "reference_dynamic_int8": 0.022257506847381592,
+    "reference_weight_only_int4": 0.15470898151397705
+  },
+  "module_state_storage_bytes": {
+    "float32": 4198400,
+    "native_dynamic_int4_kleidiai": 536576,
+    "native_dynamic_int8": 1056768,
+    "reference_dynamic_int8": 1056768,
+    "reference_weight_only_int4": 532480
+  },
+  "protocol": {
+    "construction_and_weight_packing_excluded": true,
+    "dtype": "float32",
+    "input_shape": [
+      8,
+      1024
+    ],
+    "iterations_per_trial": 100,
+    "trial_order": "rotated",
+    "trials": 11,
+    "warmup_iterations_per_operation": 20,
+    "weight_shape": [
+      1024,
+      1024
+    ]
+  },
+  "provenance": {
+    "command": "scripts/benchmark_native_cpu_quant.py",
+    "hardware_label": "Apple M3 MacBook Air (8 cores, 16 GB)",
+    "host_isolation": "shared development host; background load not controlled",
+    "kleidiai_available": true,
+    "logical_cpu_count": 8,
+    "machine": "arm64",
+    "measured_at": "2026-07-16T03:10:29.497672+00:00",
+    "platform": "macOS-15.3.1-arm64-arm-64bit",
+    "processor": "arm",
+    "python_version": "3.12.13",
+    "quantized_engine": "qnnpack",
+    "seed": 20260715,
+    "torch_interop_threads": 1,
+    "torch_threads": 1,
+    "torch_version": "2.13.0"
+  },
+  "schema_version": "native-cpu-quant-benchmark-v1",
+  "speedup_vs_reference": {
+    "native_dynamic_int4_kleidiai": 39.3544218976898,
+    "native_dynamic_int8": 6.704362714300826
+  }
+}

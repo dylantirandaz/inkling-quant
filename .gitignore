@@ -1,0 +1,87 @@
+.venv/
+__pycache__/
+*.py[cod]
+
+# Test, type-check, lint, coverage, and build outputs
+.pytest_cache/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.json
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Immutable experiment outputs, downloaded data, and model weights
+artifacts/
+/.cache/
+/cache/
+/checkpoints/
+/datasets/
+/models/
+/runs/
+*.safetensors
+*.gguf
+*.ggml
+*.imatrix
+*.ckpt
+*.onnx
+*.pt
+*.pth
+*.bin
+
+# Runtime logs and interrupted downloads
+*.log
+*.part
+*.tmp
+*.bak
+/logs/
+/wandb/
+/mlruns/
+
+# Local secrets and provider credentials
+.env
+.env.*
+!.env.example
+.modal/
+.modal.toml
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+
+# Agent-only instructions, state, and editor integrations
+**/AGENTS.md
+!/AGENTS.md
+**/CLAUDE.md
+**/GEMINI.md
+.agents/
+.codex/
+.claude/
+.gemini/
+.cursor/
+.cline/
+.continue/
+.roo/
+.windsurf/
+.aider*
+.github/copilot-instructions.md
+.github/instructions/
+.github/prompts/
+.github/workflows/
+# Keep project Markdown local; publish only the repository README.
+*.md
+*.[mM][dD]
+*.[mM][aA][rR][kK][dD][oO][wW][nN]
+SPEC.md
+SDD.md
+TDD.md
+!/README.md
+
+# Local editor and OS metadata
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,10 @@
+model:
+  model_id: local://fixtures/tiny-moe
+  revision: tiny-moe-fixture-v1
+  adapter: local_fixture
+  tokenizer_id: local://fixtures/fixed-tokenizer
+  dtype: float32
+  trust_remote_code: false
+  local_files_only: true
+  checkpoint_format: fixture
+

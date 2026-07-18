@@ -1,0 +1,10 @@
+extends:
+  - hf_stories15m_native_int8_isolated_peak.yaml
+name: hf-stories15m-native-int8-source-weight-free-peak
+benchmark:
+  protocol_version: public-moe-source-weight-free-subject-peak-v1
+  # Each benchmark subject gets a fresh worker. The candidate worker loads the governed export
+  # plus pinned config/tokenizer metadata and never opens or copies the float source weights.
+  host_memory_mode: isolated_subject_artifact_peak_rss
+output:
+  run_prefix: hf-stories15m-native-int8-source-weight-free-peak

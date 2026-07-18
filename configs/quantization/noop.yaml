@@ -1,0 +1,19 @@
+quantization:
+  backend: noop
+  method: none
+  policy:
+    type: uniform
+    default_precision: float32
+    preserve_router_precision: true
+    router_precision: float32
+    preserve_output_head: true
+    output_head_precision: float32
+    preserve_embeddings: true
+    embedding_precision: float32
+    preserve_multimodal_projectors: true
+    multimodal_projector_precision: float32
+  export:
+    enabled: true
+    format: recipe_json
+    destination: candidate
+

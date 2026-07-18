@@ -1,0 +1,31 @@
+quantization:
+  backend: torch_reference_mixed
+  method: expert_aware_weight_only
+  calibration:
+    dataset: local://fixtures/calibration
+    revision: fixture-data-v1
+    split: calibration
+    sample_ids:
+      - calibration-001
+      - calibration-002
+      - calibration-003
+      - calibration-004
+    max_samples: 4
+  policy:
+    type: frequency_tiered
+    default_precision: int4
+    module_class_rules:
+      - name: preserve-normalization
+        pattern: "*LayerNorm"
+        precision: float32
+    preserve_router_precision: true
+    preserve_output_head: true
+    preserve_embeddings: true
+    frequency:
+      quantiles: [0.5]
+      precisions: [int4, int8]
+      fallback_precision: null
+  export:
+    enabled: true
+    format: recipe_json
+    destination: candidate

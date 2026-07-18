@@ -1,0 +1,3 @@
+{"id":"eval-gen-001","text":"alpha beta","expected_tokens":[2,2,2,2]}
+{"id":"eval-gen-002","text":"red blue","expected_tokens":[2,2,2,2]}
+{"id":"eval-gen-003","text":"cat dog","expected_tokens":[2,2,2,2]}

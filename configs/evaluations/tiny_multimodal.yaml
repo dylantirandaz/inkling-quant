@@ -1,0 +1,9 @@
+evaluation:
+  allow_partial: false
+  suites:
+    - type: multimodal_contract
+      dataset: local://fixtures/multimodal
+      revision: fixture-data-v1
+      split: evaluation
+      prompt_template: "{text}+modality"
+

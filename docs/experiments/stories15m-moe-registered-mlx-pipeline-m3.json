@@ -1,0 +1,169 @@
+{
+  "schema_version": "registered-mlx-public-moe-pipeline-acceptance-v1",
+  "created_at_utc": "2026-07-16T16:43:00Z",
+  "model": {
+    "id": "ggml-org/stories15M_MOE",
+    "revision": "b6dd737497465570b5f5e962dbc9d9454ed1e0eb",
+    "architecture": "MixtralForCausalLM",
+    "resolved_class": "mlx_lm.models.mixtral.Model",
+    "source_weight_sha256": "dbfa0289f68a8dd721d10eb12d8bd82e098455682027f6f9986ba548913f9082",
+    "source_weight_bytes": 72744704
+  },
+  "environment": {
+    "platform": {
+      "system": "Darwin",
+      "release": "24.3.0",
+      "machine": "arm64"
+    },
+    "hardware": {
+      "device_name": "Apple M3",
+      "metal_core_count": 10,
+      "logical_cpu_count": 8
+    },
+    "python": "3.12.7",
+    "packages": {
+      "mlx": "0.32.0",
+      "mlx-lm": "0.31.3",
+      "mlx-metal": "0.32.0",
+      "safetensors": "0.8.0",
+      "transformers": "5.12.1"
+    }
+  },
+  "claims": {
+    "public_checkpoint_executed": true,
+    "q4_fresh_governed_run_completed": true,
+    "q8_fresh_governed_run_completed": true,
+    "all_50_eligible_leaves_quantized": true,
+    "all_18_fused_expert_projections_quantized": true,
+    "safe_export_reload_execution_validated": true,
+    "baseline_and_candidate_loss_executed": true,
+    "six_layer_full_routing_comparison_executed": true,
+    "reports_and_final_manifest_completed": true,
+    "pipeline_benchmarks_executed": false,
+    "latency_or_throughput_claim": false,
+    "peak_memory_claim": false,
+    "energy_or_utilization_claim": false,
+    "representative_quality_claim": false,
+    "expert_aware_or_per_expert_precision_claim": false,
+    "generic_mlx_or_other_model_support_claim": false,
+    "learned_router_specialization_claim": false,
+    "raw_prompts_persisted": false,
+    "raw_model_outputs_persisted": false
+  },
+  "runs": {
+    "q4": {
+      "run_id": "mlx-stories15m-moe-q4-20260716T163523193586Z-499205e2-e19511",
+      "run_kind": "fresh",
+      "started_at_utc": "2026-07-16T16:35:23.230293Z",
+      "completed_at_utc": "2026-07-16T16:35:35.611981Z",
+      "hashes": {
+        "config_sha256": "499205e2ac1b92805ffccf8d158a8b1162412fab60c38e78e7aa3ef36a022e39",
+        "resolved_config_sha256": "c5bdb44d7619e73f2ee4eb9457a4760a0bdfe6f601d4630609a0060dfe252857",
+        "environment_sha256": "f4a0f96e1024b2f2a53ac0c581c064a071541bb4bb2f29739ec61ded24a19eea",
+        "manifest_sha256": "2ee4b406f8610bae4e7f69397eed4f863f13a725e3edab34203e770e132d4b6c",
+        "completion_sha256": "a9622639835df3062dce166745b3f1060163fd9a0dcfdb08504ce76503b5009f",
+        "quantization_manifest_sha256": "fb73c9111152d5afdcf33c3a6cb241529449a07a2a99b2b6dfc4d1936da4f8b2",
+        "packed_weight_sha256": "610c0f80ed9e59648c652aa4e8c9227b59be1286c55cccad0d5356c064b20552",
+        "baseline_evaluation_sha256": "13b57342c51d58b71715ff77180ed37fa988fa65966214366e01a9abea775747",
+        "candidate_evaluation_sha256": "2ed50c3ff92c76c93c4de0506910558f78ae0c061e72150e253ed6c7d2cbe08d",
+        "routing_comparison_sha256": "fa51e648aa5d702da461f9ad8dd0c97badcffbb43551cf177e60c7d85371a752"
+      },
+      "stages": {
+        "resolve_configuration": {"status": "success", "attempt": 1},
+        "probe_runtime": {"status": "success", "attempt": 1},
+        "load_baseline": {"status": "success", "attempt": 1},
+        "inventory_modules": {"status": "success", "attempt": 1},
+        "collect_statistics": {"status": "success", "attempt": 1},
+        "resolve_precision_policy": {"status": "success", "attempt": 1},
+        "quantize": {"status": "success", "attempt": 1},
+        "evaluate_baseline": {"status": "success", "attempt": 1},
+        "evaluate_candidate": {"status": "success", "attempt": 1},
+        "benchmark_baseline": {"status": "skipped_not_required", "attempt": 0},
+        "benchmark_candidate": {"status": "skipped_not_required", "attempt": 0},
+        "compare_routing": {"status": "success", "attempt": 1},
+        "generate_reports": {"status": "success", "attempt": 1},
+        "finalize_manifest": {"status": "success", "attempt": 1}
+      },
+      "bundle": {
+        "bits": 4,
+        "group_size": 32,
+        "mode": "affine",
+        "quantized_leaf_count": 50,
+        "quantized_fused_expert_projection_count": 18,
+        "runtime_tensor_bytes": 27281088,
+        "serialized_bundle_bytes": 30938244
+      },
+      "fixture_metrics": {
+        "baseline_perplexity": 412689.0149946304,
+        "candidate_perplexity": 550724.7307166351,
+        "token_route_agreement": 0.8095238095238095,
+        "top_k_overlap": 0.9047619047619048,
+        "routing_js_divergence": 0.00831893162090163,
+        "aligned_token_layer_count": 126
+      }
+    },
+    "q8": {
+      "run_id": "mlx-stories15m-moe-q8-20260716T164221897674Z-2e041c14-17db0f",
+      "run_kind": "fresh",
+      "started_at_utc": "2026-07-16T16:42:21.949742Z",
+      "completed_at_utc": "2026-07-16T16:42:38.437591Z",
+      "hashes": {
+        "config_sha256": "2e041c1430d37016186f34bd7e9741ed54725a859f6918c3234e16b93b2bb05e",
+        "resolved_config_sha256": "be84ed5c10320f420991f6438dae4ccebf49be5ed3f27be3ede7d01948f17f32",
+        "environment_sha256": "f4a0f96e1024b2f2a53ac0c581c064a071541bb4bb2f29739ec61ded24a19eea",
+        "manifest_sha256": "4749f36758a2e3635c8359e3ec478f78534c0f414db93168a7e365abb6639f03",
+        "completion_sha256": "411d50d21fec6d2a647c7c92ae20624a68618b5d41db5dd28e97b3cd86020d68",
+        "quantization_manifest_sha256": "32d0e75efdbf0213a9db59045f6edb5964e6386dc0eaff0b578d7c5c70c171c6",
+        "packed_weight_sha256": "a2a5a57afbad4aa8378fea33a6b51b0848f7cd665d3ed191bad80704d3756dec",
+        "baseline_evaluation_sha256": "13b57342c51d58b71715ff77180ed37fa988fa65966214366e01a9abea775747",
+        "candidate_evaluation_sha256": "94e013d02ed428ffa70107fca2bc074502b8a918e14b24a9d104aa7435703cd2",
+        "routing_comparison_sha256": "145a83f8afc7ea63d793ee9d3aab1eba675d2477c4a197f401181d9791e1a8b4"
+      },
+      "stages": {
+        "resolve_configuration": {"status": "success", "attempt": 1},
+        "probe_runtime": {"status": "success", "attempt": 1},
+        "load_baseline": {"status": "success", "attempt": 1},
+        "inventory_modules": {"status": "success", "attempt": 1},
+        "collect_statistics": {"status": "success", "attempt": 1},
+        "resolve_precision_policy": {"status": "success", "attempt": 1},
+        "quantize": {"status": "success", "attempt": 1},
+        "evaluate_baseline": {"status": "success", "attempt": 1},
+        "evaluate_candidate": {"status": "success", "attempt": 1},
+        "benchmark_baseline": {"status": "skipped_not_required", "attempt": 0},
+        "benchmark_candidate": {"status": "skipped_not_required", "attempt": 0},
+        "compare_routing": {"status": "success", "attempt": 1},
+        "generate_reports": {"status": "success", "attempt": 1},
+        "finalize_manifest": {"status": "success", "attempt": 1}
+      },
+      "bundle": {
+        "bits": 8,
+        "group_size": 32,
+        "mode": "affine",
+        "quantized_leaf_count": 50,
+        "quantized_fused_expert_projection_count": 18,
+        "runtime_tensor_bytes": 45458496,
+        "serialized_bundle_bytes": 49115708
+      },
+      "fixture_metrics": {
+        "baseline_perplexity": 412689.0149946304,
+        "candidate_perplexity": 423641.9372993321,
+        "token_route_agreement": 0.9920634920634921,
+        "top_k_overlap": 0.996031746031746,
+        "routing_js_divergence": 0.00007644462572387552,
+        "aligned_token_layer_count": 126
+      }
+    }
+  },
+  "secondary_resume_evidence": {
+    "primary_acceptance_run": false,
+    "run_id": "mlx-stories15m-moe-q8-20260716T163045125771Z-90350b99-363226",
+    "final_status": "success",
+    "quantize_attempt": 3,
+    "preserved_successful_stage_count_before_resume": 6,
+    "fail_closed_reasons": [
+      "generated model-card YAML key order differed from the frozen byte contract",
+      "offline tokenizer metadata differed from the earlier external converter contract"
+    ],
+    "interpretation": "resume/fail-closed evidence only; the fresh q8 run is canonical"
+  }
+}

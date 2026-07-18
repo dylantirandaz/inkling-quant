@@ -1,0 +1,40 @@
+extends:
+  - ../models/tiny_moe.yaml
+  - ../quantization/native_int4_kleidiai.yaml
+  - ../evaluations/tiny_cpu.yaml
+schema_version: "1.0"
+name: tiny-moe-native-int4
+seed: 17
+routing:
+  mode: aggregate
+  required: true
+  capture_router_logits: false
+  dataset: local://fixtures/routing-prompts
+  dataset_revision: fixture-data-v1
+  dataset_split: routing-evaluation
+benchmark:
+  enabled: true
+  protocol_version: cpu-native-v1
+  warmup_iterations: 2
+  repetitions: 7
+  synchronize: true
+  measure_energy: false
+runtime:
+  backend: torch_eager_cpu
+  device: cpu
+  dtype: float32
+  device_map: single
+output:
+  root: artifacts
+  run_prefix: tiny-moe-native-int4
+security:
+  allow_remote_code: false
+  allow_pickle_weights: false
+  allow_uploads: false
+  log_prompts: false
+  log_model_outputs: false
+reporting:
+  markdown: true
+  html: false
+  plots: true
+  include_interpretation: true

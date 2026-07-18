@@ -1,0 +1,41 @@
+extends:
+  - ../models/mlx_stories15m_moe.yaml
+  - ../quantization/mlx_affine_q8_g32.yaml
+  - ../evaluations/mlx_public_moe_tiny_eval.yaml
+schema_version: "1.0"
+name: mlx-stories15m-moe-q8
+seed: 20260715
+routing:
+  mode: full_trace
+  required: true
+  capture_router_logits: false
+  dataset: local://fixtures/routing-prompts
+  dataset_revision: fixture-data-v1
+  dataset_split: routing-evaluation
+benchmark:
+  enabled: false
+  protocol_version: direct-mlx-pipeline-v1
+  warmup_iterations: 5
+  repetitions: 15
+  synchronize: true
+  measure_energy: false
+runtime:
+  backend: mlx_metal
+  device: mps
+  dtype: float32
+  device_map: single
+  sharding: null
+output:
+  root: artifacts
+  run_prefix: mlx-stories15m-moe-q8
+security:
+  allow_remote_code: false
+  allow_pickle_weights: false
+  allow_uploads: false
+  log_prompts: false
+  log_model_outputs: false
+reporting:
+  markdown: true
+  html: false
+  plots: true
+  include_interpretation: true

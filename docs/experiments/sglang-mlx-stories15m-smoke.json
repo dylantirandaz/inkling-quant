@@ -1,0 +1,165 @@
+{
+  "schema_version": "sglang-mlx-serving-evidence-v1",
+  "observed_at": "2026-07-15T22:22:45-05:00",
+  "backend": {
+    "name": "sglang",
+    "version": "0.5.15.post1",
+    "release_tag": "v0.5.15.post1",
+    "source_revision": "0b3bb0cbe31873994c9f989fddfe2f87ca839fdd",
+    "installation": "editable source install with the srt_mps extra in an isolated environment",
+    "git_dirty": true,
+    "apple_install_transformation": {
+      "operation": "moved the tracked CUDA-oriented python/pyproject.toml to python/pyproject_cuda.toml, then moved tracked python/pyproject_other.toml to python/pyproject.toml before the editable install",
+      "resulting_git_status": [
+        "M python/pyproject.toml",
+        "D python/pyproject_other.toml",
+        "?? python/pyproject_cuda.toml"
+      ],
+      "tracked_cuda_pyproject_sha256": "c7c74954e1726ca858d674558d7a848add79a13c7fd1631e616147bf2a976a0b",
+      "installed_apple_pyproject_sha256": "25118095a8a24377dabee6f1fa00ee801d89be8f213440be012103d38837d8a5"
+    },
+    "runtime": "mlx_on_apple_metal",
+    "server_entrypoint": "python -m sglang.launch_server"
+  },
+  "model": {
+    "model_id": "ggml-org/stories15M_MOE",
+    "requested_revision": "b6dd737497465570b5f5e962dbc9d9454ed1e0eb",
+    "resolved_revision_observed": "b6dd737497465570b5f5e962dbc9d9454ed1e0eb",
+    "descriptor_checksum": "93e36334ff1be21096ca5f59c6b4d8bdfb212c8854b815583110755df75d6ed9",
+    "model_safetensors_sha256": "dbfa0289f68a8dd721d10eb12d8bd82e098455682027f6f9986ba548913f9082",
+    "model_safetensors_bytes": 72744704,
+    "model_type": "mixtral",
+    "architecture": "MixtralForCausalLM",
+    "hidden_size": 288,
+    "layers": 6,
+    "experts_per_layer": 4,
+    "experts_per_token": 2,
+    "router_provenance": "randomly_initialized_by_model_publisher"
+  },
+  "model_revision_resolution": {
+    "sglang_revision_forwarded_to_mlx_weight_loader": false,
+    "mlx_loader_input": "ggml-org/stories15M_MOE",
+    "huggingface_main_ref_observed_after_load": "b6dd737497465570b5f5e962dbc9d9454ed1e0eb",
+    "only_snapshot_directory_observed": "b6dd737497465570b5f5e962dbc9d9454ed1e0eb",
+    "weight_symlink_target": "../../blobs/dbfa0289f68a8dd721d10eb12d8bd82e098455682027f6f9986ba548913f9082",
+    "interpretation": "The unpinned MLX Hub lookup resolved to the requested immutable commit during this observation. The SGLang CLI revision flag alone does not guarantee that result for a future run.",
+    "required_reproducer_change": "Pass the absolute immutable snapshot directory as model-path so the MLX weight loader cannot resolve a moving Hub ref."
+  },
+  "model_code_safety": {
+    "trust_remote_code_flag": false,
+    "flag_scope_in_mlx_path": "forwarded as tokenizer_config only; not a general MLX-LM model-code guard",
+    "config_sha256": "e901e012953d1df93574b2cc3d7db5ed4758d52f8bd4a7dd4b647936e32261be",
+    "config_model_file": null,
+    "config_auto_map": null,
+    "python_files_in_resolved_snapshot": [],
+    "custom_model_code_executed": false,
+    "general_remote_code_guard_established": false,
+    "interpretation": "This specific inspected snapshot used MLX-LM's built-in Mixtral implementation. MLX-LM permits Python files and executes config.model_file when present, irrespective of this SGLang flag."
+  },
+  "server_configuration": {
+    "trust_remote_code_flag": false,
+    "load_format": "safetensors",
+    "device": "mps",
+    "mlx_enabled": true,
+    "tensor_parallel_size": 1,
+    "random_seed_reported_by_server": 712917284,
+    "max_total_tokens": 4096,
+    "max_running_requests_requested": 16,
+    "cuda_graph_decode": "disabled",
+    "cuda_graph_prefill": "disabled",
+    "overlap_schedule": false,
+    "radix_cache": true,
+    "request_logging": false
+  },
+  "launch": {
+    "environment": {
+      "SGLANG_USE_MLX": "1",
+      "HF_HUB_DISABLE_TELEMETRY": "1"
+    },
+    "arguments": [
+      "python",
+      "-m",
+      "sglang.launch_server",
+      "--model-path",
+      "ggml-org/stories15M_MOE",
+      "--revision",
+      "b6dd737497465570b5f5e962dbc9d9454ed1e0eb",
+      "--load-format",
+      "safetensors",
+      "--cuda-graph-backend-decode",
+      "disabled",
+      "--cuda-graph-backend-prefill",
+      "disabled",
+      "--disable-overlap-schedule",
+      "--max-total-tokens",
+      "4096",
+      "--max-running-requests",
+      "16",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "43440",
+      "--tp-size",
+      "1"
+    ],
+    "readiness_model_info_http_status": 200,
+    "model_info_response_body_retained": false
+  },
+  "protocol": {
+    "endpoint": "/generate",
+    "temperature": 0,
+    "request_sampling_seed": null,
+    "max_new_tokens": 16,
+    "server_startup_warmup_completed": true,
+    "measured_requests": 1,
+    "prompt_source": "manual smoke input; plaintext intentionally omitted from checked artifacts",
+    "prompt_fixture_id": null,
+    "prompt_sha256": "e286222c229ec73b1bc520d88583191572ae0cbbaa66ea68053994a5e50ac87a",
+    "checked_record_contains_prompt_or_output_content": false
+  },
+  "result": {
+    "http_status": 200,
+    "client_elapsed_seconds": 0.227669,
+    "server_e2e_seconds": 0.22604370885528624,
+    "prompt_tokens": 5,
+    "completion_tokens": 16,
+    "cached_tokens": 1,
+    "finish_reason": "length",
+    "output_sha256": "1cefb6c3af3a97703effee61bd1e68363faafed9f6f165fb815a36421b1f8c1c"
+  },
+  "environment": {
+    "platform": "macOS 15.3.1 arm64",
+    "hardware": "Apple M3, 10 GPU cores",
+    "python": "3.12.7",
+    "torch": "2.11.0",
+    "transformers": "5.12.1",
+    "mlx": "0.32.0",
+    "mlx_lm": "0.31.3",
+    "sglang": "0.5.15.post1",
+    "pip_freeze_sha256": "dbc2c3ba7e30f1bd611cc4399075c39cf72d797266fd919a7aee558ca53a75c3",
+    "pip_freeze_line_count": 146,
+    "source_environment": "/private/tmp/inkling-sglang-v0.5.15.post1",
+    "virtual_environment": "/private/tmp/inkling-sglang-venv"
+  },
+  "negative_probe": {
+    "model_id": "yujiepan/mixtral-tiny-random",
+    "revision": "c2faa23d97931c5481999c382d79163b02c4793c",
+    "outcome": "server reached startup but the first warmup generation failed",
+    "error_type": "ValueError",
+    "error": "[rope] dims must be even but got 1",
+    "cause": "the synthetic checkpoint has attention head dimension 1, which the MLX RoPE kernel rejects"
+  },
+  "limitations": [
+    "This is one post-startup generation smoke request, not a latency or throughput benchmark.",
+    "The reusable probe supports repeated trials, but this checked record contains one measured request only.",
+    "The prompt hash detects equality but cannot reconstruct the intentionally omitted prompt; this one request is therefore not independently reproducible from the checked record.",
+    "The original manual request did not set sampling_seed. It was greedy, and the server-reported process seed is retained, but a repeatable probe should set sampling_seed explicitly.",
+    "SGLang did not forward --revision into mlx_lm.load; the Hub main ref happened to resolve to the requested commit and was verified after the run, but future runs must use the absolute snapshot path.",
+    "trust_remote_code=false was tokenizer-scoped in this MLX path. Safety for this run comes from inspecting the resolved config and absence of snapshot Python files, not from treating the flag as a general guard.",
+    "The editable source tree includes the documented Apple pyproject substitution and was dirty relative to the release tag; both transformed file hashes are recorded.",
+    "The SGLang server is an external serving path and is not registered as an Inkling Quant Lab runtime adapter.",
+    "Forward loss, internal routing capture, quantized serving, and export/reload were not validated through SGLang.",
+    "The publisher states that the checkpoint router is random, so this run is not evidence of learned expert specialization.",
+    "The isolated install used the LLM-only srt_mps extra rather than the larger all_mps extra that also includes diffusion dependencies."
+  ]
+}

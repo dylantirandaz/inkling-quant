@@ -1,0 +1,12 @@
+evaluation:
+  allow_partial: false
+  suites:
+    - type: perplexity
+      dataset: local://fixtures/tiny-corpus
+      revision: fixture-data-v1
+      split: evaluation
+      prompt_template: "{text}"
+      decode:
+        max_new_tokens: 4
+        do_sample: false
+        temperature: 1.0

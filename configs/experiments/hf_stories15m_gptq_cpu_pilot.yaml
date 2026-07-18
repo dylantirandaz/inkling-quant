@@ -1,0 +1,47 @@
+extends:
+  - ../models/hf_stories15m_moe.yaml
+  - ../quantization/gptq_gptqmodel_cpu_stories15m.yaml
+schema_version: "1.0"
+name: hf-stories15m-gptq-cpu-pilot
+seed: 20260716
+model:
+  adapter: hf_causal_lm_linear_mixtral
+  local_files_only: true
+evaluation:
+  allow_partial: false
+  suites:
+    - type: perplexity
+      dataset: local://fixtures/tiny-corpus
+      revision: fixture-data-v1
+      split: evaluation
+      prompt_template: "{text}"
+      sample_ids:
+        - eval-loss-001
+        - eval-loss-002
+        - eval-loss-003
+        - eval-loss-004
+routing:
+  mode: "off"
+  required: false
+  capture_router_logits: false
+benchmark:
+  enabled: false
+runtime:
+  backend: torch_eager_cpu
+  device: cpu
+  dtype: float32
+  device_map: single
+output:
+  root: artifacts
+  run_prefix: hf-stories15m-gptq-cpu-pilot
+security:
+  allow_remote_code: false
+  allow_pickle_weights: false
+  allow_uploads: false
+  log_prompts: false
+  log_model_outputs: false
+reporting:
+  markdown: true
+  html: false
+  plots: false
+  include_interpretation: false

@@ -1,0 +1,31 @@
+quantization:
+  backend: mlx_affine
+  method: mlx_affine
+  calibration: null
+  policy:
+    type: uniform
+    default_precision: float32
+    module_class_rules:
+      - name: quantize-mlx-linear-q4
+        pattern: mlx.nn.layers.linear.Linear
+        precision: int4
+      - name: quantize-mlx-embedding-q4
+        pattern: mlx.nn.layers.embedding.Embedding
+        precision: int4
+      - name: quantize-mlx-fused-experts-q4
+        pattern: mlx_lm.models.switch_layers.SwitchLinear
+        precision: int4
+    preserve_router_precision: false
+    preserve_output_head: false
+    preserve_embeddings: false
+    preserve_multimodal_projectors: true
+    multimodal_projector_precision: float32
+  export:
+    enabled: true
+    format: safetensors
+    destination: candidate
+  parameters:
+    bits: 4
+    group_size: 32
+    mode: affine
+

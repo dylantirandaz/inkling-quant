@@ -1,0 +1,15 @@
+model:
+  model_id: ggml-org/stories15M_MOE
+  revision: b6dd737497465570b5f5e962dbc9d9454ed1e0eb
+  adapter: hf_causal_lm
+  tokenizer_id: null
+  dtype: float32
+  trust_remote_code: false
+  local_files_only: false
+  checkpoint_format: safetensors
+
+routing:
+  mode: full_trace
+  required: true
+  capture_router_logits: true
+

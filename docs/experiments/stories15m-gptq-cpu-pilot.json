@@ -1,0 +1,645 @@
+{
+  "schema_version": "curated-gptqmodel-cpu-public-moe-pilot-v1",
+  "record_kind": "curated_public_moe_gptqmodel_cpu_pilot",
+  "status": "success",
+  "curated_at_utc": "2026-07-17T08:40:00Z",
+  "canonical_run": {
+    "run_id": "hf-stories15m-gptq-cpu-pilot-20260717T083523430551Z-cd45e8d4-032a76",
+    "artifact_root": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T083523430551Z-cd45e8d4-032a76",
+    "run_kind": "fresh_uninterrupted_adapter_isolated_source_bound",
+    "started_at_utc": "2026-07-17T08:35:23.529824Z",
+    "completed_at_utc": "2026-07-17T08:35:43.605689Z",
+    "final_status": "success",
+    "config_hash": "cd45e8d47f4b8ab13a3bafba965989c644d887e6484695f26df4d2724fd6e9b5",
+    "model_adapter": "hf_causal_lm_linear_mixtral",
+    "adapter_isolation_explicit": true,
+    "deterministic_project_source_manifest_recorded": true,
+    "required_stage_count": 11,
+    "successful_required_stage_count": 11,
+    "required_stage_attempts_are_all_one": true,
+    "failed_stage_count": 0,
+    "skipped_not_required_stages": [
+      "benchmark_baseline",
+      "benchmark_candidate",
+      "compare_routing"
+    ],
+    "completion_claim": "all required stages succeeded before final run transition"
+  },
+  "artifact_bindings": {
+    "resolved_config": {
+      "path": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T083523430551Z-cd45e8d4-032a76/resolved_config.yaml",
+      "sha256": "76cc1609ee1a67bec996c301d8080f0d242aa1ee6be17f3c1a98095a9754c532",
+      "size_bytes": 3768
+    },
+    "environment": {
+      "path": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T083523430551Z-cd45e8d4-032a76/environment.json",
+      "sha256": "dd1cdc86d09db76f9972a2faeb4dde54b33497b01908b34c48f5e0e3e9aa2425",
+      "size_bytes": 21669
+    },
+    "manifest": {
+      "path": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T083523430551Z-cd45e8d4-032a76/manifest.json",
+      "sha256": "4c988d8beee377f8e46e991753e09c23cea43d9124c424081cb1a86e24c23cd3",
+      "size_bytes": 35021
+    },
+    "status": {
+      "path": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T083523430551Z-cd45e8d4-032a76/status.json",
+      "sha256": "73ca91be554497f5ff028bad9877e9ccb65a3923ac0cc913050ed429e6c31fd3",
+      "size_bytes": 789
+    },
+    "completion": {
+      "path": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T083523430551Z-cd45e8d4-032a76/completion.json",
+      "sha256": "2e355ff67046620c4162eb40c9b16c2ad9e665568224953775ae61ca3c6639dd",
+      "size_bytes": 588
+    },
+    "events": {
+      "path": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T083523430551Z-cd45e8d4-032a76/events.jsonl",
+      "sha256": "71434cf6aa6a793b3fb622b2914ab688961dad856ea1ecda1429abf8d2cf7d9e",
+      "size_bytes": 12914
+    },
+    "baseline_descriptor": {
+      "path": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T083523430551Z-cd45e8d4-032a76/checkpoints/baseline/descriptor.json",
+      "sha256": "7c1b5752010e60064c07b8b44fc0bea5a260a8a29a9d07145858df7a6c69be1e",
+      "size_bytes": 686
+    },
+    "resolved_policy": {
+      "path": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T083523430551Z-cd45e8d4-032a76/checkpoints/policy/resolved_policy.json",
+      "sha256": "40210e3ac029708186cb632accfde6d87d7ca0620f174f22de3ea006a81a3cc0",
+      "size_bytes": 67566
+    },
+    "quantization_manifest": {
+      "path": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T083523430551Z-cd45e8d4-032a76/checkpoints/candidate/quantization_manifest.json",
+      "sha256": "37ac16cf65da670dd9ba65afd0f9d26d3b4fc9562278cb6578bc5171c82d5f0b",
+      "size_bytes": 13142
+    },
+    "reload_recipe": {
+      "path": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T083523430551Z-cd45e8d4-032a76/checkpoints/candidate/candidate/inkling_quant_reload.json",
+      "sha256": "fa8f6d9da52ccd1d8b18b214e214065d674a4f6fc4c4d41ed04cc2aa0387025c",
+      "size_bytes": 2810
+    },
+    "exported_config": {
+      "path": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T083523430551Z-cd45e8d4-032a76/checkpoints/candidate/candidate/config.json",
+      "sha256": "4da4c2b5f5b96586c8be675d32548d8b14e6e9147c0ffa27f9ebcc1f46eba3ca",
+      "size_bytes": 7899
+    },
+    "exported_weights": {
+      "path": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T083523430551Z-cd45e8d4-032a76/checkpoints/candidate/candidate/model.safetensors",
+      "sha256": "c8d7d76d8a06e1777fdb1344d00b88d734ad4a9c7ad40e592775da6e84c4be36",
+      "size_bytes": 138671232
+    },
+    "baseline_evaluation": {
+      "path": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T083523430551Z-cd45e8d4-032a76/metrics/evaluation_baseline/results.json",
+      "sha256": "def16e1f2dbe09ea5501ac8fd0dc6b9f02fcf39629bb4c72ca6dfd1fb85d2167",
+      "size_bytes": 903
+    },
+    "candidate_evaluation": {
+      "path": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T083523430551Z-cd45e8d4-032a76/metrics/evaluation_candidate/results.json",
+      "sha256": "cb554cd69bfe34caa47eb763d90910d8ae2d6db0db1b7e4e100fb2ab07155bf3",
+      "size_bytes": 904
+    },
+    "comparison": {
+      "path": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T083523430551Z-cd45e8d4-032a76/reports/comparison.json",
+      "sha256": "1c80a19f9a979582fface576d580d1fd972d179cca7de1794aa1fa4961e17028",
+      "size_bytes": 20513
+    }
+  },
+  "model": {
+    "model_id": "ggml-org/stories15M_MOE",
+    "revision": "b6dd737497465570b5f5e962dbc9d9454ed1e0eb",
+    "architecture": "MixtralForCausalLM",
+    "resolved_class": "transformers.models.mixtral.modeling_mixtral.MixtralForCausalLM",
+    "loaded_baseline_float32_state_sha256": "368fc0265ea7f6b86ef2103ab33e5d929c592521b029f024100d7910b576ed51",
+    "source_checkpoint": {
+      "repository_filename": "model.safetensors",
+      "sha256": "dbfa0289f68a8dd721d10eb12d8bd82e098455682027f6f9986ba548913f9082",
+      "size_bytes": 72744704,
+      "tensor_count": 117,
+      "dtype_counts": {
+        "F16": 111,
+        "F32": 6
+      }
+    },
+    "moe": {
+      "layer_count": 6,
+      "experts_per_layer": 4,
+      "top_k": 2,
+      "expert_projection_module_count": 72
+    },
+    "local_files_only": true,
+    "trust_remote_code": false,
+    "pickle_weights_allowed": false,
+    "checkpoint_format": "safetensors"
+  },
+  "configuration": {
+    "seed": 20260716,
+    "model_adapter": "hf_causal_lm_linear_mixtral",
+    "adapter_scope": "explicit linear-Mixtral compatibility adapter",
+    "runtime_backend": "torch_eager_cpu",
+    "device": "cpu",
+    "dtype": "float32",
+    "device_map": "single",
+    "config_hash": "cd45e8d47f4b8ab13a3bafba965989c644d887e6484695f26df4d2724fd6e9b5",
+    "checked_in_files": {
+      "experiment": {
+        "path": "configs/experiments/hf_stories15m_gptq_cpu_pilot.yaml",
+        "sha256": "5e64203c81120406b672cdf4068e4624785f147cdf13a4fa30a264c8d874de43",
+        "size_bytes": 1042
+      },
+      "model": {
+        "path": "configs/models/hf_stories15m_moe.yaml",
+        "sha256": "5fab19408d23990e6ddf62f93a4472e000e27faccb91998049857aae6c3b8cff",
+        "size_bytes": 321
+      },
+      "quantization": {
+        "path": "configs/quantization/gptq_gptqmodel_cpu_stories15m.yaml",
+        "sha256": "556a0be6b0b49a60260b4043121d9fee7a32ab9aee750dab8185c9bcabb43ad5",
+        "size_bytes": 2096
+      }
+    },
+    "resolved_config_sha256": "76cc1609ee1a67bec996c301d8080f0d242aa1ee6be17f3c1a98095a9754c532",
+    "remote_code_allowed": false,
+    "prompt_logging_allowed": false,
+    "model_output_logging_allowed": false
+  },
+  "software_and_hardware": {
+    "software_matrix_sha256": "7a4a08cf0b56bc176cdfef4ff3bae2b9342043105582e1014e1d7b58dfa9b75a",
+    "exact_gptq_cpu_packages": {
+      "accelerate": "1.14.0",
+      "defuser": "0.0.23",
+      "gptqmodel": "5.8.0",
+      "huggingface-hub": "1.23.0",
+      "kernels": "0.14.1",
+      "safetensors": "0.8.0",
+      "torch": "2.13.0",
+      "transformers": "5.12.1"
+    },
+    "python": "3.12.13",
+    "python_implementation": "CPython",
+    "platform": "Darwin 24.3.0 arm64",
+    "logical_cpu_count": 8,
+    "execution_device": "cpu",
+    "available_devices": [
+      "cpu",
+      "mps"
+    ],
+    "cuda_available": false,
+    "cuda_device_count": 0,
+    "mps_built": true,
+    "mps_available_to_run": true
+  },
+  "project_source_provenance": {
+    "kind": "filesystem_sha256_manifest_v1",
+    "tree_sha256": "b5099bafdf044eef327d5ad6b41db732a9fba7c0b600f45d6abf344eaec714f0",
+    "file_count": 94,
+    "scope": [
+      "pyproject.toml",
+      "src/inkling_quant_lab regular files excluding __pycache__ and .DS_Store",
+      "uv.lock"
+    ],
+    "file_manifest_order": "ascending repository-relative POSIX path",
+    "file_digest": "raw file bytes SHA-256",
+    "tree_digest": "SHA-256 over a domain-separated canonical JSON file manifest",
+    "symlinks_permitted": false,
+    "importable_sourceless_bytecode_permitted": false,
+    "first_file": {
+      "path": "pyproject.toml",
+      "sha256": "eaebb09534ff40fd6401af4a6769f5d6a8a95f8e811a66218ec62b40777370d6",
+      "size_bytes": 3272
+    },
+    "last_file": {
+      "path": "uv.lock",
+      "sha256": "4e2d482b5be0fb7e7479eb5f668cc431798630cfbaf34bd21f2fa49dbfc382d8",
+      "size_bytes": 661141
+    },
+    "recorded_environment_manifest_equals_current_project_source_manifest": true,
+    "full_file_manifest_persisted_in_environment": true,
+    "git_provenance_available": false
+  },
+  "calibration": {
+    "dataset_id": "local://fixtures/gptq-calibration",
+    "revision": "gptq-calibration-v1",
+    "split": "calibration",
+    "fixture_path": "src/inkling_quant_lab/fixture_data/gptq-calibration.jsonl",
+    "fixture_sha256": "0fa4421c8991e6cac2da5292ec21502383861da79e73c12d5108420130ce0c66",
+    "fixture_size_bytes": 470,
+    "resolved_calibration_checksum": "74353c584e71b7f3fdaef73dd32315fe9c7107439134086bc128c68aaed38fc9",
+    "sample_count": 4,
+    "token_count": 74,
+    "minimum_active_tokens_per_sample": 10,
+    "sample_ids": [
+      "gptq-calibration-001",
+      "gptq-calibration-002",
+      "gptq-calibration-003",
+      "gptq-calibration-004"
+    ],
+    "disjoint_from_evaluation_by_dataset_and_sample_id": true
+  },
+  "policy_and_realization": {
+    "policy_type": "uniform",
+    "default_precision": "float32",
+    "resolved_assignment_count": 118,
+    "int4_assignment_count": 24,
+    "float32_assignment_count": 94,
+    "selected_scope": "all q/k/v/o self-attention projections in six layers",
+    "selected_module_count": 24,
+    "selected_module_names_sha256": "1fc95a1405d0cbbad4abad8c8ed64e61080c939061df15e9ad85e4545a75b176",
+    "runtime_exclusion_count": 94,
+    "expert_projection_modules_quantized": 0,
+    "expert_projection_modules_retained_float32": 72,
+    "router_modules_retained_float32": 6,
+    "estimated_size_bytes": 138467136,
+    "estimated_budget_error": 0.0,
+    "quantization": {
+      "backend": "gptq",
+      "backend_version": "5.8.0",
+      "execution_backend": "torch",
+      "bits": 4,
+      "group_size": 32,
+      "symmetric": true,
+      "desc_act": false,
+      "act_group_aware": true,
+      "damp_percent": 0.1,
+      "batch_size": 1,
+      "python_packing": true
+    }
+  },
+  "state_integrity": {
+    "candidate_state_sha256": "89bd85450717005aad377ec08ba313ad004da4ebd44d0ecd3c6bae9fd0c2cca7",
+    "excluded_state_sha256": "1340b3deb923033cbefc9cae30203893b6e0193106c921cef58a552334858231",
+    "excluded_state_tensor_count": 95,
+    "excluded_state_verified_equal_to_source": true,
+    "quantized_module_count": 24,
+    "cpu_bias_none_repair_count": 24,
+    "cpu_eager_post_init_module_count": 24,
+    "cpu_post_init_compile_bypass_count": 24,
+    "runtime_qzero_conversion_count": 24,
+    "runtime_qzero_format": "gptq_v2",
+    "export_config_sha256": "4da4c2b5f5b96586c8be675d32548d8b14e6e9147c0ffa27f9ebcc1f46eba3ca",
+    "export_config_size_bytes": 7899,
+    "defuser_global_patch_restored": true,
+    "gptqmodel_import_environment_restored": true
+  },
+  "export_and_reload": {
+    "export_format": "safetensors",
+    "exported_bundle_file_count": 9,
+    "exported_bundle_size_bytes": 142322660,
+    "config_file": "config.json",
+    "config_file_sha256": "4da4c2b5f5b96586c8be675d32548d8b14e6e9147c0ffa27f9ebcc1f46eba3ca",
+    "config_file_size_bytes": 7899,
+    "config_binding_matches_quantization_manifest_reload_recipe_and_actual_file": true,
+    "weight_file": "model.safetensors",
+    "weight_file_sha256": "c8d7d76d8a06e1777fdb1344d00b88d734ad4a9c7ad40e592775da6e84c4be36",
+    "weight_file_size_bytes": 138671232,
+    "weight_tensor_count": 189,
+    "weight_tensor_dtype_counts": {
+      "F16": 24,
+      "F32": 93,
+      "I32": 72
+    },
+    "reload_adapter": "inkling_quant_lab_gptqmodel_cpu",
+    "reload_loader": "inkling_quant_lab.quantization.optional.reload_gptqmodel_cpu_export",
+    "checkpoint_qzero_format": "gptq_v1",
+    "runtime_qzero_format": "gptq_v2",
+    "strict_state_assignment": true,
+    "strict_behavior_affecting_config_binding": true,
+    "policy_preserving_reload_supported": true,
+    "validation_required_on_reload": true,
+    "local_files_only": true,
+    "trust_remote_code": false,
+    "successful_strict_export_reload_count_in_canonical_run": 1,
+    "reloaded_state_sha256_matches_quantized_candidate": true,
+    "reloaded_excluded_state_sha256_matches_source": true,
+    "candidate_evaluation_used_persisted_export_reload": true
+  },
+  "pilot_quality": {
+    "inference_role": "small_fixture_smoke_only",
+    "dataset_id": "local://fixtures/tiny-corpus",
+    "dataset_revision": "fixture-data-v1",
+    "dataset_sha256": "28e753647cba749a2993511d7e0a43a99428b453df532377ebd0e1330c55b210",
+    "fixture_path": "src/inkling_quant_lab/fixture_data/tiny-corpus.jsonl",
+    "fixture_size_bytes": 211,
+    "split": "evaluation",
+    "seed": 20260716,
+    "sample_count": 4,
+    "evaluated_token_count": 17,
+    "successful_sample_count": 4,
+    "prompt_template_hash": "ada0db1bcc3bb7d19b34d0911e00ffde1acb4bb632f2f2d6b8b8ced3470ec673",
+    "decode": {
+      "do_sample": false,
+      "max_new_tokens": 4,
+      "temperature": 1.0,
+      "top_k": null
+    },
+    "baseline": {
+      "mean_nll": 12.93042138043572,
+      "perplexity": 412677.3700901102,
+      "quality_exp_negative_nll": 0.0000024232004768801485
+    },
+    "candidate": {
+      "mean_nll": 13.080715347738828,
+      "perplexity": 479603.6668453753,
+      "quality_exp_negative_nll": 0.0000020850549508463236
+    },
+    "candidate_minus_baseline": {
+      "mean_nll": 0.1502939673031083,
+      "mean_nll_relative_delta": 0.011623284569094514,
+      "perplexity": 66926.2967552651,
+      "perplexity_relative_delta": 0.1621758342131806,
+      "quality_exp_negative_nll": -0.00000033814552603382495,
+      "quality_relative_delta": -0.13954500639137568
+    },
+    "observed_direction": "candidate_worse",
+    "representative_quality_dataset": false,
+    "noninferiority_test_performed": false,
+    "quality_preservation_claim_supported": false
+  },
+  "serialized_size_result": {
+    "comparison_scope": "pinned_publisher_safetensors_file_vs_exported_candidate_safetensors_file",
+    "source_weight_file_size_bytes": 72744704,
+    "candidate_weight_file_size_bytes": 138671232,
+    "candidate_minus_source_weight_file_bytes": 65926528,
+    "candidate_relative_size_delta": 0.9062725445965111,
+    "candidate_to_source_size_ratio": 1.9062725445965112,
+    "candidate_bundle_size_bytes": 142322660,
+    "candidate_bundle_minus_source_weight_file_bytes": 69577956,
+    "candidate_bundle_relative_size_delta": 0.9564676488339274,
+    "candidate_bundle_to_source_size_ratio": 1.9564676488339274,
+    "serialized_size_reduction_observed": false,
+    "observed_direction": "candidate_larger",
+    "interpretation_boundary": "The source checkpoint and export use different tensor dtypes and structures; these are serialized-file facts, not a runtime-memory measurement."
+  },
+  "superseded_source_bound_validation_history": [
+    {
+      "canonical_claim_source": false,
+      "status": "clean_validation_superseded_by_config_and_source_hardening",
+      "reason_noncanonical": "the run predates strict exported config binding and the final source-root symlink and sourceless-bytecode checks",
+      "run_id": "hf-stories15m-gptq-cpu-pilot-20260717T081224283945Z-cd45e8d4-ef8dda",
+      "artifact_root": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T081224283945Z-cd45e8d4-ef8dda",
+      "config_hash": "cd45e8d47f4b8ab13a3bafba965989c644d887e6484695f26df4d2724fd6e9b5",
+      "source_tree_sha256": "304def974cb56a9567893a324c871bad4afa219ce55016758a84df669de6dad7",
+      "source_file_count": 93,
+      "strict_exported_config_binding": false,
+      "required_stage_attempts_are_all_one": true,
+      "scientific_outputs_match_canonical": true,
+      "artifact_sha256": {
+        "environment": "de0f61e5578dea50744e7997f4230ab17b7a56a9369beeaad1d6917917c55877",
+        "manifest": "c3817c3be90e2e4e7300326f275b252e6d3f79fee0ac0e11759d375d7bff5760",
+        "status": "95594d82c770ab426062e6475569242c63908f8a7eda3337931c8331e95b9588",
+        "quantization_manifest": "0ba08dec8b3f156081e92fdde79dbfc087614fc516fa16ebeba17b77f9c5481e",
+        "reload_recipe": "b64cea21231276e370de94c5262bf713ec04d23d7b1a237d72a2a06f09259ead"
+      }
+    },
+    {
+      "canonical_claim_source": false,
+      "status": "clean_validation_superseded_by_config_and_source_hardening",
+      "reason_noncanonical": "the run predates the final formatting, strict exported config binding, and source-provenance hardening",
+      "run_id": "hf-stories15m-gptq-cpu-pilot-20260717T080806076188Z-cd45e8d4-3fc140",
+      "artifact_root": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T080806076188Z-cd45e8d4-3fc140",
+      "config_hash": "cd45e8d47f4b8ab13a3bafba965989c644d887e6484695f26df4d2724fd6e9b5",
+      "source_tree_sha256": "2f0b91408e5e837ed3d63c19da7b11a1bbdec7d587fbbe4ff8c204a95a6103a8",
+      "source_file_count": 93,
+      "strict_exported_config_binding": false,
+      "required_stage_attempts_are_all_one": true,
+      "scientific_outputs_match_canonical": true,
+      "artifact_sha256": {
+        "environment": "64f2a43fac5898ff7d940cb55c1b6195d6b12888189ef57bc94d5ca2f68375af",
+        "manifest": "e6e89f65f2fec35b9cc3ae0b8987ee9b2f0d6baf1c35499ada68bd512cd55ba7",
+        "status": "df39e694dc46581da3703e8be63f4ca817d0335b0b0f722e2f29cf9afce78ee9",
+        "quantization_manifest": "0ba08dec8b3f156081e92fdde79dbfc087614fc516fa16ebeba17b77f9c5481e",
+        "reload_recipe": "b64cea21231276e370de94c5262bf713ec04d23d7b1a237d72a2a06f09259ead"
+      }
+    }
+  ],
+  "earlier_adapter_isolated_validation_history": {
+    "canonical_claim_source": false,
+    "status": "clean_adapter_isolated_validation_superseded_by_source_binding",
+    "reason_noncanonical": "the run predates the deterministic filesystem project-source manifest now required by the canonical evidence",
+    "run_id": "hf-stories15m-gptq-cpu-pilot-20260717T075858584773Z-cd45e8d4-89c2db",
+    "artifact_root": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T075858584773Z-cd45e8d4-89c2db",
+    "model_adapter": "hf_causal_lm_linear_mixtral",
+    "adapter_isolation_explicit": true,
+    "deterministic_project_source_manifest_recorded": false,
+    "config_hash": "cd45e8d47f4b8ab13a3bafba965989c644d887e6484695f26df4d2724fd6e9b5",
+    "started_at_utc": "2026-07-17T07:58:58.670345Z",
+    "completed_at_utc": "2026-07-17T07:59:13.270854Z",
+    "required_stage_count": 11,
+    "successful_required_stage_count": 11,
+    "required_stage_attempts_are_all_one": true,
+    "failed_stage_count": 0,
+    "scientific_outputs_match_canonical": {
+      "quantization_manifest": true,
+      "exported_weights": true,
+      "baseline_evaluation": true,
+      "candidate_evaluation": true
+    },
+    "artifact_bindings": {
+      "resolved_config": {
+        "sha256": "76cc1609ee1a67bec996c301d8080f0d242aa1ee6be17f3c1a98095a9754c532",
+        "size_bytes": 3768
+      },
+      "environment": {
+        "sha256": "2b2216d4f22454cfbd2be3fad80ff6a8a184b93e3813baf97b9fea8bfee7783c",
+        "size_bytes": 3248
+      },
+      "manifest": {
+        "sha256": "d8d5bf669fdcfb7d538beeb5c7849f1808a9dce2f747a0384e24baf1d3ddf1f0",
+        "size_bytes": 15632
+      },
+      "status": {
+        "sha256": "8226adde4c15b1938181a42d0db2543c9de1919692216232a77ad3b3fc22353a",
+        "size_bytes": 789
+      },
+      "completion": {
+        "sha256": "d6f54fc5aa5b7f029432985a68e4c73cd701a0c7496ffa7b597c8e09cb451f14",
+        "size_bytes": 588
+      },
+      "events": {
+        "sha256": "1b99e32e0f82f2eeda344ce9f3b5a2062ea9ce1be0150e95354b6196241ec4f5",
+        "size_bytes": 12914
+      },
+      "quantization_manifest": {
+        "sha256": "0ba08dec8b3f156081e92fdde79dbfc087614fc516fa16ebeba17b77f9c5481e",
+        "size_bytes": 13008
+      },
+      "exported_weights": {
+        "sha256": "c8d7d76d8a06e1777fdb1344d00b88d734ad4a9c7ad40e592775da6e84c4be36",
+        "size_bytes": 138671232
+      },
+      "baseline_evaluation": {
+        "sha256": "def16e1f2dbe09ea5501ac8fd0dc6b9f02fcf39629bb4c72ca6dfd1fb85d2167",
+        "size_bytes": 903
+      },
+      "candidate_evaluation": {
+        "sha256": "cb554cd69bfe34caa47eb763d90910d8ae2d6db0db1b7e4e100fb2ab07155bf3",
+        "size_bytes": 904
+      }
+    }
+  },
+  "earlier_clean_pre_adapter_isolation_history": {
+    "canonical_claim_source": false,
+    "status": "clean_validation_superseded_by_adapter_isolation",
+    "reason_noncanonical": "the run predates the explicit hf_causal_lm_linear_mixtral adapter selection now required by the canonical configuration",
+    "run_id": "hf-stories15m-gptq-cpu-pilot-20260717T075034920658Z-058c709a-5b8c99",
+    "artifact_root": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T075034920658Z-058c709a-5b8c99",
+    "model_adapter": "hf_causal_lm",
+    "config_hash": "058c709a19e6e0d97c998138324938aaf60021f68cb1afda1f871574a864b6eb",
+    "started_at_utc": "2026-07-17T07:50:34.987411Z",
+    "completed_at_utc": "2026-07-17T07:50:52.685273Z",
+    "required_stage_count": 11,
+    "successful_required_stage_count": 11,
+    "required_stage_attempts_are_all_one": true,
+    "failed_stage_count": 0,
+    "scientific_outputs_match_canonical": {
+      "quantization_manifest": true,
+      "exported_weights": true,
+      "baseline_evaluation": true,
+      "candidate_evaluation": true
+    },
+    "artifact_bindings": {
+      "resolved_config": {
+        "sha256": "89bb4efb54fe69e653433655d9464b8bb61939efe3b5e56be8367ed0855f61a2",
+        "size_bytes": 3753
+      },
+      "manifest": {
+        "sha256": "50fd3c7430353106223a8527d8d9f215ba2eba0050d00196e66b0f756a6304cb",
+        "size_bytes": 15632
+      },
+      "status": {
+        "sha256": "f3156175d0c22701234b844ebc7b936ab4b7326ebf9169e01b58aa4dec98a15a",
+        "size_bytes": 789
+      },
+      "completion": {
+        "sha256": "90a79f5f51f133c695c6d4f381227a146ce3468076140070ae8b60870dde97d0",
+        "size_bytes": 588
+      },
+      "events": {
+        "sha256": "b7698fb0b2e361509da764e3d174748dd7b8281efd37f5df8af3e739b6de6c8c",
+        "size_bytes": 12914
+      },
+      "quantization_manifest": {
+        "sha256": "0ba08dec8b3f156081e92fdde79dbfc087614fc516fa16ebeba17b77f9c5481e",
+        "size_bytes": 13008
+      },
+      "exported_weights": {
+        "sha256": "c8d7d76d8a06e1777fdb1344d00b88d734ad4a9c7ad40e592775da6e84c4be36",
+        "size_bytes": 138671232
+      },
+      "baseline_evaluation": {
+        "sha256": "def16e1f2dbe09ea5501ac8fd0dc6b9f02fcf39629bb4c72ca6dfd1fb85d2167",
+        "size_bytes": 903
+      },
+      "candidate_evaluation": {
+        "sha256": "cb554cd69bfe34caa47eb763d90910d8ae2d6db0db1b7e4e100fb2ab07155bf3",
+        "size_bytes": 904
+      }
+    }
+  },
+  "secondary_failed_reload_and_resume_history": {
+    "canonical_claim_source": false,
+    "status": "diagnostic_only",
+    "reason_noncanonical": "implementation was edited between the failed reload and resumed attempt",
+    "run_id": "hf-stories15m-gptq-cpu-pilot-20260717T073445204598Z-058c709a-f89df0",
+    "artifact_root": "artifacts/hf-stories15m-gptq-cpu-pilot-20260717T073445204598Z-058c709a-f89df0",
+    "config_hash": "058c709a19e6e0d97c998138324938aaf60021f68cb1afda1f871574a864b6eb",
+    "started_at_utc": "2026-07-17T07:34:45.252209Z",
+    "completed_at_utc": "2026-07-17T07:36:28.249469Z",
+    "quantize_stage_attempt": 1,
+    "candidate_evaluation_attempts": 2,
+    "first_reload": {
+      "started_at_utc": "2026-07-17T07:35:00.003780+00:00",
+      "failed_at_utc": "2026-07-17T07:35:01.138159+00:00",
+      "code": "QUANTIZATION_ERROR",
+      "component": "gptq",
+      "message": "CPU GPTQ reload did not restore global compatibility bindings",
+      "failure_artifact_sha256": "7e9f855c0a87b5f2bb5f77ad1547ec1f1c8d2c580f5a9858c8be9e9bdd7cb9ec",
+      "failure_artifact_size_bytes": 350
+    },
+    "resumed_reload": {
+      "started_at_utc": "2026-07-17T07:36:21.225860+00:00",
+      "succeeded_at_utc": "2026-07-17T07:36:27.709047+00:00",
+      "candidate_evaluation_sha256": "cb554cd69bfe34caa47eb763d90910d8ae2d6db0db1b7e4e100fb2ab07155bf3"
+    },
+    "artifact_bindings": {
+      "manifest_sha256": "607231c42e436d71295d4e59ff98ab2e3806414391a2a790526434b7aff9dadc",
+      "status_sha256": "44424f5428c2d508c99641c5beb572648181d2bbd6a8f510625ea6291ead4510",
+      "events_sha256": "f0342ef8e8623462b4446a9c11000e77bb359903b3f36b1962f01a98eedf47a6"
+    }
+  },
+  "unavailable_measurements_and_claims": {
+    "routing": {
+      "status": "not_measured",
+      "reason": "routing mode was off and compare_routing was skipped_not_required",
+      "routing_drift_claim": false,
+      "learned_router_preservation_claim": false
+    },
+    "benchmark": {
+      "status": "not_measured",
+      "reason": "benchmarking was disabled and both benchmark stages were skipped_not_required",
+      "latency_claim": false,
+      "throughput_claim": false,
+      "peak_host_memory_claim": false,
+      "peak_device_memory_claim": false
+    },
+    "energy": {
+      "status": "unavailable",
+      "reason": "Apple powermetrics requires superuser privileges and its per-process energy impact is not accepted as joules",
+      "energy_joules_claim": false
+    },
+    "cuda": {
+      "status": "unavailable_on_run_host",
+      "cuda_available": false,
+      "cuda_device_count": 0,
+      "cuda_execution_claim": false
+    },
+    "fp8": {
+      "status": "not_measured",
+      "reason": "this was a CPU GPTQ INT4 run",
+      "fp8_execution_claim": false,
+      "fp8_availability_claim": false
+    },
+    "awq": {
+      "status": "not_measured",
+      "reason": "this run selected GPTQ and did not apply the AWQ packing shim",
+      "awq_pack_shim_applied": false,
+      "awq_execution_claim": false,
+      "awq_availability_claim": false
+    }
+  },
+  "claims": {
+    "real_public_moe_checkpoint_loaded_exactly": true,
+    "real_gptqmodel_5_8_cpu_conversion_executed": true,
+    "fresh_uninterrupted_governed_run_completed": true,
+    "explicit_linear_mixtral_adapter_isolation": true,
+    "deterministic_project_source_manifest_recorded": true,
+    "current_project_source_matches_recorded_manifest": true,
+    "strict_persisted_export_reload_executed": true,
+    "strict_behavior_affecting_export_config_bound": true,
+    "reloaded_candidate_evaluated": true,
+    "exact_attention_int4_policy_realized": true,
+    "protected_float32_state_preserved": true,
+    "serialized_size_reduction_observed": false,
+    "representative_quality_preservation": false,
+    "expert_weights_quantized": false,
+    "routing_drift_measured": false,
+    "benchmark_executed": false,
+    "latency_or_throughput_claim": false,
+    "peak_memory_claim": false,
+    "energy_joules_claim": false,
+    "cuda_execution_claim": false,
+    "fp8_execution_claim": false,
+    "awq_execution_claim": false,
+    "universal_gptq_support_claim": false,
+    "clean_checkout_provenance": false
+  },
+  "artifact_audit": {
+    "compact_record_contains_local_absolute_paths": false,
+    "compact_record_contains_prompt_or_model_output_content": false,
+    "raw_prompts_persisted": false,
+    "raw_model_outputs_persisted": false,
+    "canonical_raw_artifacts_contain_local_absolute_paths": true,
+    "canonical_raw_artifact_reason": "environment executable and run-directory log fields retain the local workspace path",
+    "candidate_bundle_contains_derived_model_weights": true,
+    "deterministic_filesystem_project_source_manifest_recorded": true,
+    "current_project_source_manifest_equals_recorded": true,
+    "git_commit_recorded": false
+  }
+}

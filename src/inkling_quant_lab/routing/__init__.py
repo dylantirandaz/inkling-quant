@@ -1,0 +1,63 @@
+"""Architecture-independent MoE routing capture and drift analysis."""
+
+from inkling_quant_lab.routing.hooks import (
+    RoutingHookHandle,
+    attach_routing_hooks,
+    attach_routing_snapshot_hooks,
+    discover_routing_modules,
+    events_from_routing_snapshot,
+)
+from inkling_quant_lab.routing.metrics import (
+    LayerRoutingMetrics,
+    RoutingComparison,
+    RoutingMetricSummary,
+    compare_routing,
+    compute_routing_metrics,
+    expert_selection_frequency,
+    jensen_shannon_divergence,
+    js_divergence,
+    load_imbalance,
+    routing_entropy,
+    selection_frequency,
+    token_route_agreement,
+    top_k_overlap,
+)
+from inkling_quant_lab.routing.traces import (
+    BatchMeta,
+    InMemoryRoutingSink,
+    LayerRoutingAggregate,
+    RoutingArtifact,
+    RoutingEvent,
+    RoutingMode,
+    RoutingSink,
+    RoutingTraceSink,
+)
+
+__all__ = [
+    "BatchMeta",
+    "InMemoryRoutingSink",
+    "LayerRoutingAggregate",
+    "LayerRoutingMetrics",
+    "RoutingArtifact",
+    "RoutingComparison",
+    "RoutingEvent",
+    "RoutingHookHandle",
+    "RoutingMetricSummary",
+    "RoutingMode",
+    "RoutingSink",
+    "RoutingTraceSink",
+    "attach_routing_hooks",
+    "attach_routing_snapshot_hooks",
+    "compare_routing",
+    "compute_routing_metrics",
+    "discover_routing_modules",
+    "events_from_routing_snapshot",
+    "expert_selection_frequency",
+    "jensen_shannon_divergence",
+    "js_divergence",
+    "load_imbalance",
+    "routing_entropy",
+    "selection_frequency",
+    "token_route_agreement",
+    "top_k_overlap",
+]

@@ -1,0 +1,211 @@
+{
+  "schema_version": "public-moe-native-linear-quality-summary-v1",
+  "measured_at_utc": "2026-07-16T03:49:38.224859+00:00",
+  "command": ".venv/bin/python scripts/evaluate_public_moe_native_quality.py configs/experiments/hf_stories15m_tinystories_native_quality.yaml configs/experiments/hf_stories15m_tinystories_native_int8_quality.yaml configs/experiments/hf_stories15m_tinystories_native_int4_quality.yaml --dataset /private/tmp/TinyStories-valid-f54c09fd.txt --expected-dataset-sha256 94e431816c4cce81ff71e4408ff8d3bda9a42e8d2663986697c3954288cb38b4 --hardware-label 'Apple M3 MacBook Air (8 cores, 16 GB)' --output artifacts/research-slices/public-moe-native-linear-quality-20260716.json",
+  "full_record": {
+    "path": "docs/experiments/stories15m-moe-native-linear-quality-full-v2.json",
+    "sha256": "1065b25f26f0c756b77693a16a88d6675b546c801723a06487461f1dea7bb315",
+    "curated": true,
+    "source_artifact_sha256": "7e41966384b5a2ba108e7d7470b7e5344a120caf7154ea001d31ae73636585b6"
+  },
+  "configuration": {
+    "baseline_sha256": "2438fcc5152ee6b1361e8716af8aa1bd383c5a3b183aec474dba2dcd5114fa44",
+    "native_int8_sha256": "4cede448008d35b512a0048869d04ece314a4b6a9d112dce0de274b6918578d1",
+    "native_int4_sha256": "c5f307b94542014579ecc6ca39ab7b3bfe51da5a1285a0f8f71f909a8de18b98"
+  },
+  "model": {
+    "model_id": "ggml-org/stories15M_MOE",
+    "revision": "b6dd737497465570b5f5e962dbc9d9454ed1e0eb",
+    "architecture": "MixtralForCausalLM",
+    "license": "MIT",
+    "source_weight_file": "model.safetensors",
+    "source_weight_size_bytes": 72744704,
+    "source_weight_sha256": "dbfa0289f68a8dd721d10eb12d8bd82e098455682027f6f9986ba548913f9082",
+    "loaded_float32_state_sha256": "93e36334ff1be21096ca5f59c6b4d8bdfb212c8854b815583110755df75d6ed9",
+    "expert_weight_provenance": "repeated_trained_TinyStories_weights",
+    "router_provenance": "randomly_initialized_by_model_publisher"
+  },
+  "dataset": {
+    "dataset_id": "hf://datasets/roneneldan/TinyStories/TinyStories-valid.txt",
+    "revision": "f54c09fd23315a6f9c86f9dc80f725de7d8f9c64",
+    "split": "validation",
+    "license": "cdla-sharing-1.0",
+    "file_sha256": "94e431816c4cce81ff71e4408ff8d3bda9a42e8d2663986697c3954288cb38b4",
+    "perplexity_sample_count": 32,
+    "perplexity_selection_sha256": "9987d78e04cb9a7717d9402b53543058df5ca8bd9311ee31252f2d611b89ef89",
+    "generation_sample_ids": [
+      "story-000001",
+      "story-000008",
+      "story-000016",
+      "story-000024"
+    ],
+    "generation_selection_sha256": "a5afdd253c27d41ec08450c0cd2f3cc0f8b40167815bbe5e5e7f5daf5476f485"
+  },
+  "protocol": {
+    "seed": 20260715,
+    "quality_metric": "token_weighted_causal_nll_and_perplexity",
+    "evaluated_loss_token_count": 5826,
+    "max_context_tokens": 256,
+    "loss_truncation": "right_to_model_max_context",
+    "generation_decode": {
+      "do_sample": false,
+      "max_new_tokens": 8,
+      "temperature": 1.0,
+      "top_k": null
+    },
+    "routing_capture": "full_trace_during_the_exact_32_loss_forwards",
+    "routing_alignment": "stable_sample_id_token_position_and_layer",
+    "routing_alignment_sha256": "9b61a51dc72e0afe74a207aa272a15e18355c060a8634d883977c1efca9bbcf2",
+    "routing_event_count": 35148,
+    "prompt_or_output_content_persisted": false
+  },
+  "quantization_scope": {
+    "inventory_entry_count": 70,
+    "addressable_linear_count": 25,
+    "selected_attention_linear_count": 24,
+    "selection": "q_proj, k_proj, v_proj, and o_proj in each of six layers",
+    "protected_output_head_count": 1,
+    "fused_expert_slice_count": 24,
+    "fused_expert_slices_quantized": 0,
+    "all_fused_expert_slices_float32_only": true,
+    "all_nonlinear_entries_float32_only": true,
+    "routers_embeddings_normalization_and_output_head": "float32"
+  },
+  "baseline": {
+    "runtime_tensor_storage_bytes": 145434432,
+    "mean_nll": 1.6219844741179614,
+    "perplexity": 5.063127999980134
+  },
+  "candidates": [
+    {
+      "backend": "torch_native_dynamic_int8",
+      "method": "native_dynamic_w8a8",
+      "kernel": "quantized::linear_dynamic",
+      "quantized_engine": "qnnpack",
+      "candidate_state_sha256": "f81d7c5c90f36690d38d45038f4ce4dc46048f9e5ddbc931c4010f872b9f84d5",
+      "runtime_tensor_storage_bytes": 139490112,
+      "runtime_tensor_storage_ratio_vs_float32": 0.9591271481020396,
+      "runtime_tensor_storage_reduction_fraction": 0.0408728518979604,
+      "mean_nll": 1.6247600663211639,
+      "mean_nll_delta_vs_float32": 0.0027755922032024483,
+      "perplexity": 5.077200699583774,
+      "perplexity_delta_vs_float32": 0.014072699603640437,
+      "perplexity_relative_change": 0.002779447725535622,
+      "generation_exact_match_count": 4,
+      "generation_sample_count": 4,
+      "generation_exact_match_rate": 1.0,
+      "routing_weighted": {
+        "js_divergence": 0.000005737654027756889,
+        "top_k_overlap": 0.9906822578809605,
+        "token_route_agreement": 0.9813645157619211
+      },
+      "routing_per_layer": [
+        {"layer": 0, "js_divergence": 0.0000029622595040702267, "token_route_agreement": 0.9900990099009901},
+        {"layer": 1, "js_divergence": 0.000003877017847667182, "token_route_agreement": 0.9824172072379652},
+        {"layer": 2, "js_divergence": 0.0000034025965556675684, "token_route_agreement": 0.9808808467053602},
+        {"layer": 3, "js_divergence": 0.000003830017987672464, "token_route_agreement": 0.9810515534312052},
+        {"layer": 4, "js_divergence": 0.0000160222895105332, "token_route_agreement": 0.9745646978490953},
+        {"layer": 5, "js_divergence": 0.000004331742760930692, "token_route_agreement": 0.9791737794469102}
+      ]
+    },
+    {
+      "backend": "torch_native_int4_kleidiai",
+      "method": "native_dynamic_w4a8",
+      "packing_kernel": "aten::_dyn_quant_pack_4bit_weight",
+      "kernel": "aten::_dyn_quant_matmul_4bit",
+      "candidate_state_sha256": "213427538e55a71743a57f565e4651573467028a23c96221463e9136f890f78e",
+      "runtime_tensor_storage_bytes": 138550080,
+      "runtime_tensor_storage_ratio_vs_float32": 0.9526635343135249,
+      "runtime_tensor_storage_reduction_fraction": 0.0473364656864751,
+      "mean_nll": 1.8406977306065426,
+      "mean_nll_delta_vs_float32": 0.2187132564885812,
+      "perplexity": 6.300933081508728,
+      "perplexity_delta_vs_float32": 1.2378050815285944,
+      "perplexity_relative_change": 0.24447438056739856,
+      "generation_exact_match_count": 0,
+      "generation_sample_count": 4,
+      "generation_exact_match_rate": 0.0,
+      "routing_weighted": {
+        "js_divergence": 0.0016811036126707112,
+        "top_k_overlap": 0.9183879594856037,
+        "token_route_agreement": 0.8374302947536133
+      },
+      "routing_per_layer": [
+        {"layer": 0, "js_divergence": 0.0016171863948977903, "token_route_agreement": 0.8796517582792762},
+        {"layer": 1, "js_divergence": 0.0007137433335778712, "token_route_agreement": 0.8784568111983612},
+        {"layer": 2, "js_divergence": 0.0008256009042910426, "token_route_agreement": 0.8673608740184363},
+        {"layer": 3, "js_divergence": 0.0017904016079107249, "token_route_agreement": 0.8152953226357118},
+        {"layer": 4, "js_divergence": 0.003215400796192788, "token_route_agreement": 0.7842266985319222},
+        {"layer": 5, "js_divergence": 0.0019242886391540506, "token_route_agreement": 0.799590303857972}
+      ]
+    }
+  ],
+  "reproducibility_check": {
+    "independent_execution_count": 3,
+    "scientific_fields_exact_across_executions": true,
+    "execution_records": [
+      {
+        "created_at_utc": "2026-07-16T03:45:51.590185+00:00",
+        "raw_record_sha256": "e597e57c9fd49b168e2fde9a813066604f04c93d831bc38a6079153c90d948e9"
+      },
+      {
+        "created_at_utc": "2026-07-16T03:48:18.429847+00:00",
+        "raw_record_sha256": "bd0b1506700b4961926779322e0d310ba6d0a298b0dd83f38c99df32527c7e77"
+      },
+      {
+        "created_at_utc": "2026-07-16T03:49:38.224859+00:00",
+        "raw_record_sha256": "6355d7f1ef56ce90a66bddbfb6b823391165cfc1468f3da95013f0bb21788109"
+      }
+    ],
+    "canonical_scientific_projection": {
+      "jq_filter": "{baseline_quality:.baseline.quality,baseline_generation:.baseline.generation,baseline_routing:.baseline.routing,candidates:[.candidates[]|{backend,quantization:{runtime_tensor_storage_bytes:.quantization.runtime_tensor_storage_bytes,safe_bundle_serialized_size_bytes:.quantization.safe_bundle_serialized_size_bytes,candidate_state_sha256:.quantization.candidate_state_sha256,manifest:.quantization.manifest},quality,generation_retention,routing}],inventory,model,dataset,protocol}",
+      "serialization": "jq -cS output as one UTF-8 line including its trailing newline",
+      "sha256_each_execution": "392352902162c583574ccc479f97f4d8220006c40e5c04cf9d6427d92bec50a4"
+    },
+    "post_gate_reexecution": {
+      "created_at_utc": "2026-07-16T13:37:31.150677+00:00",
+      "raw_record_sha256": "7e41966384b5a2ba108e7d7470b7e5344a120caf7154ea001d31ae73636585b6",
+      "canonical_scientific_projection_sha256": "78ee8dd8fe46275808707f6489be490fdc49ed40eb58b04c9a45198a02feda43",
+      "quality_generation_routing_model_state_and_tensor_storage_match_originals": true,
+      "hub_execution_mode": "HF_HUB_OFFLINE=1 with the exact cached revision; checked config local_files_only remained false",
+      "projection_change": {
+        "reason": "QuantizationManifest gained explicit null calibration checksum/sample/token fields after the original three runs, increasing each safe bundle JSON metadata size by 109 bytes without changing tensors or model behavior.",
+        "native_int8_safe_bundle_bytes_before": 139505736,
+        "native_int8_safe_bundle_bytes_after": 139505845,
+        "native_int4_safe_bundle_bytes_before": 138563069,
+        "native_int4_safe_bundle_bytes_after": 138563178
+      }
+    },
+    "exact_fields": [
+      "per-sample loss metrics",
+      "candidate state checksums",
+      "tensor storage byte counts",
+      "generation output hashes",
+      "per-layer and aggregate routing comparisons"
+    ],
+    "timings_excluded_from_exactness_check": true
+  },
+  "environment": {
+    "hardware": "Apple M3 MacBook Air (8 cores, 16 GB)",
+    "platform": "macOS 15.3.1 arm64",
+    "python": "3.12.13",
+    "torch": "2.13.0",
+    "transformers": "5.14.0",
+    "accelerate": "1.14.0",
+    "safetensors": "0.8.0",
+    "numpy": "2.2.6",
+    "torch_intraop_threads": 4,
+    "torch_interop_threads": 8,
+    "quantized_engine": "qnnpack",
+    "kleidiai_available": true,
+    "git_commit": null,
+    "git_dirty": null
+  },
+  "limitations": [
+    "This is one deterministic 32-story subset and one CPU hardware/software environment, not a full-dataset claim.",
+    "Only 24 attention linears are quantized; the fused expert weights that dominate model storage remain float32.",
+    "The model publisher states that router weights were randomly initialized, so routing drift is not evidence about learned expert specialization.",
+    "Four greedy exact-match prompts are a regression signal, not a general generation-quality score.",
+    "Storage values count unique in-memory parameter and buffer tensors; they are neither serialized source-checkpoint size nor measured process peak RSS."
+  ]
+}

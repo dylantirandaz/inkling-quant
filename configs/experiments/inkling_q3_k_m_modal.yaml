@@ -1,0 +1,94 @@
+schema_version: "1.1"
+source:
+  model_id: thinkingmachines/Inkling
+  revision: 86b4d430ab871652a707666b89203a866888c5e5
+  architecture: InklingForConditionalGeneration
+  model_type: inkling_mm_model
+  license: apache-2.0
+  checkpoint_format: safetensors
+  trust_remote_code: false
+toolchain:
+  repository: https://github.com/danielhanchen/llama.cpp.git
+  commit: a015409e6c27b84f60d688823d4c0126a11571fd
+  support_status: experimental_unmerged_pr_25731
+coverage:
+  text: converted
+  multimodal: separate_bf16_mmproj
+  mtp: omitted_unsupported
+quantization:
+  quant_type: Q3_K_M
+  output_label: inkling-Q3_K_M
+  use_importance_matrix: false
+  split_max_size: 48G
+  threads: 32
+modal:
+  app_name: inkling-q3-k-m
+  environment_name: inkling-quant
+  source_volume: inkling-source-v1
+  work_volume: inkling-work-v1
+  final_volume: inkling-final-v1
+  hf_secret: huggingface-secret
+  hf_secret_environment: main
+  volume_version: 1
+  rate_card:
+    as_of: "2026-07-17"
+    cpu_core_hour_usd: "0.04716"
+    memory_gib_hour_usd: "0.007992"
+    b300_gpu_hour_usd: "7.0992"
+  stages:
+    - name: materialize_source
+      cpu_cores: 8
+      memory_gib: 32
+      gpu_count: 0
+      startup_timeout_seconds: 900
+      max_hours: "4"
+      max_attempts: 12
+    - name: convert_text_bf16
+      cpu_cores: 32
+      memory_gib: 192
+      gpu_count: 0
+      startup_timeout_seconds: 900
+      max_hours: "23"
+      max_attempts: 2
+      max_recovery_attempts: 1
+    - name: convert_multimodal_projector
+      cpu_cores: 8
+      memory_gib: 32
+      gpu_count: 0
+      startup_timeout_seconds: 900
+      max_hours: "12"
+      max_attempts: 2
+      max_recovery_attempts: 1
+    - name: quantize_text
+      cpu_cores: 32
+      memory_gib: 192
+      gpu_count: 0
+      startup_timeout_seconds: 900
+      max_hours: "23"
+      max_attempts: 2
+      max_recovery_attempts: 1
+    - name: verify_export
+      cpu_cores: 16
+      memory_gib: 64
+      gpu_count: 0
+      startup_timeout_seconds: 900
+      max_hours: "12"
+      max_attempts: 2
+      max_recovery_attempts: 1
+    - name: smoke_test
+      cpu_cores: 16
+      memory_gib: 64
+      gpu_type: B300
+      gpu_count: 2
+      startup_timeout_seconds: 900
+      max_hours: "2"
+      max_attempts: 1
+budget:
+  user_limit_usd: "1000"
+  planned_compute_usd: "600"
+  planned_storage_usd: "150"
+  workspace_contingency_usd: "50"
+  workspace_hard_budget_usd: "800"
+  external_contingency_usd: "150"
+  max_total_usd: "950"
+  require_workspace_budget: true

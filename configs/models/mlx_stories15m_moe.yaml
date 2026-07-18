@@ -1,0 +1,11 @@
+model:
+  model_id: ggml-org/stories15M_MOE
+  revision: b6dd737497465570b5f5e962dbc9d9454ed1e0eb
+  adapter: mlx_lm_mixtral
+  tokenizer_id: null
+  local_snapshot_path: local_models/stories15M_MOE/b6dd737497465570b5f5e962dbc9d9454ed1e0eb
+  dtype: float32
+  trust_remote_code: false
+  local_files_only: true
+  checkpoint_format: safetensors
+

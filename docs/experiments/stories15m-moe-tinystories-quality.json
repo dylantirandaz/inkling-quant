@@ -1,0 +1,55 @@
+{
+  "schema_version": "public-moe-quality-summary-v1",
+  "config_hash": "a35434deb7ad034051525a2dca7a11067dfed94dcacbcdd7e85738099b05e2ab",
+  "command": "uv run python scripts/evaluate_public_moe_quality.py configs/experiments/hf_stories15m_tinystories_quality.yaml /private/tmp/TinyStories-valid-f54c09fd.txt --expected-dataset-sha256 94e431816c4cce81ff71e4408ff8d3bda9a42e8d2663986697c3954288cb38b4",
+  "model": {
+    "model_id": "ggml-org/stories15M_MOE",
+    "revision": "b6dd737497465570b5f5e962dbc9d9454ed1e0eb",
+    "checksum": "93e36334ff1be21096ca5f59c6b4d8bdfb212c8854b815583110755df75d6ed9",
+    "architecture": "MixtralForCausalLM",
+    "router_provenance": "randomly_initialized_by_model_publisher"
+  },
+  "dataset": {
+    "dataset_id": "hf://datasets/roneneldan/TinyStories/TinyStories-valid.txt",
+    "revision": "f54c09fd23315a6f9c86f9dc80f725de7d8f9c64",
+    "file_sha256": "94e431816c4cce81ff71e4408ff8d3bda9a42e8d2663986697c3954288cb38b4",
+    "selection_sha256": "9987d78e04cb9a7717d9402b53543058df5ca8bd9311ee31252f2d611b89ef89",
+    "license": "cdla-sharing-1.0",
+    "sample_ids": {
+      "first": "story-000001",
+      "last": "story-000032",
+      "count": 32
+    }
+  },
+  "protocol": {
+    "metric": "token_weighted_causal_nll_and_perplexity",
+    "add_special_tokens": true,
+    "truncation": "right_to_model_max_context",
+    "max_context_tokens": 256,
+    "seed": 20260715,
+    "prompt_or_output_content_persisted": false
+  },
+  "results": {
+    "sample_count": 32,
+    "evaluated_token_count": 5826,
+    "truncated_sample_count": 2,
+    "mean_nll": 1.6219844741179614,
+    "perplexity": 5.063127999980134,
+    "elapsed_seconds_including_model_load": 4.0859806661028415
+  },
+  "environment": {
+    "platform": "macOS 15.3.1 arm64",
+    "hardware": "Apple M3 host, 8 logical CPUs; evaluation runtime CPU eager",
+    "python": "3.12.13",
+    "torch": "2.13.0",
+    "transformers": "5.14.0",
+    "git_commit": null,
+    "git_dirty": null
+  },
+  "limitations": [
+    "This is one deterministic 32-story subset, not a full-dataset or multi-seed claim.",
+    "The publisher states that expert weights repeat a trained TinyStories model.",
+    "The publisher states that router weights were randomly initialized; routing is not evidence of learned expert specialization.",
+    "No quantized candidate participates in this baseline-only record."
+  ]
+}

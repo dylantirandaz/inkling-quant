@@ -1,0 +1,243 @@
+{
+  "bindings": {
+    "dataset": {
+      "file_sha256": "94e431816c4cce81ff71e4408ff8d3bda9a42e8d2663986697c3954288cb38b4",
+      "size_bytes": 19447282,
+      "story_count": 21990
+    },
+    "files": {
+      "AGENTS.md": "82c03f470fbf3e42fabf5eccac44edb510ded411685196882d7137ac86d5a98e",
+      "SDD.md": "04280bf503e8e29072bb4a873eba777050f93d47c593895cbf2ecb1db7053864",
+      "SPEC.md": "97bd8bf744994800acba4ecaf1ba6ec0f75baabca6fa82a7bd917bd904075e1e",
+      "TDD.md": "8d8ce45f3dc3fbac1469ebb125908ba7113fab2e2590a55b6882c14659cce6bd",
+      "configs/evaluations/stories15m_native_int8_confirmatory_256.yaml": "babdf97aad9e47e320019677be025740539c5aaaeb96bda9501fbaf7ca610876",
+      "configs/experiments/hf_stories15m_tinystories_native_confirmatory_256.yaml": "1e3dea9c7333e4d8a6cb08276d94da819c2266157b3eea4bc0c008e90b42868d",
+      "configs/experiments/hf_stories15m_tinystories_native_int8_confirmatory_256.yaml": "bf60005f08a33aab26f4824573eb89aaf2638a318dfee38cb288cd6d1454473b",
+      "configs/models/hf_stories15m_moe.yaml": "5fab19408d23990e6ddf62f93a4472e000e27faccb91998049857aae6c3b8cff",
+      "configs/quantization/native_dynamic_int8.yaml": "a2035dba6f32315cd5a252fcf69bba57cd2d8eb99a253da03d3e04eba879ceb7",
+      "docs/adr/ADR-025-prospective-tinystories-int8-noninferiority.md": "5876df8526ed149963a8a6c65c683bb53fb5211b02326edb842f65c3b9535489",
+      "pyproject.toml": "232cf0f0a054b08ca94ba0d0a10e8ea4562b3c05d107771bebf0a41dd50c98ac",
+      "scripts/__init__.py": "7c16289d0976b3c060c613ddbe67c41926c8cebf7b53bd122b93957977c36c9b",
+      "scripts/evaluate_public_moe_native_quality.py": "4100d8ce26adbac6a511e74ea78867ad0af6d1dac15f587ac23521b8686de195",
+      "scripts/run_confirmatory_quality_attempt.py": "14cb3a3537f075afc27611082c450b44f678d109a2c452309e7306c2721777fc",
+      "scripts/verify_confirmatory_quality_repeats.py": "ab17ab278548cc5855e7753bf3d68f2246f1ec6f0864fab2e8c5fcccccfbcb46",
+      "src/inkling_quant_lab/__init__.py": "32b873c80a896e60f43bf276ff6778915a0a69ff48b6942015cefa60cbaa9203",
+      "src/inkling_quant_lab/__main__.py": "3c17386a7992e54e8f6fa52f7765d0b64bc87f19835fb349226498c3062c4158",
+      "src/inkling_quant_lab/artifacts.py": "797dc3a78bb3f1b765eff0e0ef737bd99379c6a580fc80b6b568dede2d7ddf2c",
+      "src/inkling_quant_lab/benchmarking/__init__.py": "76d7db5366555ba28ce7708eb2705a177b2a758a5ced32101813c79e58e3d697",
+      "src/inkling_quant_lab/benchmarking/energy.py": "0a13e6f0805b7828fa46102ddf4cfe4a4099743cc0b2f79351b38a581a7fb3e8",
+      "src/inkling_quant_lab/benchmarking/latency.py": "4e848f62df3eecad3371af37d2310cda637661eb9e3318ea35c4460d21e659e5",
+      "src/inkling_quant_lab/benchmarking/memory.py": "0abe85ff7f93d864104361eab4b0d7f9d23ca611e11aec030caf02083e06e73c",
+      "src/inkling_quant_lab/benchmarking/throughput.py": "08c163affcc4e80d2b74337385cbdf090a5d5eff7437016a1885b841c7a4d9d7",
+      "src/inkling_quant_lab/benchmarking/utilization.py": "4b0d15d6a3067bde1305c4af074031771d2315f46ac63ff5dde5d2f867845706",
+      "src/inkling_quant_lab/bootstrap.py": "a1a2e1b51f9e1192e70177839d6203697ea78e9e2ceed1217ac5231b86b0f868",
+      "src/inkling_quant_lab/cli.py": "d5d9dd148af7b878c35c2ea7e01cea18363562b1dcc14f92b02e9224898466cd",
+      "src/inkling_quant_lab/comparison.py": "e558b155a774c3a01823bfd39e88529b33f910e4a3e75796c434e01e3d877a00",
+      "src/inkling_quant_lab/config.py": "267f55bb187486511ec0f24fd889e5b9ca99d42f4bacc721cd823eca9d703635",
+      "src/inkling_quant_lab/data.py": "0f862faa7e998ab157f3b432b3b9418c63ebcc915faa19494e408f8a947923a2",
+      "src/inkling_quant_lab/distributed.py": "fa0345324cefb7e7db50207497f5fbb20e148e61fb07d04d0df4201b92f67143",
+      "src/inkling_quant_lab/evaluation/__init__.py": "51e467cd501af15d09c7a219f0bee4a05e8f8711686a6d328ced2616fe4a56ca",
+      "src/inkling_quant_lab/evaluation/base.py": "211fa6cab0d0582f7f8965fcf0f26a1bf09600441218f85026db23a6f2e97436",
+      "src/inkling_quant_lab/evaluation/behavioral.py": "02809d8713eb90a2a69e58a1df3bac13250db30f137331247143dbb59016600e",
+      "src/inkling_quant_lab/evaluation/generation.py": "3b5f30841420eda6b276bdbbe28047333b0f92180143417906ffc33a3b5a859f",
+      "src/inkling_quant_lab/evaluation/multimodal.py": "45cc9a9265d57e394ab55c1e646d3682455c9b8be49ba77cb9f5181684ddbe67",
+      "src/inkling_quant_lab/evaluation/noninferiority.py": "d0bba5b6e6714be58e7b61a1e46dcdf560b6c91765f14b93a59d25eb485d9d67",
+      "src/inkling_quant_lab/evaluation/perplexity.py": "06e8ab8c74f268d96db9b6615830fd0eea72bd69a847c4d505002874e76961be",
+      "src/inkling_quant_lab/evaluation/runner.py": "5725e2ec9394867535b8b836aa57178dee25f7b11c6c1d18e61fb726c5dd7dfd",
+      "src/inkling_quant_lab/exceptions.py": "21d4d58e4f687be24504163d0af3a6bc538ff4431000000fcae32240d908f787",
+      "src/inkling_quant_lab/fixture_data/__init__.py": "2873a051d86481483a0161feff33ecb0f980ad8e78da640fc2ca90e2f2c1ef36",
+      "src/inkling_quant_lab/hardware.py": "30f69439e7c344d100fbddc41dc1b6022b58da473eb8e78b1361415673a3a8cc",
+      "src/inkling_quant_lab/logging.py": "bc9ba36ab3f61183d019e4be08f7f81c0124efbdab403f75454d7b8498ff52d7",
+      "src/inkling_quant_lab/manifests.py": "19f82e004e7a0bb60aeade24703cc95338361f38de89bb183122f840acb0931f",
+      "src/inkling_quant_lab/mlx_contract.py": "abc2fa43705e8f9432df451aab8254c2554345a5cca2ca73b267004489ce74f3",
+      "src/inkling_quant_lab/models/__init__.py": "b61f70dfcac0d24ecdd75a06f3470c7020eb52bed0788cea9c720b50ac49c595",
+      "src/inkling_quant_lab/models/base.py": "7ca83a38ec2226f8cdb1fe468441f8e9cd23ca30a2e107155afedc2c6fe44382",
+      "src/inkling_quant_lab/models/fixtures.py": "1cecb7dffb21a696aa4e4530c3d20962300dff9e58b82ad83b26f29e1232c854",
+      "src/inkling_quant_lab/models/hf_causal_lm.py": "46f6b1adca9c3e84c880408121a08c754e627533008bfd152209ef5067ba4f77",
+      "src/inkling_quant_lab/models/local.py": "fcebef5e806164f28f1854e03daf59201885c8053439b61dc50cf3142c6d576c",
+      "src/inkling_quant_lab/models/mlx_lm_mixtral.py": "fe4bfdcbd37af46c4feed882f52ea7086b44dde31ed4d7e4f6b55db5eb116c33",
+      "src/inkling_quant_lab/pipeline/__init__.py": "8a55e2f7aaeb987c1c463bd30b25f7ce015a186df36a54ccb9a1f7da7d082d39",
+      "src/inkling_quant_lab/pipeline/benchmark_worker.py": "051307cb627989d16bf10e0bda64f4d5a003e7e459a2bdb26786dbb6edc25b3d",
+      "src/inkling_quant_lab/pipeline/calibration.py": "47610367b69674662b9b8502d8b8303ed5d7b80b4dd10aea3cb26afb3e349bf6",
+      "src/inkling_quant_lab/pipeline/candidate_artifact.py": "b6ca65adf5b122a4613dbb2c2b9c276bfd272e40b1ec3f50e6c64dd4b449345e",
+      "src/inkling_quant_lab/pipeline/comparison_artifacts.py": "0f7e09810d0d1a66411a5ce7a98db59a2b3bd99902fc96b1667838f08e9d3330",
+      "src/inkling_quant_lab/pipeline/operations.py": "0c4791f46ed33971bd93742f7c63a67ce5face82aec93a24456be19dd29bc940",
+      "src/inkling_quant_lab/pipeline/resume.py": "9216f1e00270f8efdc1d6790922ff2c781333631f8ed4f8b2c21dab7e55c84ef",
+      "src/inkling_quant_lab/pipeline/routing_capture.py": "398b46bef871574d314416465d81a613e9e46eb5fe5ecd222238eab870fc2782",
+      "src/inkling_quant_lab/pipeline/runner.py": "72295c9867f54f129aafe1c4d61105c5531a611613d5b91837a5377c5483eb1e",
+      "src/inkling_quant_lab/pipeline/stages.py": "da455d76a47c17d42f73cd58b659a92a7d44bd155f56293ebd76853f97727dc0",
+      "src/inkling_quant_lab/pipeline/summaries.py": "5e79dc0a1019e1955a95ee8782dfabfb369377107092fc65d0687e173c6d98f8",
+      "src/inkling_quant_lab/post_training/__init__.py": "8dc411eb851eb0d27efba2e22fdec7b5840ec8e76e9828491a2f8ba81a1c71c6",
+      "src/inkling_quant_lab/post_training/corpora.py": "0e64bd9c8fe0dee7f385aad9738254608d4ef89ab875fee836bee82effd2f799",
+      "src/inkling_quant_lab/post_training/lineage.py": "0478f1a52700ce4fca5ea92469697348d0973e15998c331f7054e3059ea21cc3",
+      "src/inkling_quant_lab/post_training/quantized_router.py": "df8e9206fcde38f8fecdf0ded01904bb906756e7a9610ac0cacd165e41414d17",
+      "src/inkling_quant_lab/post_training/router.py": "635296dcb3029100716f7cb044470d074f5928bad4665f4271712117f61ee7fe",
+      "src/inkling_quant_lab/public_moe_tensor_parallel.py": "808393f7a5200fe0b628eb296e57691cd7dd5a7a4f6ba71adb80ee8e3312ca7b",
+      "src/inkling_quant_lab/quantization/__init__.py": "1245eaf85cee88351ead32525f1bd02a1a5025e7c0383b0e2dbfc2067c6ade4e",
+      "src/inkling_quant_lab/quantization/base.py": "2de85056ded760e55716db8c33f89d1f8506e5dc76f4d757e52f32b6ca804fac",
+      "src/inkling_quant_lab/quantization/fake_optional.py": "516c695b49fc65f2d55a32212307433a93a0659a012488f75a9ec496ce5ca0a3",
+      "src/inkling_quant_lab/quantization/fp8.py": "6b534d764c6774315396da605d5e12b77daa1163a21f9e322d9e294e8ddd352e",
+      "src/inkling_quant_lab/quantization/int8.py": "4bc74441b748db6397c48757680ced35785256129fadbcaa56d3372db3c70e19",
+      "src/inkling_quant_lab/quantization/mixed_precision.py": "dc2d9e43fbf89414efca26be7a63fa66f8f6fd89dd73ded0c4dba161a6007257",
+      "src/inkling_quant_lab/quantization/mlx.py": "02403f133f0fba002cdb9e2bdf875b0043f08f8bdaefe6e4a69fd0ef44c43daa",
+      "src/inkling_quant_lab/quantization/native_cpu.py": "d8c7216cd0abd7cc3a40b5853e979eb764bed39febabc12aaada20fcfa0a6125",
+      "src/inkling_quant_lab/quantization/optional.py": "3ae6c53b717544b3613018fff0bd5c1290903355a190aa4a725425b6449d4156",
+      "src/inkling_quant_lab/quantization/policies.py": "686e7b282f8749012bd6e2b9d862a16575fb55eb47d795c8c9adc9cdfab68a64",
+      "src/inkling_quant_lab/quantization/reference.py": "68fbd6f200b55f45e39739a1f845a3827bac63990abc6fce2bea8c32b98b0942",
+      "src/inkling_quant_lab/quantization/weight_only.py": "7fbfb5fbf141f3b96a3a0cbb127119d42132e9875597223957b0584152dd77f4",
+      "src/inkling_quant_lab/registry.py": "c4df297609a628b1192923df80cfe6dbb1926408e951e6c8d3ee5192326f5bc5",
+      "src/inkling_quant_lab/reporting/__init__.py": "e35a647c30d2dfa3ea730805454f7b6643fbf6a8cf227df02e2ee057edd4ecac",
+      "src/inkling_quant_lab/reporting/plots.py": "f6f7b92fc873046ec26242f2de7212cae61ec8a2503f56989d5db27e21012bbb",
+      "src/inkling_quant_lab/reporting/report.py": "5c41a0b582c16437e285b79f57205fd44b79533720c9e31afe0d741af7c1e5a3",
+      "src/inkling_quant_lab/reporting/tables.py": "adf36e168cd64c2e52651694e3ba6f3a5efdd1a32e6ea9c9459689995a5c328c",
+      "src/inkling_quant_lab/routing/__init__.py": "a6670da2f2764576956e03194acc288de816a004d25a655b1a56ac1ef7b7ecf7",
+      "src/inkling_quant_lab/routing/hooks.py": "e704689739ade455aa894e8f561f2420454a40fc5c9756fb5d77857a68609a54",
+      "src/inkling_quant_lab/routing/metrics.py": "5a54771fe20dadb56891fc1d9f3178ced580da24c072c396a851fd162f37cd27",
+      "src/inkling_quant_lab/routing/traces.py": "ab1a5898500e551bd1c1a3bc7db17865f443a83a75289fc56379ed7a47ee89cd",
+      "src/inkling_quant_lab/runtimes/__init__.py": "ee8a763b1f2352b182aa6fe4c26d90c73473cca0dd5cb737a3dd64cbff367e30",
+      "src/inkling_quant_lab/runtimes/base.py": "e82c76e1af0c9cd0fa73293f0a2bd5a7c6541142211f057517bf0a609ad30ee9",
+      "src/inkling_quant_lab/runtimes/fake.py": "03d20b81c1519f07e277df6b98861a624889a70730959a51171c3d751d96d33e",
+      "src/inkling_quant_lab/runtimes/mlx_metal.py": "5ccc73f03337a26a7babb0fc66bccc37c33e99869e2e5e0926312e72af574f40",
+      "src/inkling_quant_lab/runtimes/torch_cpu.py": "af4b09e432319b5269139799af9f20c64a2edf95acc36d45175166250ef5e334",
+      "src/inkling_quant_lab/runtimes/torch_cuda.py": "55612610d9ff07447f62130a5d6d5cdb6d6c496924e63378a9e2c97e1d2770c4",
+      "src/inkling_quant_lab/runtimes/torch_mps.py": "3f04fca9cea42b762cde2d6297b75047db617c13449792641c82ac342dec61cd",
+      "src/inkling_quant_lab/security.py": "eb7c11bb500f19a10c616538da899d37502406e74561618d50965ff3310036ce",
+      "src/inkling_quant_lab/version.py": "17a21c3def96ea4579d6bc5d051b69ce47d59fce37c92c335c91f565ea36d447",
+      "uv.lock": "2a2243f6376fb63e17722d50f1982ba3708847c0a600214bc3e0e45b1bbcc9a4"
+    },
+    "protocol_definition_sha256": "84dff06f85d9490f71d80a37fa4788ee6bec326a5673afef67461ecc586153dd",
+    "resolved_config_sha256": {
+      "baseline": "e6db2959221babf9aaba1f529a20349fe3462d4309b6929caf3a7d3331d668f2",
+      "candidate": "d6ee2054d6db801c56596042df7e9eca130109ab922ee46735b61953da8d7912"
+    }
+  },
+  "claim_boundary": [
+    "A confirmed pass applies only to the pinned Stories15M_MOE revision and the finite TinyStories validation holdout population declared here.",
+    "Only addressable attention and other unprotected concrete torch.nn.Linear leaves use native dynamic INT8; fused experts, routers, embeddings, normalization, and the output head remain float32.",
+    "The one-sided 95 percent bootstrap upper bound is nominal and has approximate, not exact, finite-population coverage.",
+    "Generation and routing are descriptive regressions; token-layer events are not independent inferential samples.",
+    "The publisher-randomized router is not evidence about learned expert specialization.",
+    "No cross-domain, model-seed, hardware-portability, latency, energy, CUDA, AWQ, GPTQ, FP8, or causal claim follows.",
+    "Any failed gate, failed execution, provenance mismatch, or repeat disagreement is retained and reported; there is no outcome-dependent extension to 512 stories."
+  ],
+  "created_at_utc": "2026-07-17T04:42:19Z",
+  "environment_contract": {
+    "hardware_label": "Apple M3 MacBook Air (8 cores, 16 GB)",
+    "offline_environment": {
+      "HF_DATASETS_OFFLINE": "1",
+      "HF_HUB_OFFLINE": "1",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "PYTHONPYCACHEPREFIX": "/dev/null",
+      "TOKENIZERS_PARALLELISM": "false",
+      "TRANSFORMERS_OFFLINE": "1"
+    },
+    "platform": {
+      "machine": "arm64",
+      "release": "24.3.0",
+      "system": "Darwin"
+    },
+    "python": {
+      "implementation": "CPython",
+      "version": "3.12.13"
+    },
+    "python_executable": {
+      "invocation_path": "/Users/dylantirandaz/thinking machines/inkling-quant/.venv/bin/python",
+      "resolved_path": "/Users/dylantirandaz/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/bin/python3.12",
+      "sha256": "36984af9f922aec72ba5b03e811ee92512268785007192e20f826cbd07cf8d04",
+      "size_bytes": 49968
+    },
+    "software": {
+      "huggingface-hub": "1.23.0",
+      "inkling-quant-lab": "0.1.0",
+      "numpy": "2.2.6",
+      "safetensors": "0.8.0",
+      "tokenizers": "0.22.2",
+      "torch": "2.13.0",
+      "transformers": "5.12.1"
+    },
+    "torch_cpu": {
+      "interop_threads": 8,
+      "intraop_threads": 4,
+      "required_supported_engine": "qnnpack"
+    },
+    "virtual_environment": {
+      "pyvenv_cfg_path": ".venv/pyvenv.cfg",
+      "sha256": "6ac655fe109ceb2312e57bd560b481b11e982a4f57a014d426dcf6e498afd8d6",
+      "size_bytes": 211
+    }
+  },
+  "outcomes": {
+    "holdout_model_forward_executed": false,
+    "holdout_outcomes_inspected": false
+  },
+  "planned_attempts": [
+    {
+      "directory": "artifacts/research-slices/stories15m-native-int8-confirmatory-256/attempt-1",
+      "ordinal": 1,
+      "record_path": "artifacts/research-slices/stories15m-native-int8-confirmatory-256/attempt-1/record.json"
+    },
+    {
+      "directory": "artifacts/research-slices/stories15m-native-int8-confirmatory-256/attempt-2",
+      "ordinal": 2,
+      "record_path": "artifacts/research-slices/stories15m-native-int8-confirmatory-256/attempt-2/record.json"
+    }
+  ],
+  "primary_analysis": {
+    "analysis_population": {
+      "eligible_evaluated_token_count": 4441967,
+      "eligible_story_count": 21958,
+      "excluded_pilot_story_count": 32,
+      "finite_population": "pinned_TinyStories_validation_stories_after_excluding_story_000001_through_story_000032"
+    },
+    "bootstrap": {
+      "confidence_level": 0.95,
+      "finite_population_correction": "per_stratum_srswor_moment_matching",
+      "method": "paired_story_cluster_within_four_length_strata",
+      "quantile_method": "linear",
+      "replicates": 100000,
+      "rng": "numpy.random.Generator(numpy.random.PCG64)",
+      "seed": 20260715,
+      "upper_bound_label": "nominal_one_sided_95_percent_bootstrap_upper_bound"
+    },
+    "decision": {
+      "coverage_interpretation": "nominal_approximate_coverage_under_the_predeclared_stratified_finite_population_bootstrap_design",
+      "margin_nats_per_token": 0.004987541511039074,
+      "margin_relative_perplexity": 0.005,
+      "rule": "upper_bound_strictly_less_than_margin"
+    },
+    "estimand": "finite_holdout_population_token_weighted_candidate_minus_baseline_nll",
+    "estimator": "stratified_horvitz_thompson_numerator_over_known_token_denominator",
+    "execution": {
+      "dataset_path_at_lock": "/private/tmp/TinyStories-valid-f54c09fd.txt",
+      "interpreter_flags": [
+        "-s",
+        "-P",
+        "-B"
+      ],
+      "offline_only": true,
+      "runner": "scripts/run_confirmatory_quality_attempt.py",
+      "verifier": "scripts/verify_confirmatory_quality_repeats.py"
+    },
+    "generation_and_routing": "descriptive_only_on_frozen_16_story_subset",
+    "quality_sample_count": 256,
+    "quality_selection_manifest_sha256": "3e290e440cb6c6c4e917682793c9af6039695d10305188da0da821277c41b91b",
+    "repeat_verification": {
+      "aggregate_path": "artifacts/research-slices/stories15m-native-int8-confirmatory-256/repeat-verification.json",
+      "input_records": [
+        "artifacts/research-slices/stories15m-native-int8-confirmatory-256/attempt-1/record.json",
+        "artifacts/research-slices/stories15m-native-int8-confirmatory-256/attempt-2/record.json"
+      ],
+      "promotion_rule": "both_within_execution_gates_pass_and_scientific_environment_projections_match_exactly",
+      "repeat_is_additional_statistical_sample": false,
+      "required_clean_process_executions": 2,
+      "single_execution_status": "provisional_until_2_clean_executions"
+    },
+    "sample_unit": "paired_story_cluster",
+    "stopping_rule": "exactly_256_stories_with_no_outcome_dependent_extension_or_substitution"
+  },
+  "protocol_id": "stories15m-native-int8-confirmatory-quality-v1",
+  "schema_version": "confirmatory-quality-preregistration-v1",
+  "status": "locked_before_execution"
+}

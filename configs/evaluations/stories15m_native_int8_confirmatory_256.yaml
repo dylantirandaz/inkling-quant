@@ -1,0 +1,126 @@
+schema_version: "1.0"
+protocol_id: stories15m-native-int8-confirmatory-quality-v1
+model:
+  model_id: ggml-org/stories15M_MOE
+  revision: b6dd737497465570b5f5e962dbc9d9454ed1e0eb
+  max_context_tokens: 256
+  source_weight_file: model.safetensors
+  source_weight_size_bytes: 72744704
+  source_weight_sha256: dbfa0289f68a8dd721d10eb12d8bd82e098455682027f6f9986ba548913f9082
+  config_json_sha256: e901e012953d1df93574b2cc3d7db5ed4758d52f8bd4a7dd4b647936e32261be
+  generation_config_json_sha256: 295aa491adda22ab9fbdecdda9e8121e8348fd0eea0529d8802993426ab0892c
+dataset:
+  dataset_id: hf://datasets/roneneldan/TinyStories/TinyStories-valid.txt
+  revision: f54c09fd23315a6f9c86f9dc80f725de7d8f9c64
+  split: validation
+  file_sha256: 94e431816c4cce81ff71e4408ff8d3bda9a42e8d2663986697c3954288cb38b4
+  story_count: 21990
+  license: cdla-sharing-1.0
+tokenizer:
+  add_special_tokens: true
+  special_tokens_map_json_sha256: ff3b4a612c4e447acb02d40071bddd989fe0da87eb5b7fe0dbadfc4f74de7531
+  tokenizer_json_sha256: 8eea70c4866c4f1320ba096fc986ac82038a8374dbe135212ba7628835b4a6f1
+  tokenizer_config_json_sha256: 33d29c87e41f7dd1efb0434d852730320c82970f292be452d820539bce417052
+execution_contract:
+  baseline_resolved_config_sha256: e6db2959221babf9aaba1f529a20349fe3462d4309b6929caf3a7d3331d668f2
+  candidate_resolved_config_sha256: d6ee2054d6db801c56596042df7e9eca130109ab922ee46735b61953da8d7912
+  candidate_backend: torch_native_dynamic_int8
+  candidate_method: native_dynamic_w8a8
+  quantized_engine: qnnpack
+  activation_granularity: per_call_tensor
+  weight_granularity: per_output_channel
+  generation_decode:
+    max_new_tokens: 8
+    do_sample: false
+    temperature: 1.0
+    top_k: null
+  runtime_backend: torch_eager_cpu
+  runtime_device: cpu
+  runtime_dtype: float32
+  runtime_device_map: single
+holdout_selection:
+  seed: 20260715
+  excluded_sample_ids_first: story-000001
+  excluded_sample_ids_last: story-000032
+  excluded_sample_count: 32
+  excluded_selection_sha256: 9987d78e04cb9a7717d9402b53543058df5ca8bd9311ee31252f2d611b89ef89
+  eligible_story_count: 21958
+  eligible_evaluated_token_count: 4441967
+  length_stratum_assignment: sorted_by_evaluated_token_count_then_sample_id_floor_4i_over_N
+  quality_rank_protocol: tinystories-confirmatory-length-stratified-v1
+  quality_sample_count_per_stratum: 64
+  quality_sample_count: 256
+  quality_sample_id_list_sha256: 1eb2da103e38898e93be80cec9a41cd28bf3a4dcc964d886905423c05e7d0203
+  quality_ids_content_sha256: 263cea98b4ebde459e269e664656c6d0161eae45240a6abf7c158dd45abff98f
+  quality_manifest_sha256: 3e290e440cb6c6c4e917682793c9af6039695d10305188da0da821277c41b91b
+  quality_input_token_ids_manifest_sha256: 4a93334e9ad18e4508fa58c368bcb2c2875d8f324b1f3c54efa2214bf3ea8bdb
+  quality_evaluated_token_count: 52038
+  quality_source_token_count: 58969
+  quality_truncated_sample_count: 50
+  strata:
+    - stratum: 0
+      population_story_count: 5490
+      population_evaluated_token_count: 821620
+      minimum_evaluated_tokens: 17
+      maximum_evaluated_tokens: 172
+      selected_story_count: 64
+      selected_evaluated_token_count: 9688
+    - stratum: 1
+      population_story_count: 5489
+      population_evaluated_token_count: 1025316
+      minimum_evaluated_tokens: 172
+      maximum_evaluated_tokens: 201
+      selected_story_count: 64
+      selected_evaluated_token_count: 12052
+    - stratum: 2
+      population_story_count: 5490
+      population_evaluated_token_count: 1201909
+      minimum_evaluated_tokens: 201
+      maximum_evaluated_tokens: 242
+      selected_story_count: 64
+      selected_evaluated_token_count: 14050
+    - stratum: 3
+      population_story_count: 5489
+      population_evaluated_token_count: 1393122
+      minimum_evaluated_tokens: 242
+      maximum_evaluated_tokens: 255
+      selected_story_count: 64
+      selected_evaluated_token_count: 16248
+generation_and_routing:
+  selection_protocol: tinystories-confirmatory-generation-routing-subset-v1
+  sample_count_per_stratum: 4
+  sample_count: 16
+  sample_id_list_sha256: a7ee74daec91ec377392f9f8a10606ecfb86ef47b8371391e24e97cf12febe83
+  ids_content_sha256: 0b1965885b9adba5d6d2edec1cffab5108574fe53639e89a97e8ae31ac427376
+  manifest_sha256: 69a6dbca6a03d621063b154c64ef3fa02a4c86b78f4a7bff3fc11fefdc63cc11
+  routing_input_token_ids_manifest_sha256: 8a0059b59e4ab04d674fc9122c070017ca31f44600f690b4973b567fcdae1055
+  generation_prompt_token_ids_manifest_sha256: 923060f0f3dc78919b5b7356a7adcc5b3c362e119e31a99f6459570962b0293c
+  evaluated_token_count: 3278
+  routed_input_token_count: 3294
+  expected_layer_token_event_count: 19764
+  inference_claim: descriptive_only
+noninferiority:
+  target: finite_holdout_population_token_weighted_candidate_minus_baseline_nll
+  estimator: stratified_horvitz_thompson_numerator_over_known_token_denominator
+  margin_relative_perplexity: 0.005
+  margin_nats_per_token: 0.004987541511039074
+  decision_rule: one_sided_upper_bound_strictly_less_than_margin
+  confidence_level: 0.95
+  bootstrap:
+    method: paired_story_cluster_within_length_strata_srswor_moment_matching
+    replicates: 100000
+    rng: numpy.random.Generator(numpy.random.PCG64)
+    seed: 20260715
+    quantile_method: linear
+    finite_population_correction: per_stratum_moment_matched
+  analytic_standard_error: stratified_srswor_design_based
+repeatability:
+  required_clean_process_executions: 2
+  deterministic_decode: true
+  calibration_data: not_applicable_dynamic_int8
+claims:
+  domain: pinned_tinystories_validation_holdout_only
+  routing_and_generation_inferential: false
+  model_seed_uncertainty_covered: false
+  hardware_uncertainty_covered: false
+  cross_domain_generalization: false
