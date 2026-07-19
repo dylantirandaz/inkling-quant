@@ -14,7 +14,7 @@ import re
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Final, Literal
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -43,6 +43,17 @@ EXPECTED_SOURCE_SHARDS: Final = 109
 EXPECTED_WEIGHT_INDEX_CANONICAL_SHA256: Final = (
     "22e9760da68bfe0cf6f86c554ca5514936be0f5dfee0b63aaecf01d87b38cd95"
 )
+INKLING_SOURCE_ADOPTION_REFERENCE_RELATIVE_PATH: Final = (
+    "configs/experiments/inkling_q3_k_m_source_adoption.json"
+)
+ORIGIN_SOURCE_RUN_ID: Final = "inkling-q3km-86b4d430-a015409e-551ab8f240-bcc168525e"
+ORIGIN_SOURCE_CONFIG_SHA256: Final = (
+    "551ab8f240269edbdc19efb61afc73e8b8b50e128e15781cf2248c674a8c4562"
+)
+ORIGIN_SOURCE_CONTROL_PLANE_SHA256: Final = (
+    "bcc168525e8392944f4d19b8119fd888ab86f1cca620bbfd1c0d9e5dc5461ca3"
+)
+SOURCE_ADOPTION_HASH_DOMAIN: Final = b"inkling-source-adoption-reference-v1\0"
 MODAL_CPU_CORE_HOUR_USD: Final = Decimal("0.04716")
 MODAL_MEMORY_GIB_HOUR_USD: Final = Decimal("0.007992")
 MODAL_B300_GPU_HOUR_USD: Final = Decimal("7.0992")
@@ -324,6 +335,333 @@ class InklingGGUFConfig(StrictFrozenModel):
         return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
 
 
+class SourceAdoptionArtifact(StrictFrozenModel):
+    """One immutable file needed to authenticate an existing source snapshot."""
+
+    path: str = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size_bytes: int = Field(gt=0)
+
+    @field_validator("path")
+    @classmethod
+    def path_is_canonical_and_contained(cls, value: str) -> str:
+        if "\x00" in value or "\\" in value or "//" in value:
+            raise ValueError("adoption artifact path must be canonical POSIX text")
+        parsed = PurePosixPath(value)
+        if any(part in {"", ".", ".."} for part in parsed.parts):
+            raise ValueError("adoption artifact path must not contain traversal")
+        if parsed.as_posix() != value:
+            raise ValueError("adoption artifact path must be canonical")
+        return value
+
+
+class InklingSourceAdoptionReference(StrictFrozenModel):
+    """Checked direct-source lineage used to avoid a second multi-terabyte download.
+
+    This record is deliberately specific to the already verified materialization. It
+    is not an alias and does not itself authorize adoption: the paid boundary must
+    still rehash every referenced remote file and the complete source inventory.
+    """
+
+    schema_version: Literal["inkling-source-adoption-reference-v1"] = (
+        "inkling-source-adoption-reference-v1"
+    )
+    adoption_kind: Literal["rehash_verified_source_into_distinct_run_v1"] = (
+        "rehash_verified_source_into_distinct_run_v1"
+    )
+    origin_materialization_kind: Literal["direct_huggingface_snapshot_v1"] = (
+        "direct_huggingface_snapshot_v1"
+    )
+    origin_parent_adoption_reference_sha256: None = None
+    verified: Literal[True] = True
+    origin_run_id: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,95}$")
+    origin_app_name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")
+    origin_app_id: str = Field(pattern=r"^ap-[A-Za-z0-9]+$")
+    origin_app_required_state: Literal["stopped"] = "stopped"
+    origin_app_required_active_tasks: Literal[0] = 0
+    origin_config_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    origin_control_plane_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    origin_control_plane_file_count: int = Field(gt=0)
+    materialize_function_call_id: str = Field(pattern=r"^fc-[A-Za-z0-9]+$")
+    materialize_input_id: str = Field(min_length=1, pattern=r"^in-[A-Za-z0-9:-]+$")
+    materialize_task_id: str = Field(pattern=r"^ta-[A-Za-z0-9]+$")
+    materialize_call_terminal_status: Literal["SUCCESS"] = "SUCCESS"
+    materialize_call_child_count: Literal[0] = 0
+    materialize_continuation_call_ids: tuple[()] = ()
+    materialize_launch_intent_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_volume: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")
+    source_mount_path: str
+    source_run_root: str
+    snapshot_path: str
+    model_id: str
+    revision: str = Field(pattern=r"^[0-9a-f]{40}$")
+    architecture: str
+    model_type: str
+    license: str
+    checkpoint_format: Literal["safetensors"] = "safetensors"
+    trust_remote_code: Literal[False] = False
+    toolchain_repository: str
+    toolchain_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    indexed_tensor_bytes: int = Field(gt=0)
+    materialized_weight_file_bytes: int = Field(gt=0)
+    source_tensor_count: int = Field(gt=0)
+    source_shard_count: int = Field(gt=0)
+    materialized_file_count: int = Field(gt=0)
+    text_tensor_count: int = Field(gt=0)
+    vision_tensor_count: int = Field(gt=0)
+    audio_tensor_count: int = Field(gt=0)
+    mtp_tensor_count: int = Field(gt=0)
+    converted_source_tensor_count: int = Field(gt=0)
+    omitted_source_tensor_count: int = Field(gt=0)
+    weight_index_canonical_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_success_receipt: SourceAdoptionArtifact
+    source_inventory: SourceAdoptionArtifact
+    origin_resolved_config: SourceAdoptionArtifact
+    origin_control_plane: SourceAdoptionArtifact
+    origin_materialize_attempt_ledger: SourceAdoptionArtifact
+    origin_materialize_invocation_history: SourceAdoptionArtifact
+    snapshot_config: SourceAdoptionArtifact
+    snapshot_weight_index: SourceAdoptionArtifact
+    local_materialize_call_receipt: SourceAdoptionArtifact
+    local_materialize_launch_intent: SourceAdoptionArtifact
+    local_deployment_receipt: SourceAdoptionArtifact
+    reference_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("source_mount_path", "source_run_root", "snapshot_path")
+    @classmethod
+    def source_paths_are_canonical_absolute_posix(cls, value: str) -> str:
+        if "\x00" in value or "\\" in value or "//" in value:
+            raise ValueError("source path must be canonical absolute POSIX text")
+        parsed = PurePosixPath(value)
+        if not parsed.is_absolute() or any(part in {"", ".", ".."} for part in parsed.parts):
+            raise ValueError("source path must be absolute and contain no traversal")
+        if parsed.as_posix() != value:
+            raise ValueError("source path must be canonical")
+        return value
+
+    def canonical_payload_dict(self) -> dict[str, Any]:
+        """Return the self-hashed payload without its hash field."""
+
+        return self.model_dump(mode="json", exclude={"reference_sha256"})
+
+    def computed_reference_sha256(self) -> str:
+        """Compute the domain-separated hash over the canonical payload."""
+
+        return inkling_source_adoption_reference_sha256(self.canonical_payload_dict())
+
+    def canonical_json(self) -> str:
+        """Serialize the complete checked record as canonical JSON."""
+
+        return json.dumps(
+            self.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+
+    @model_validator(mode="after")
+    def matches_exact_verified_direct_source(self) -> InklingSourceAdoptionReference:
+        source_root = f"/source/runs/{ORIGIN_SOURCE_RUN_ID}"
+        local_root = f"artifacts/inkling-modal/{ORIGIN_SOURCE_RUN_ID}"
+        expected: dict[str, object] = {
+            "origin_run_id": ORIGIN_SOURCE_RUN_ID,
+            "origin_app_name": "inkling-q3-k-m-bcc168525e83",
+            "origin_app_id": "ap-zhL7JVGVfoVSSeiKxrj1k3",
+            "origin_config_hash": ORIGIN_SOURCE_CONFIG_SHA256,
+            "origin_control_plane_sha256": ORIGIN_SOURCE_CONTROL_PLANE_SHA256,
+            "origin_control_plane_file_count": 102,
+            "materialize_function_call_id": "fc-01KXVB8CYN7EA0S0Z3650W0C53",
+            "materialize_input_id": "in-01KXVB8CZ0V6E777SP8Z02JTGE:1784402949113-0",
+            "materialize_task_id": "ta-01KXVB8EEZGNFCTYXHPJT612GR",
+            "materialize_launch_intent_sha256": (
+                "864b14663f506bc5aa6bd9d0ea24dffbbfc05779f82b1b3c380c4449ca4fa339"
+            ),
+            "source_volume": "inkling-source-v1",
+            "source_mount_path": "/source",
+            "source_run_root": source_root,
+            "snapshot_path": f"{source_root}/snapshot",
+            "model_id": PINNED_INKLING_MODEL_ID,
+            "revision": PINNED_INKLING_REVISION,
+            "architecture": EXPECTED_ARCHITECTURE,
+            "model_type": EXPECTED_MODEL_TYPE,
+            "license": EXPECTED_LICENSE,
+            "toolchain_repository": PINNED_LLAMA_CPP_REPOSITORY,
+            "toolchain_commit": PINNED_LLAMA_CPP_COMMIT,
+            "indexed_tensor_bytes": EXPECTED_MODEL_BYTES,
+            "materialized_weight_file_bytes": 1_904_755_463_940,
+            "source_tensor_count": EXPECTED_SOURCE_TENSORS,
+            "source_shard_count": EXPECTED_SOURCE_SHARDS,
+            "materialized_file_count": 117,
+            "text_tensor_count": EXPECTED_TEXT_TENSORS,
+            "vision_tensor_count": EXPECTED_VISION_TENSORS,
+            "audio_tensor_count": EXPECTED_AUDIO_TENSORS,
+            "mtp_tensor_count": EXPECTED_MTP_TENSORS,
+            "converted_source_tensor_count": (
+                EXPECTED_TEXT_TENSORS + EXPECTED_VISION_TENSORS + EXPECTED_AUDIO_TENSORS
+            ),
+            "omitted_source_tensor_count": EXPECTED_MTP_TENSORS,
+            "weight_index_canonical_sha256": EXPECTED_WEIGHT_INDEX_CANONICAL_SHA256,
+        }
+        mismatches = [name for name, value in expected.items() if getattr(self, name) != value]
+        expected_artifacts = {
+            "source_success_receipt": {
+                "path": f"{source_root}/source.success.json",
+                "sha256": "06937bc535fb703da6adc9d11e1e804ce15f67b39ffbbe98a9a51a7dc70edbbc",
+                "size_bytes": 1193,
+            },
+            "source_inventory": {
+                "path": f"{source_root}/source_inventory.json",
+                "sha256": "a8aa37efec2b12c5d584c8163111d3a8a22d9568ef01886343755a8af6ace571",
+                "size_bytes": 25106,
+            },
+            "origin_resolved_config": {
+                "path": f"{source_root}/resolved_config.json",
+                "sha256": "f0527ddb6b475e20771c231e42329cf51fc3326c87453593418b062d1b3aac96",
+                "size_bytes": 3351,
+            },
+            "origin_control_plane": {
+                "path": f"{source_root}/control_plane.json",
+                "sha256": "135bf3af048e8e6fe6e4e9032c94da364a5e362dcb012e4b5fbaf36ececda380",
+                "size_bytes": 18718,
+            },
+            "origin_materialize_invocation_history": {
+                "path": (
+                    f"{source_root}/control/history/materialize_source.attempt.1."
+                    "896fb36e8aadc52a0d15fe190e464ff33e4910f2fa163bb00e64d712fd990581.json"
+                ),
+                "sha256": "42bb7cd1338485ea81c3c15346b29304f1c135167ea205877c72d1b902956456",
+                "size_bytes": 632,
+            },
+            "origin_materialize_attempt_ledger": {
+                "path": f"{source_root}/control/materialize_source.attempts.json",
+                "sha256": "3d30e78f8f2f8ee70a5fb7fe53109b17b8bb2c39bc64ecd2e9f58e9607fa51f3",
+                "size_bytes": 712,
+            },
+            "snapshot_config": {
+                "path": f"{source_root}/snapshot/config.json",
+                "sha256": "58720f145bcecef9a7ab2b419ab346e7c634af8d2f3e7362e900d00f789ea46c",
+                "size_bytes": 2415,
+            },
+            "snapshot_weight_index": {
+                "path": f"{source_root}/snapshot/model.safetensors.index.json",
+                "sha256": "6bdebc2a928b1be96e1666b40704a4222ee0c764c2611247bb8ad4d485ea9a97",
+                "size_bytes": 128600,
+            },
+            "local_materialize_call_receipt": {
+                "path": (
+                    f"{local_root}/calls/2026-07-18T192909.115192+0000-materialize_source.json"
+                ),
+                "sha256": "eba7fc186b0150e8e43dba50dd96c8bca865c8b6aa79587a1661e13f8b522a90",
+                "size_bytes": 1054,
+            },
+            "local_materialize_launch_intent": {
+                "path": (
+                    f"{local_root}/launch-intents/"
+                    "2026-07-18T192908.5039760000-materialize_source-"
+                    "dd18a2109a926e7eae54a3f4f6890136.json"
+                ),
+                "sha256": "864b14663f506bc5aa6bd9d0ea24dffbbfc05779f82b1b3c380c4449ca4fa339",
+                "size_bytes": 853,
+            },
+            "local_deployment_receipt": {
+                "path": f"{local_root}/deployment.json",
+                "sha256": "40eb0bf204115a58c7bd196fff601c5184c9479c82c52ba4d3891b876c85d6e6",
+                "size_bytes": 1248,
+            },
+        }
+        mismatches.extend(
+            name
+            for name, value in expected_artifacts.items()
+            if getattr(self, name).model_dump(mode="json") != value
+        )
+        if mismatches:
+            raise ValueError(
+                "source adoption reference differs from exact verified source evidence: "
+                + ", ".join(sorted(mismatches))
+            )
+        if self.reference_sha256 != self.computed_reference_sha256():
+            raise ValueError("source adoption reference self-hash does not match its payload")
+        return self
+
+
+def inkling_source_adoption_reference_sha256(value: Mapping[str, Any]) -> str:
+    """Hash a reference payload, ignoring its own hash field if present."""
+
+    payload = dict(value)
+    payload.pop("reference_sha256", None)
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(SOURCE_ADOPTION_HASH_DOMAIN + canonical).hexdigest()
+
+
+def load_inkling_source_adoption_reference(
+    path: str | Path,
+) -> InklingSourceAdoptionReference:
+    """Load one byte-canonical, self-hashed direct-source adoption reference."""
+
+    reference_path = Path(path)
+    try:
+        raw_bytes = reference_path.read_bytes()
+        raw = json.loads(raw_bytes)
+        if not isinstance(raw, Mapping):
+            raise ValueError("reference root must be a JSON object")
+        reference = InklingSourceAdoptionReference.model_validate(raw)
+    except (OSError, ValueError, ValidationError) as error:
+        raise ConfigurationError(
+            f"Unable to load Inkling source adoption reference {reference_path}: {error}",
+            component="inkling_source_adoption",
+        ) from error
+    if raw_bytes != (reference.canonical_json() + "\n").encode("utf-8"):
+        raise ConfigurationError(
+            "Inkling source adoption reference must use canonical JSON plus one newline",
+            component="inkling_source_adoption",
+        )
+    return reference
+
+
+def validate_inkling_source_adoption_reference(
+    reference: InklingSourceAdoptionReference,
+    *,
+    target_config: InklingGGUFConfig,
+    target_control_plane_sha256: str,
+) -> InklingSourceAdoptionReference:
+    """Bind a direct source reference to a distinct, config-identical target run."""
+
+    if re.fullmatch(r"[0-9a-f]{64}", target_control_plane_sha256) is None:
+        raise ConfigurationError(
+            "target_control_plane_sha256 must be SHA-256",
+            component="inkling_source_adoption",
+        )
+    if target_config.config_hash() != reference.origin_config_hash:
+        raise ConfigurationError(
+            "Source adoption requires the exact origin configuration",
+            component="inkling_source_adoption",
+        )
+    expected_origin_run_id = inkling_run_id(
+        target_config,
+        reference.origin_control_plane_sha256,
+    )
+    if expected_origin_run_id != reference.origin_run_id:
+        raise ConfigurationError(
+            "Source adoption origin run is not derived from its config and control plane",
+            component="inkling_source_adoption",
+        )
+    target_run_id = inkling_run_id(target_config, target_control_plane_sha256)
+    if (
+        target_control_plane_sha256 == reference.origin_control_plane_sha256
+        or target_run_id == reference.origin_run_id
+    ):
+        raise ConfigurationError(
+            "Source self-adoption is forbidden; the target run must be distinct",
+            component="inkling_source_adoption",
+        )
+    return reference
+
+
 class ControlPlaneFile(StrictFrozenModel):
     """One file in the content-addressed local orchestration source."""
 
@@ -420,6 +758,7 @@ def inkling_control_plane_provenance(project_root: Path) -> ControlPlaneProvenan
         project_root / "pyproject.toml",
         project_root / "uv.lock",
         project_root / "configs" / "experiments" / "inkling_q3_k_m_modal.yaml",
+        project_root / "configs" / "experiments" / "inkling_q3_k_m_source_adoption.json",
         project_root / "scripts" / "preflight_inkling_gguf.py",
         project_root / "scripts" / "manage_inkling_modal.py",
         project_root / "scripts" / "quantize_inkling_modal.py",
@@ -492,6 +831,7 @@ def validate_deployed_control_plane(
         "pyproject.toml",
         "uv.lock",
         "configs/experiments/inkling_q3_k_m_modal.yaml",
+        INKLING_SOURCE_ADOPTION_REFERENCE_RELATIVE_PATH,
         "scripts/preflight_inkling_gguf.py",
         "scripts/manage_inkling_modal.py",
     }
@@ -1224,6 +1564,7 @@ __all__ = [
     "EXPECTED_VISION_TENSORS",
     "EXPECTED_WEIGHT_INDEX_CANONICAL_SHA256",
     "FULL_INITIAL_BILLING_WINDOW_POLICY",
+    "INKLING_SOURCE_ADOPTION_REFERENCE_RELATIVE_PATH",
     "PINNED_INKLING_REVISION",
     "PINNED_LLAMA_CPP_COMMIT",
     "SHORT_INITIAL_BILLING_WINDOW_POLICY",
@@ -1234,8 +1575,10 @@ __all__ = [
     "ConversionPlan",
     "ExecutionBindingEvidence",
     "InklingGGUFConfig",
+    "InklingSourceAdoptionReference",
     "InklingSourceAudit",
     "PaidLaunchAcknowledgement",
+    "SourceAdoptionArtifact",
     "VerificationPlan",
     "WorkflowPaths",
     "audit_inkling_source",
@@ -1247,12 +1590,15 @@ __all__ = [
     "configured_deployable_wall_time_hours",
     "inkling_control_plane_provenance",
     "inkling_run_id",
+    "inkling_source_adoption_reference_sha256",
     "load_inkling_gguf_config",
+    "load_inkling_source_adoption_reference",
     "modal_stage_resources",
     "require_initial_billing_window",
     "require_materialize_initial_billing_window",
     "require_stage_billing_window",
     "validate_deployed_control_plane",
+    "validate_inkling_source_adoption_reference",
     "validate_paid_launch_acknowledgement",
     "verify_execution_bindings",
 ]

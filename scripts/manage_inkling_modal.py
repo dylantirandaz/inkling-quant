@@ -21,7 +21,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from decimal import Decimal
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Final
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -42,19 +42,25 @@ from inkling_quant_lab.exceptions import ConfigurationError  # noqa: E402
 from inkling_quant_lab.gguf.inkling import (  # noqa: E402
     DASHBOARD_EXACT_UTC_SOURCE,
     FULL_INITIAL_BILLING_WINDOW_POLICY,
+    INKLING_SOURCE_ADOPTION_REFERENCE_RELATIVE_PATH,
     SHORT_INITIAL_BILLING_WINDOW_POLICY,
     USER_CONFIRMED_ASSUMED_UTC_SOURCE,
     ControlPlaneProvenance,
     InklingGGUFConfig,
+    InklingSourceAdoptionReference,
     PaidLaunchAcknowledgement,
+    SourceAdoptionArtifact,
+    audit_inkling_source,
     audit_pinned_inkling_online,
     compute_cost_ceiling_usd,
     inkling_control_plane_provenance,
     inkling_run_id,
     load_inkling_gguf_config,
+    load_inkling_source_adoption_reference,
     require_initial_billing_window,
     require_materialize_initial_billing_window,
     require_stage_billing_window,
+    validate_inkling_source_adoption_reference,
 )
 
 CONFIG_PATH: Final = PROJECT_ROOT / "configs/experiments/inkling_q3_k_m_modal.yaml"
@@ -66,9 +72,9 @@ STAGE_ORDER: Final = (
     "quantize_text",
     "verify_export",
 )
-DEPLOYMENT_SCHEMA: Final = "inkling-modal-deployment-v6"
-CALL_SCHEMA: Final = "inkling-modal-call-v5"
-LAUNCH_INTENT_SCHEMA: Final = "inkling-modal-launch-intent-v4"
+DEPLOYMENT_SCHEMA: Final = "inkling-modal-deployment-v7"
+CALL_SCHEMA: Final = "inkling-modal-call-v6"
+LAUNCH_INTENT_SCHEMA: Final = "inkling-modal-launch-intent-v5"
 LOCK_RECONCILIATION_SCHEMA: Final = "inkling-modal-lock-reconciliation-v1"
 MAX_CONTROL_RECEIPT_BYTES: Final = 1024 * 1024
 STAGE_RECEIPTS: Final = {
@@ -81,6 +87,21 @@ STAGE_RECEIPTS: Final = {
     "quantize_text": ("final_volume", "quantize_text.success.json"),
     "verify_export": ("final_volume", "verify_export.success.json"),
 }
+SOURCE_ADOPTION_LOCAL_ARTIFACTS: Final = (
+    "local_deployment_receipt",
+    "local_materialize_call_receipt",
+    "local_materialize_launch_intent",
+)
+SOURCE_ADOPTION_VOLUME_ARTIFACTS: Final = (
+    "source_success_receipt",
+    "source_inventory",
+    "origin_resolved_config",
+    "origin_control_plane",
+    "origin_materialize_attempt_ledger",
+    "origin_materialize_invocation_history",
+    "snapshot_config",
+    "snapshot_weight_index",
+)
 
 
 def _load_checked_context() -> tuple[InklingGGUFConfig, ControlPlaneProvenance, str]:
@@ -89,6 +110,76 @@ def _load_checked_context() -> tuple[InklingGGUFConfig, ControlPlaneProvenance, 
         raise RuntimeError("Checked Inkling YAML differs from the frozen deployment schema")
     control_plane = inkling_control_plane_provenance(PROJECT_ROOT)
     return config, control_plane, inkling_run_id(config, control_plane.tree_sha256)
+
+
+def _load_source_adoption_for_target(
+    config: InklingGGUFConfig,
+    control_plane: ControlPlaneProvenance,
+) -> InklingSourceAdoptionReference:
+    """Load the one checked reference and bind it to this corrected control plane."""
+
+    relative_path = INKLING_SOURCE_ADOPTION_REFERENCE_RELATIVE_PATH
+    reference_path = PROJECT_ROOT / relative_path
+    reference = load_inkling_source_adoption_reference(reference_path)
+    validate_inkling_source_adoption_reference(
+        reference,
+        target_config=config,
+        target_control_plane_sha256=control_plane.tree_sha256,
+    )
+    matching_files = [item for item in control_plane.files if item.path == relative_path]
+    if len(matching_files) != 1:
+        raise RuntimeError("Control plane does not bind the exact source-adoption reference path")
+    raw = reference_path.read_bytes()
+    if (
+        matching_files[0].size_bytes != len(raw)
+        or matching_files[0].sha256 != hashlib.sha256(raw).hexdigest()
+    ):
+        raise RuntimeError("Control-plane source-adoption reference bytes drifted after hashing")
+    return reference
+
+
+def _load_checked_source_adoption(
+    config: InklingGGUFConfig,
+    control_plane: ControlPlaneProvenance,
+    run_id: str,
+) -> InklingSourceAdoptionReference:
+    """Load the reference supplied by a checked manager context."""
+
+    del run_id
+    return _load_source_adoption_for_target(config, control_plane)
+
+
+def _is_checked_target_run(
+    config: InklingGGUFConfig,
+    control_plane: ControlPlaneProvenance,
+    run_id: str,
+) -> bool:
+    """Distinguish the real deterministic run from synthetic helper-level fixtures."""
+
+    return run_id == inkling_run_id(config, control_plane.tree_sha256)
+
+
+def _source_adoption_binding(
+    reference: InklingSourceAdoptionReference,
+) -> dict[str, str]:
+    """Return the compact lineage fields repeated in every local control receipt."""
+
+    return {
+        "source_adoption_reference_sha256": reference.reference_sha256,
+        "source_adoption_origin_run_id": reference.origin_run_id,
+        "source_adoption_origin_app_name": reference.origin_app_name,
+        "source_adoption_origin_app_id": reference.origin_app_id,
+    }
+
+
+def _has_source_adoption_binding(
+    value: Mapping[str, Any],
+    reference: InklingSourceAdoptionReference,
+) -> bool:
+    return all(
+        value.get(name) == expected
+        for name, expected in _source_adoption_binding(reference).items()
+    )
 
 
 def _require_paid_gate(config: InklingGGUFConfig, workspace_budget_usd: Decimal) -> str:
@@ -255,6 +346,479 @@ def _read_object(path: Path) -> dict[str, Any]:
     return value
 
 
+def _json_object_from_exact_bytes(payload: bytes, *, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            f"Exact adoption artifact is not valid UTF-8 JSON for {label}"
+        ) from error
+    if not isinstance(value, dict):
+        raise RuntimeError(f"Exact adoption artifact is not a JSON object for {label}")
+    return value
+
+
+def _read_exact_local_adoption_json(
+    artifact: SourceAdoptionArtifact,
+    *,
+    label: str,
+) -> dict[str, Any]:
+    """Read one project-relative origin artifact only when its exact bytes still match."""
+
+    relative = PurePosixPath(artifact.path)
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        raise RuntimeError(f"Unsafe local adoption artifact path for {label}")
+    path = PROJECT_ROOT.joinpath(*relative.parts)
+    root = PROJECT_ROOT.resolve()
+    if not path.resolve(strict=False).is_relative_to(root):
+        raise RuntimeError(f"Local adoption artifact escapes the project root for {label}")
+    current = PROJECT_ROOT
+    if current.is_symlink():
+        raise RuntimeError(f"Local adoption artifact has a symlinked root for {label}")
+    for part in relative.parts:
+        current /= part
+        if current.is_symlink():
+            raise RuntimeError(f"Local adoption artifact contains a symlink for {label}")
+    if not path.is_file():
+        raise RuntimeError(f"Required local adoption artifact is missing for {label}")
+    before = path.stat()
+    if before.st_size != artifact.size_bytes or before.st_size > MAX_CONTROL_RECEIPT_BYTES:
+        raise RuntimeError(f"Local adoption artifact size drifted for {label}")
+    payload = path.read_bytes()
+    after = path.stat()
+    if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+    ):
+        raise RuntimeError(f"Local adoption artifact changed while reading for {label}")
+    if len(payload) != artifact.size_bytes:
+        raise RuntimeError(f"Local adoption artifact size drifted for {label}")
+    if hashlib.sha256(payload).hexdigest() != artifact.sha256:
+        raise RuntimeError(f"Local adoption artifact SHA-256 drifted for {label}")
+    return _json_object_from_exact_bytes(payload, label=label)
+
+
+def _read_exact_volume_adoption_json(
+    volume: Any,
+    artifact: SourceAdoptionArtifact,
+    *,
+    mount_path: str,
+    label: str,
+) -> dict[str, Any]:
+    """Read one exact small origin file through the read-only Volume API."""
+
+    absolute = PurePosixPath(artifact.path)
+    mount = PurePosixPath(mount_path)
+    try:
+        relative = absolute.relative_to(mount)
+    except ValueError as error:
+        raise RuntimeError(f"Volume adoption artifact is outside its mount for {label}") from error
+    if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        raise RuntimeError(f"Unsafe Volume adoption artifact path for {label}")
+    remote_path = relative.as_posix()
+    payload = bytearray()
+    try:
+        for chunk in volume.read_file(remote_path):
+            if not isinstance(chunk, bytes):
+                raise RuntimeError(f"Modal returned non-byte adoption content for {label}")
+            payload.extend(chunk)
+            if len(payload) > MAX_CONTROL_RECEIPT_BYTES:
+                raise RuntimeError(f"Modal adoption artifact is unexpectedly large for {label}")
+    except FileNotFoundError as error:
+        raise RuntimeError(f"Required Volume adoption artifact is missing for {label}") from error
+    raw = bytes(payload)
+    if len(raw) != artifact.size_bytes:
+        raise RuntimeError(f"Volume adoption artifact size drifted for {label}")
+    if hashlib.sha256(raw).hexdigest() != artifact.sha256:
+        raise RuntimeError(f"Volume adoption artifact SHA-256 drifted for {label}")
+    return _json_object_from_exact_bytes(raw, label=label)
+
+
+def _require_mapping_fields(
+    value: Mapping[str, Any],
+    expected: Mapping[str, Any],
+    *,
+    label: str,
+) -> None:
+    mismatches = [
+        name for name, expected_value in expected.items() if value.get(name) != expected_value
+    ]
+    if mismatches:
+        raise RuntimeError(
+            f"{label} has drifted critical identities: {', '.join(sorted(mismatches))}"
+        )
+
+
+def _validate_source_adoption_local_records(
+    reference: InklingSourceAdoptionReference,
+    records: Mapping[str, Mapping[str, Any]],
+) -> None:
+    if set(records) != set(SOURCE_ADOPTION_LOCAL_ARTIFACTS):
+        raise RuntimeError("Origin local adoption artifact set is incomplete")
+    deployment = records["local_deployment_receipt"]
+    call = records["local_materialize_call_receipt"]
+    intent = records["local_materialize_launch_intent"]
+    _require_mapping_fields(
+        deployment,
+        {
+            "schema_version": "inkling-modal-deployment-v6",
+            "app_name": reference.origin_app_name,
+            "environment_name": "inkling-quant",
+            "run_id": reference.origin_run_id,
+            "config_hash": reference.origin_config_hash,
+            "control_plane_sha256": reference.origin_control_plane_sha256,
+        },
+        label="Origin local deployment receipt",
+    )
+    bindings = deployment.get("stage_function_bindings")
+    if not isinstance(bindings, dict):
+        raise RuntimeError("Origin local deployment receipt has no Function bindings")
+    materialize_binding = bindings.get("materialize_source")
+    if not isinstance(materialize_binding, dict):
+        raise RuntimeError("Origin local deployment receipt has no materialize_source binding")
+    function_id = materialize_binding.get("function_id")
+    if (
+        materialize_binding.get("function_name") != "materialize_source"
+        or not isinstance(function_id, str)
+        or not function_id.startswith("fu-")
+    ):
+        raise RuntimeError("Origin materialize_source Function binding drifted")
+    _require_mapping_fields(
+        intent,
+        {
+            "schema_version": "inkling-modal-launch-intent-v4",
+            "status": "prepared_before_spawn",
+            "run_id": reference.origin_run_id,
+            "stage": "materialize_source",
+            "app_name": reference.origin_app_name,
+            "environment_name": "inkling-quant",
+            "function_id": function_id,
+            "function_name": "materialize_source",
+            "config_hash": reference.origin_config_hash,
+            "control_plane_sha256": reference.origin_control_plane_sha256,
+        },
+        label="Origin local materialize launch intent",
+    )
+    if (
+        reference.local_materialize_launch_intent.sha256
+        != reference.materialize_launch_intent_sha256
+    ):
+        raise RuntimeError("Origin launch-intent artifact hash is not its launch identity")
+    origin_local_root = PurePosixPath("artifacts", "inkling-modal", reference.origin_run_id)
+    intent_relative = PurePosixPath(reference.local_materialize_launch_intent.path).relative_to(
+        origin_local_root
+    )
+    _require_mapping_fields(
+        call,
+        {
+            "schema_version": "inkling-modal-call-v5",
+            "status": "accepted",
+            "run_id": reference.origin_run_id,
+            "stage": "materialize_source",
+            "call_id": reference.materialize_function_call_id,
+            "app_name": reference.origin_app_name,
+            "environment_name": "inkling-quant",
+            "function_id": function_id,
+            "function_name": "materialize_source",
+            "launch_intent": intent_relative.as_posix(),
+            "launch_intent_sha256": reference.materialize_launch_intent_sha256,
+            "config_hash": reference.origin_config_hash,
+            "control_plane_sha256": reference.origin_control_plane_sha256,
+        },
+        label="Origin local materialize call receipt",
+    )
+    for field in ("deployment_version", "deployment_tag", "billing_cycle_end_utc"):
+        if call.get(field) != intent.get(field):
+            raise RuntimeError(f"Origin local call/intent {field} binding drifted")
+
+
+def _validate_source_adoption_local_artifacts(
+    reference: InklingSourceAdoptionReference,
+) -> None:
+    records = {
+        name: _read_exact_local_adoption_json(
+            getattr(reference, name),
+            label=name,
+        )
+        for name in SOURCE_ADOPTION_LOCAL_ARTIFACTS
+    }
+    _validate_source_adoption_local_records(reference, records)
+
+
+def _validate_source_inventory_records(
+    records: Mapping[str, Any],
+    *,
+    expected_count: int,
+) -> None:
+    if len(records) != expected_count:
+        raise RuntimeError("Origin source inventory file count drifted")
+    for name, raw_record in records.items():
+        if not isinstance(name, str) or not isinstance(raw_record, dict):
+            raise RuntimeError("Origin source inventory contains a malformed record")
+        path = PurePosixPath(name)
+        if (
+            path.is_absolute()
+            or path.as_posix() != name
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or raw_record.get("path") != name
+            or not isinstance(raw_record.get("size_bytes"), int)
+            or raw_record["size_bytes"] <= 0
+            or re.fullmatch(r"[0-9a-f]{64}", str(raw_record.get("sha256"))) is None
+        ):
+            raise RuntimeError("Origin source inventory contains a malformed file identity")
+
+
+def _validate_source_adoption_volume_records(
+    config: InklingGGUFConfig,
+    reference: InklingSourceAdoptionReference,
+    records: Mapping[str, Mapping[str, Any]],
+) -> None:
+    if set(records) != set(SOURCE_ADOPTION_VOLUME_ARTIFACTS):
+        raise RuntimeError("Origin Volume adoption artifact set is incomplete")
+    receipt = records["source_success_receipt"]
+    inventory = records["source_inventory"]
+    resolved_config = records["origin_resolved_config"]
+    control_plane_record = records["origin_control_plane"]
+    ledger = records["origin_materialize_attempt_ledger"]
+    history = records["origin_materialize_invocation_history"]
+    snapshot_config = records["snapshot_config"]
+    weight_index = records["snapshot_weight_index"]
+
+    if resolved_config != config.canonical_dict():
+        raise RuntimeError("Origin resolved configuration differs from the checked target config")
+    try:
+        origin_control = ControlPlaneProvenance.model_validate(control_plane_record)
+    except ValueError as error:
+        raise RuntimeError("Origin control-plane record is malformed") from error
+    if (
+        origin_control.tree_sha256 != reference.origin_control_plane_sha256
+        or origin_control.file_count != reference.origin_control_plane_file_count
+    ):
+        raise RuntimeError("Origin control-plane identity drifted")
+
+    _require_mapping_fields(
+        receipt,
+        {
+            "verified": True,
+            "config_hash": reference.origin_config_hash,
+            "control_plane_sha256": reference.origin_control_plane_sha256,
+            "model_id": reference.model_id,
+            "revision": reference.revision,
+            "license": reference.license,
+            "source_dir": reference.snapshot_path,
+            "weight_index_sha256": reference.weight_index_canonical_sha256,
+            "source_tensor_bytes": reference.indexed_tensor_bytes,
+            "materialized_weight_file_bytes": reference.materialized_weight_file_bytes,
+            "source_tensor_count": reference.source_tensor_count,
+            "source_shard_count": reference.source_shard_count,
+            "file_count": reference.materialized_file_count,
+            "inventory_sha256": reference.source_inventory.sha256,
+            "source_config_sha256": reference.snapshot_config.sha256,
+            "call_id": reference.materialize_function_call_id,
+            "launch_intent_sha256": reference.materialize_launch_intent_sha256,
+        },
+        label="Origin source success receipt",
+    )
+    raw_files = inventory.get("files")
+    if not isinstance(raw_files, dict):
+        raise RuntimeError("Origin source inventory has no file mapping")
+    _require_mapping_fields(
+        inventory,
+        {
+            "config_hash": reference.origin_config_hash,
+            "model_id": reference.model_id,
+            "revision": reference.revision,
+            "required_file_count": reference.materialized_file_count,
+        },
+        label="Origin source inventory",
+    )
+    _validate_source_inventory_records(raw_files, expected_count=reference.materialized_file_count)
+
+    source_audit = audit_inkling_source(
+        config,
+        model_info={
+            "id": reference.model_id,
+            "sha": reference.revision,
+            "cardData": {"license": reference.license},
+        },
+        model_config=snapshot_config,
+        weight_index=weight_index,
+    )
+    if (
+        source_audit.weight_index_sha256 != reference.weight_index_canonical_sha256
+        or source_audit.source_bytes != reference.indexed_tensor_bytes
+        or source_audit.source_tensor_count != reference.source_tensor_count
+        or source_audit.source_shard_count != reference.source_shard_count
+    ):
+        raise RuntimeError("Origin snapshot config/index audit drifted")
+    raw_weight_map = weight_index.get("weight_map")
+    if not isinstance(raw_weight_map, dict):
+        raise RuntimeError("Origin snapshot weight index has no weight_map")
+    shard_names = {str(name) for name in raw_weight_map.values()}
+    if len(shard_names) != reference.source_shard_count or not shard_names.issubset(raw_files):
+        raise RuntimeError("Origin source inventory omits indexed shard identities")
+    materialized_weight_bytes = sum(int(raw_files[name]["size_bytes"]) for name in shard_names)
+    if materialized_weight_bytes != reference.materialized_weight_file_bytes:
+        raise RuntimeError("Origin materialized safetensors byte total drifted")
+
+    materialize_limit = next(
+        stage.max_attempts for stage in config.modal.stages if stage.name == "materialize_source"
+    )
+    history_relative = PurePosixPath(
+        reference.origin_materialize_invocation_history.path
+    ).relative_to(PurePosixPath(reference.source_run_root))
+    _require_mapping_fields(
+        history,
+        {
+            "schema_version": "inkling-modal-stage-invocation-v2",
+            "status": "started",
+            "kind": "attempt",
+            "sequence": 1,
+            "limit": materialize_limit,
+            "stage": "materialize_source",
+            "config_hash": reference.origin_config_hash,
+            "control_plane_sha256": reference.origin_control_plane_sha256,
+            "launch_intent_sha256": reference.materialize_launch_intent_sha256,
+            "call_id": reference.materialize_function_call_id,
+            "input_id": reference.materialize_input_id,
+            "task_id": reference.materialize_task_id,
+            "previous_history_sha256": None,
+        },
+        label="Origin materialize invocation history",
+    )
+    event_id = hashlib.sha256(
+        json.dumps(history, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    if history_relative.name != f"materialize_source.attempt.1.{event_id}.json":
+        raise RuntimeError("Origin materialize invocation-history filename drifted")
+    _require_mapping_fields(
+        ledger,
+        {
+            "attempts": 1,
+            "limit": materialize_limit,
+            "config_hash": reference.origin_config_hash,
+            "control_plane_sha256": reference.origin_control_plane_sha256,
+            "launch_intent_sha256": reference.materialize_launch_intent_sha256,
+            "last_call_id": reference.materialize_function_call_id,
+            "last_input_id": reference.materialize_input_id,
+            "last_task_id": reference.materialize_task_id,
+            "last_history_path": history_relative.as_posix(),
+            "last_history_sha256": reference.origin_materialize_invocation_history.sha256,
+        },
+        label="Origin materialize attempt ledger",
+    )
+
+
+def _validate_source_adoption_volume_artifacts(
+    config: InklingGGUFConfig,
+    reference: InklingSourceAdoptionReference,
+) -> None:
+    if config.modal.source_volume != reference.source_volume:
+        raise RuntimeError("Checked target config does not mount the pinned origin source Volume")
+    volume = modal.Volume.from_name(
+        reference.source_volume,
+        environment_name=config.modal.environment_name,
+        create_if_missing=False,
+        version=config.modal.volume_version,
+    )
+    volume.hydrate()
+    records = {
+        name: _read_exact_volume_adoption_json(
+            volume,
+            getattr(reference, name),
+            mount_path=reference.source_mount_path,
+            label=name,
+        )
+        for name in SOURCE_ADOPTION_VOLUME_ARTIFACTS
+    }
+    _validate_source_adoption_volume_records(config, reference, records)
+
+
+def _require_origin_call_graph_success(reference: InklingSourceAdoptionReference) -> None:
+    call = modal.FunctionCall.from_id(reference.materialize_function_call_id)
+    graph = call.get_call_graph()
+    if not isinstance(graph, list) or len(graph) != 1:
+        raise RuntimeError("Origin materialize call graph must contain exactly one root")
+    root = graph[0]
+    children = getattr(root, "children", None)
+    if not isinstance(children, list) or children:
+        raise RuntimeError("Origin materialize call graph root must have zero children")
+    # Modal's graph omits task_id and strips the immutable invocation suffix from
+    # input_id. The exact input/task pair is instead required above in both the
+    # hash-pinned invocation-history event and its attempt-ledger binding.
+    expected = {
+        "function_call_id": reference.materialize_function_call_id,
+        "status": InputStatus.SUCCESS,
+    }
+    mismatches = [name for name, value in expected.items() if getattr(root, name, None) != value]
+    if mismatches:
+        raise RuntimeError(
+            "Origin materialize root call graph identity drifted: " + ", ".join(sorted(mismatches))
+        )
+    if reference.materialize_call_child_count != 0 or reference.materialize_continuation_call_ids:
+        raise RuntimeError("Checked origin reference permits unexpected materialize continuations")
+
+
+def _modal_app_list(config: InklingGGUFConfig) -> list[dict[str, Any]]:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "modal",
+            "app",
+            "list",
+            "-e",
+            config.modal.environment_name,
+            "--json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        shell=False,
+    )
+    value = json.loads(result.stdout)
+    if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
+        raise RuntimeError("Modal App list returned an unexpected JSON shape")
+    return value
+
+
+def _require_origin_app_stopped(
+    config: InklingGGUFConfig,
+    reference: InklingSourceAdoptionReference,
+) -> None:
+    candidates = [
+        row
+        for row in _modal_app_list(config)
+        if row.get("app_id") == reference.origin_app_id
+        or row.get("description") == reference.origin_app_name
+    ]
+    if len(candidates) != 1:
+        raise RuntimeError("Expected exactly one Modal App matching the pinned origin ID/name")
+    row = candidates[0]
+    if (
+        row.get("app_id") != reference.origin_app_id
+        or row.get("description") != reference.origin_app_name
+        or row.get("state") != reference.origin_app_required_state
+        or row.get("tasks") not in (reference.origin_app_required_active_tasks, "0")
+    ):
+        raise RuntimeError("Pinned origin App must remain stopped with zero active tasks")
+
+
+def _require_source_adoption_origin_ready(
+    config: InklingGGUFConfig,
+    reference: InklingSourceAdoptionReference,
+) -> dict[str, str]:
+    """Reprove all cheap origin evidence without starting a Modal container."""
+
+    _validate_source_adoption_local_artifacts(reference)
+    _validate_source_adoption_volume_artifacts(config, reference)
+    _require_origin_call_graph_success(reference)
+    _require_origin_app_stopped(config, reference)
+    return _source_adoption_binding(reference)
+
+
 def _reconcile_stale_manager_lock(
     run_id: str,
     *,
@@ -329,6 +893,22 @@ def _read_volume_json_file(
     remote_path: str,
     label: str,
 ) -> dict[str, Any] | None:
+    result = _read_volume_json_file_with_sha256(
+        config,
+        volume_attribute=volume_attribute,
+        remote_path=remote_path,
+        label=label,
+    )
+    return None if result is None else result[0]
+
+
+def _read_volume_json_file_with_sha256(
+    config: InklingGGUFConfig,
+    *,
+    volume_attribute: str,
+    remote_path: str,
+    label: str,
+) -> tuple[dict[str, Any], str] | None:
     volume_name = getattr(config.modal, volume_attribute)
     volume = modal.Volume.from_name(
         volume_name,
@@ -336,8 +916,7 @@ def _read_volume_json_file(
         create_if_missing=False,
         version=config.modal.volume_version,
     )
-    result = _read_json_from_volume(volume, remote_path=remote_path, label=label)
-    return None if result is None else result[0]
+    return _read_json_from_volume(volume, remote_path=remote_path, label=label)
 
 
 def _read_json_from_volume(
@@ -449,6 +1028,7 @@ def _validate_volume_receipt(
     *,
     config: InklingGGUFConfig,
     control_plane: ControlPlaneProvenance,
+    run_id: str,
     stage: str,
 ) -> None:
     expected_success = (
@@ -462,6 +1042,262 @@ def _validate_volume_receipt(
         or receipt.get("control_plane_sha256") != control_plane.tree_sha256
     ):
         raise RuntimeError(f"Committed Modal receipt drifted for {stage}")
+    if stage == "materialize_source" and _is_checked_target_run(config, control_plane, run_id):
+        _validate_current_adopted_source_receipt(
+            receipt,
+            config=config,
+            control_plane=control_plane,
+            run_id=run_id,
+        )
+
+
+def _expected_adopted_source_origin(
+    reference: InklingSourceAdoptionReference,
+) -> dict[str, Any]:
+    return {
+        "run_id": reference.origin_run_id,
+        "config_hash": reference.origin_config_hash,
+        "control_plane_sha256": reference.origin_control_plane_sha256,
+        "source_success_sha256": reference.source_success_receipt.sha256,
+        "source_inventory_sha256": reference.source_inventory.sha256,
+        "source_config_sha256": reference.snapshot_config.sha256,
+        "weight_index_file_sha256": reference.snapshot_weight_index.sha256,
+        "materialize_function_call_id": reference.materialize_function_call_id,
+        "materialize_input_id": reference.materialize_input_id,
+        "materialize_task_id": reference.materialize_task_id,
+    }
+
+
+def _validate_current_adopted_source_receipt(
+    receipt: Mapping[str, Any],
+    *,
+    config: InklingGGUFConfig,
+    control_plane: ControlPlaneProvenance,
+    run_id: str,
+) -> None:
+    """Require the real current source marker to be the checked adoption, never a download."""
+
+    reference = _load_checked_source_adoption(config, control_plane, run_id)
+    reference_files = [
+        item
+        for item in control_plane.files
+        if item.path == INKLING_SOURCE_ADOPTION_REFERENCE_RELATIVE_PATH
+    ]
+    if len(reference_files) != 1:
+        raise RuntimeError("Current control plane has no unique adoption reference file")
+    expected = {
+        "schema_version": "inkling-adopted-source-success-v2",
+        "status": "success",
+        "verified": True,
+        "config_hash": config.config_hash(),
+        "control_plane_sha256": control_plane.tree_sha256,
+        "run_id": run_id,
+        "materialization_kind": "adopted_verified_source_v1",
+        "source_dir": reference.snapshot_path,
+        "source_adoption_reference_sha256": reference.reference_sha256,
+        "source_adoption_file_sha256": reference_files[0].sha256,
+        "origin": _expected_adopted_source_origin(reference),
+        "model_id": config.source.model_id,
+        "revision": config.source.revision,
+        "license": config.source.license,
+        "weight_index_sha256": reference.weight_index_canonical_sha256,
+        "source_tensor_bytes": reference.indexed_tensor_bytes,
+        "materialized_weight_file_bytes": reference.materialized_weight_file_bytes,
+        "source_tensor_count": reference.source_tensor_count,
+        "source_shard_count": reference.source_shard_count,
+        "file_count": reference.materialized_file_count,
+        "inventory_sha256": reference.source_inventory.sha256,
+        "source_config_sha256": reference.snapshot_config.sha256,
+    }
+    mismatches = [name for name, value in expected.items() if receipt.get(name) != value]
+    toolchain = receipt.get("toolchain")
+    if not isinstance(toolchain, dict) or toolchain.get("commit") != config.toolchain.commit:
+        mismatches.append("toolchain")
+    if mismatches:
+        raise RuntimeError(
+            "Current materialize_source receipt lacks the exact adopted source binding: "
+            + ", ".join(sorted(set(mismatches)))
+        )
+    _validate_adopted_source_invocation_binding(
+        receipt,
+        config=config,
+        control_plane=control_plane,
+        run_id=run_id,
+    )
+
+
+def _validate_adopted_source_invocation_binding(
+    receipt: Mapping[str, Any],
+    *,
+    config: InklingGGUFConfig,
+    control_plane: ControlPlaneProvenance,
+    run_id: str,
+) -> None:
+    """Bind the marker to its creation attempt and every later validation attempt."""
+
+    resources = next(item for item in config.modal.stages if item.name == "materialize_source")
+    history = _authoritative_invocation_history(
+        config,
+        control_plane,
+        volume_attribute="source_volume",
+        run_id=run_id,
+        stage="materialize_source",
+        kind="attempt",
+        limit=resources.max_attempts,
+    )
+    if not history:
+        raise RuntimeError("Adopted current source marker has no immutable attempt history")
+    latest_path, latest_event, latest_sha256 = history[-1]
+    run_prefix = f"runs/{run_id}/"
+    if not latest_path.startswith(run_prefix):
+        raise RuntimeError("Latest adopted-source invocation history path escapes its run")
+    relative_history_path = latest_path.removeprefix(run_prefix)
+    ledger_result = _read_volume_json_file(
+        config,
+        volume_attribute="source_volume",
+        remote_path=f"runs/{run_id}/control/materialize_source.attempts.json",
+        label="current adopted source attempt ledger",
+    )
+    ledger_expected = {
+        "attempts": len(history),
+        "limit": resources.max_attempts,
+        "config_hash": config.config_hash(),
+        "control_plane_sha256": control_plane.tree_sha256,
+        "last_history_path": relative_history_path,
+        "last_history_sha256": latest_sha256,
+        "last_call_id": latest_event["call_id"],
+        "last_input_id": latest_event["input_id"],
+        "last_task_id": latest_event["task_id"],
+        "launch_intent_sha256": latest_event["launch_intent_sha256"],
+    }
+    if ledger_result is None or any(
+        ledger_result.get(name) != value for name, value in ledger_expected.items()
+    ):
+        raise RuntimeError("Current adopted source materialization attempt ledger drifted")
+
+    creation_sequence = receipt.get("invocation_sequence")
+    if (
+        not isinstance(creation_sequence, int)
+        or creation_sequence < 1
+        or creation_sequence > len(history)
+    ):
+        raise RuntimeError("Current adopted source marker has no valid creation invocation")
+    creation_path, creation_event, creation_sha256 = history[creation_sequence - 1]
+    if not creation_path.startswith(run_prefix):
+        raise RuntimeError("Adopted-source creation history path escapes its run")
+    creation_expected = {
+        "invocation_sequence": creation_event["sequence"],
+        "invocation_history_path": creation_path.removeprefix(run_prefix),
+        "invocation_history_sha256": creation_sha256,
+        "call_id": creation_event["call_id"],
+        "input_id": creation_event["input_id"],
+        "task_id": creation_event["task_id"],
+        "launch_intent_sha256": creation_event["launch_intent_sha256"],
+    }
+    if any(receipt.get(name) != value for name, value in creation_expected.items()):
+        raise RuntimeError(
+            "Current adopted source marker is not bound to its exact creation invocation"
+        )
+
+    validations, source_success_sha256 = _completed_adoption_validations_from_volume(
+        config,
+        run_id=run_id,
+        expected_source_receipt=receipt,
+    )
+    expected_sequences = set(range(creation_sequence + 1, len(history) + 1))
+    if set(validations) != expected_sequences:
+        raise RuntimeError(
+            "Current adopted source completed-validation chain is incomplete or unexpected"
+        )
+    toolchain = receipt.get("toolchain")
+    reference_sha256 = receipt.get("source_adoption_reference_sha256")
+    if not isinstance(toolchain, dict) or not isinstance(reference_sha256, str):
+        raise RuntimeError("Current adopted source marker has invalid validation identities")
+    for sequence in sorted(validations):
+        path, event, sha256 = history[sequence - 1]
+        if not path.startswith(run_prefix):
+            raise RuntimeError("Adopted-source validation history path escapes its run")
+        expected_validation = {
+            "schema_version": "inkling-adopted-source-completed-validation-v1",
+            "status": "success",
+            "verified": True,
+            "run_id": run_id,
+            "config_hash": config.config_hash(),
+            "control_plane_sha256": control_plane.tree_sha256,
+            "source_success_sha256": source_success_sha256,
+            "source_adoption_reference_sha256": reference_sha256,
+            "toolchain": dict(toolchain),
+            "invocation_sequence": event["sequence"],
+            "invocation_history_path": path.removeprefix(run_prefix),
+            "invocation_history_sha256": sha256,
+            "call_id": event["call_id"],
+            "input_id": event["input_id"],
+            "task_id": event["task_id"],
+            "launch_intent_sha256": event["launch_intent_sha256"],
+        }
+        if validations[sequence] != expected_validation:
+            raise RuntimeError("Current adopted source completed-validation receipt drifted")
+
+
+def _completed_adoption_validations_from_volume(
+    config: InklingGGUFConfig,
+    *,
+    run_id: str,
+    expected_source_receipt: Mapping[str, Any],
+) -> tuple[dict[int, dict[str, Any]], str]:
+    """Read the exact marker bytes and immutable later-validation records."""
+
+    volume = modal.Volume.from_name(
+        config.modal.source_volume,
+        environment_name=config.modal.environment_name,
+        create_if_missing=False,
+        version=config.modal.volume_version,
+    )
+    volume.hydrate()
+    marker_path = f"runs/{run_id}/source.success.json"
+    marker_result = _read_json_from_volume(
+        volume,
+        remote_path=marker_path,
+        label="current adopted source marker",
+    )
+    if marker_result is None or marker_result[0] != dict(expected_source_receipt):
+        raise RuntimeError("Current adopted source marker changed during validation")
+    _, source_success_sha256 = marker_result
+
+    history_root = f"runs/{run_id}/control/history"
+    try:
+        listed = volume.listdir(history_root, recursive=False)
+    except (FileNotFoundError, modal.exception.NotFoundError):
+        listed = []
+    prefix = f"{history_root}/materialize_source.completed_validation."
+    pattern = re.compile(rf"^{re.escape(prefix)}([1-9][0-9]*)\.([0-9a-f]{{64}})\.json$")
+    validations: dict[int, dict[str, Any]] = {}
+    for item in listed:
+        if not item.path.startswith(prefix):
+            continue
+        match = pattern.fullmatch(item.path)
+        if match is None:
+            raise RuntimeError(f"Malformed adopted-source completed-validation path: {item.path}")
+        result = _read_json_from_volume(
+            volume,
+            remote_path=item.path,
+            label=f"adopted-source completed validation at {item.path}",
+        )
+        if result is None:
+            raise RuntimeError(f"Listed adopted-source validation disappeared: {item.path}")
+        record, _ = result
+        sequence = int(match.group(1))
+        record_id = hashlib.sha256(
+            json.dumps(record, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        if (
+            match.group(2) != record_id
+            or record.get("invocation_sequence") != sequence
+            or sequence in validations
+        ):
+            raise RuntimeError("Adopted source completed-validation history drifted")
+        validations[sequence] = record
+    return validations, source_success_sha256
 
 
 def _require_stage_invocation_budget(
@@ -564,6 +1400,8 @@ def _validated_local_call_receipts(
     control_plane: ControlPlaneProvenance,
     run_id: str,
 ) -> list[dict[str, Any]]:
+    reference = _load_source_adoption_for_target(config, control_plane)
+    require_adoption_binding = _is_checked_target_run(config, control_plane, run_id)
     run_root = _run_root(run_id)
     calls_directory = run_root / "calls"
     if not calls_directory.exists():
@@ -581,6 +1419,7 @@ def _validated_local_call_receipts(
             or receipt.get("run_id") != run_id
             or receipt.get("config_hash") != config.config_hash()
             or receipt.get("control_plane_sha256") != control_plane.tree_sha256
+            or (require_adoption_binding and not _has_source_adoption_binding(receipt, reference))
             or receipt.get("stage") not in STAGE_ORDER
             or not isinstance(intent_sha256, str)
             or len(intent_sha256) != 64
@@ -602,6 +1441,7 @@ def _validated_local_call_receipts(
             or not str(intent["function_id"]).startswith("fu-")
             or intent.get("config_hash") != config.config_hash()
             or intent.get("control_plane_sha256") != control_plane.tree_sha256
+            or (require_adoption_binding and not _has_source_adoption_binding(intent, reference))
             or intent.get("billing_cycle_end_utc") != receipt.get("billing_cycle_end_utc")
             or intent.get("initial_billing_window_policy")
             != receipt.get("initial_billing_window_policy")
@@ -621,6 +1461,8 @@ def _require_no_unresolved_launch_intent(
 ) -> None:
     """Fail closed after a crash or ambiguous spawn that left no call receipt."""
 
+    reference = _load_source_adoption_for_target(config, control_plane)
+    require_adoption_binding = _is_checked_target_run(config, control_plane, run_id)
     run_root = _run_root(run_id)
     resolved = {
         str(receipt["launch_intent_sha256"])
@@ -639,6 +1481,7 @@ def _require_no_unresolved_launch_intent(
             or intent.get("stage") not in STAGE_ORDER
             or intent.get("config_hash") != config.config_hash()
             or intent.get("control_plane_sha256") != control_plane.tree_sha256
+            or (require_adoption_binding and not _has_source_adoption_binding(intent, reference))
             or not _valid_initial_billing_evidence(intent)
         ):
             raise RuntimeError(f"Local launch intent drifted: {path}")
@@ -657,6 +1500,7 @@ def _create_launch_intent(
     deployment: Mapping[str, Any],
     binding: Mapping[str, Any],
 ) -> tuple[str, str]:
+    reference = _load_source_adoption_for_target(config, control_plane)
     created_at = datetime.now(UTC).isoformat()
     filename = (
         f"{created_at.replace(':', '').replace('+', '')}-{stage}-{secrets.token_hex(16)}.json"
@@ -683,6 +1527,7 @@ def _create_launch_intent(
             "billing_cycle_end_utc": deployment["billing_cycle_end_utc"],
             "initial_billing_window_policy": deployment["initial_billing_window_policy"],
             "billing_cycle_end_source": deployment["billing_cycle_end_source"],
+            **_source_adoption_binding(reference),
         },
     )
     return relative, _local_sha256(path)
@@ -694,6 +1539,8 @@ def _intent_for_reconciliation(
     run_id: str,
     launch_intent_sha256: str,
 ) -> tuple[str, dict[str, Any]]:
+    reference = _load_source_adoption_for_target(config, control_plane)
+    require_adoption_binding = _is_checked_target_run(config, control_plane, run_id)
     directory = _run_root(run_id) / "launch-intents"
     if directory.is_symlink() or not directory.is_dir():
         raise RuntimeError(f"Safe launch-intent directory is missing: {directory}")
@@ -711,6 +1558,7 @@ def _intent_for_reconciliation(
             or not str(intent["function_id"]).startswith("fu-")
             or intent.get("config_hash") != config.config_hash()
             or intent.get("control_plane_sha256") != control_plane.tree_sha256
+            or (require_adoption_binding and not _has_source_adoption_binding(intent, reference))
             or not _valid_initial_billing_evidence(intent)
         ):
             raise RuntimeError(f"Launch intent drifted: {path}")
@@ -750,6 +1598,7 @@ def _remote_intent_evidence(
                 value,
                 config=config,
                 control_plane=control_plane,
+                run_id=run_id,
                 stage=stage,
             )
             evidence.append((remote_path, value))
@@ -779,6 +1628,7 @@ def reconcile_launch_intent(
 ) -> None:
     """Adopt one intent only after immutable remote evidence proves the exact call ID."""
     config, control_plane, run_id = _load_checked_context()
+    reference = _load_checked_source_adoption(config, control_plane, run_id)
     with _exclusive_manager_operation(run_id, "reconcile-intent"):
         relative, intent = _intent_for_reconciliation(
             config,
@@ -834,6 +1684,7 @@ def reconcile_launch_intent(
             "initial_billing_window_policy": intent["initial_billing_window_policy"],
             "billing_cycle_end_source": intent["billing_cycle_end_source"],
             "remote_evidence_paths": [path for path, _ in evidence],
+            **_source_adoption_binding(reference),
         }
         path = _run_root(run_id) / "calls" / f"reconciled-{launch_intent_sha256}.json"
         _write_immutable_json(path, receipt)
@@ -850,7 +1701,13 @@ def _require_launchable_stage(
 
     existing = _read_volume_receipt(config, run_id=run_id, stage=stage)
     if existing is not None:
-        _validate_volume_receipt(existing, config=config, control_plane=control_plane, stage=stage)
+        _validate_volume_receipt(
+            existing,
+            config=config,
+            control_plane=control_plane,
+            run_id=run_id,
+            stage=stage,
+        )
         raise RuntimeError(f"Stage {stage} is already successful; refusing another paid launch")
     remaining_invocations = _require_stage_invocation_budget(
         config,
@@ -861,8 +1718,30 @@ def _require_launchable_stage(
     stage_index = STAGE_ORDER.index(stage)
     if stage_index == 0:
         return remaining_invocations
+    source_receipt: dict[str, Any] | None = None
+    if _is_checked_target_run(config, control_plane, run_id):
+        source_receipt = _read_volume_receipt(
+            config,
+            run_id=run_id,
+            stage="materialize_source",
+        )
+        if source_receipt is None:
+            raise RuntimeError(
+                f"Stage {stage} requires the successful adopted source marker; refusing paid launch"
+            )
+        _validate_volume_receipt(
+            source_receipt,
+            config=config,
+            control_plane=control_plane,
+            run_id=run_id,
+            stage="materialize_source",
+        )
     predecessor = STAGE_ORDER[stage_index - 1]
-    predecessor_receipt = _read_volume_receipt(config, run_id=run_id, stage=predecessor)
+    predecessor_receipt = (
+        source_receipt
+        if predecessor == "materialize_source" and source_receipt is not None
+        else _read_volume_receipt(config, run_id=run_id, stage=predecessor)
+    )
     if predecessor_receipt is None:
         raise RuntimeError(
             f"Stage {stage} requires successful predecessor {predecessor}; refusing paid launch"
@@ -871,6 +1750,7 @@ def _require_launchable_stage(
         predecessor_receipt,
         config=config,
         control_plane=control_plane,
+        run_id=run_id,
         stage=predecessor,
     )
     predecessor_call_id = predecessor_receipt.get("call_id")
@@ -1024,6 +1904,7 @@ def _audit_plan(
     control_plane: ControlPlaneProvenance,
     run_id: str,
 ) -> dict[str, Any]:
+    reference = _load_source_adoption_for_target(config, control_plane)
     audit = audit_pinned_inkling_online(config, token=os.environ.get("HF_TOKEN"))
     return {
         "status": "exact_source_preflight_passed",
@@ -1044,6 +1925,7 @@ def _audit_plan(
         "workspace_budget_required_usd": str(config.budget.workspace_hard_budget_usd),
         "max_total_envelope_usd": str(config.budget.max_total_usd),
         "warnings": list(audit.warnings),
+        **_source_adoption_binding(reference),
     }
 
 
@@ -1105,6 +1987,8 @@ def _deploy_locked(
         billing_cycle_end_utc,
         accept_short_initial_window_risk=accept_short_initial_window_risk,
     )
+    reference = _load_checked_source_adoption(config, control_plane, run_id)
+    source_adoption = _require_source_adoption_origin_ready(config, reference)
     plan = _audit_plan(config, control_plane, run_id)
     print(json.dumps(plan, indent=2, sort_keys=True))
     receipt_path = _deployment_path(run_id)
@@ -1119,6 +2003,7 @@ def _deploy_locked(
     if len(existing) > 1:
         raise RuntimeError(f"Multiple existing deployments use implementation tag {tag!r}")
     if not existing:
+        source_adoption = _require_source_adoption_origin_ready(config, reference)
         subprocess.run(
             [
                 sys.executable,
@@ -1164,6 +2049,7 @@ def _deploy_locked(
         "billing_cycle_end_utc": billing_cycle_end_utc,
         "initial_billing_window_policy": initial_window_policy,
         "billing_cycle_end_source": billing_cycle_end_source,
+        **source_adoption,
     }
     _write_immutable_json(receipt_path, receipt)
     print(json.dumps({"status": "deployed_and_sealed", **receipt}, indent=2, sort_keys=True))
@@ -1174,6 +2060,7 @@ def _validated_deployment(
     control_plane: ControlPlaneProvenance,
     run_id: str,
 ) -> dict[str, Any]:
+    reference = _load_checked_source_adoption(config, control_plane, run_id)
     receipt = _read_object(_deployment_path(run_id))
     expected = {
         "schema_version": DEPLOYMENT_SCHEMA,
@@ -1184,6 +2071,7 @@ def _validated_deployment(
         "config_hash": config.config_hash(),
         "control_plane_sha256": control_plane.tree_sha256,
         "run_id": run_id,
+        **_source_adoption_binding(reference),
     }
     mismatches = [key for key, value in expected.items() if receipt.get(key) != value]
     version = receipt.get("version")
@@ -1252,6 +2140,10 @@ def _launch_locked(
     workspace_budget_usd: Decimal,
 ) -> None:
     billing_cycle_end_utc = _require_paid_gate(config, workspace_budget_usd)
+    reference = _load_checked_source_adoption(config, control_plane, run_id)
+    checked_target_run = _is_checked_target_run(config, control_plane, run_id)
+    if stage == "materialize_source" and checked_target_run:
+        _require_source_adoption_origin_ready(config, reference)
     _require_no_unresolved_launch_intent(config, control_plane, run_id)
     stage_index = STAGE_ORDER.index(stage)
     predecessor_and_current = STAGE_ORDER[max(0, stage_index - 1) : stage_index + 1]
@@ -1295,6 +2187,8 @@ def _launch_locked(
         include_startup=True,
         invocations=remaining_invocations if stage == "materialize_source" else 1,
     )
+    if stage == "materialize_source" and checked_target_run:
+        _require_source_adoption_origin_ready(config, reference)
     launch_intent, launch_intent_sha256 = _create_launch_intent(
         config,
         control_plane,
@@ -1355,6 +2249,7 @@ def _launch_locked(
         "billing_cycle_end_utc": billing_cycle_end_utc,
         "initial_billing_window_policy": deployment["initial_billing_window_policy"],
         "billing_cycle_end_source": deployment["billing_cycle_end_source"],
+        **_source_adoption_binding(reference),
     }
     if post_acceptance_error is not None:
         call_receipt["deployment_revalidation_error"] = str(post_acceptance_error)

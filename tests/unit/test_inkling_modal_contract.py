@@ -98,8 +98,7 @@ def test_paid_functions_share_the_four_part_remote_gate_and_stable_concurrency()
         assert startup_value.attr == "startup_timeout_seconds"
         assert isinstance(startup_value.value, ast.Name)
         assert startup_value.value.id == PAID_RESOURCE_NAMES[name]
-        if name != "materialize_source":
-            assert literals["block_network"] is True
+        assert literals["block_network"] is True
 
     remote_gate = functions["_remote_config"]
     cycle_checks = [
@@ -111,7 +110,7 @@ def test_paid_functions_share_the_four_part_remote_gate_and_stable_concurrency()
     ]
     assert len(cycle_checks) == 1
 
-    materialize = functions["materialize_source"]
+    materialize = functions["download_materialize_source"]
     continuation_lines = sorted(
         node.lineno
         for node in ast.walk(materialize)
@@ -194,9 +193,9 @@ def test_paid_script_has_no_ephemeral_modal_run_entrypoint() -> None:
     assert local_entrypoints == []
 
 
-def test_networked_materialization_image_installs_a_system_ca_bundle() -> None:
+def test_recovery_app_does_not_export_a_networked_materializer_image() -> None:
     tree = ast.parse(PAID_SCRIPT.read_text(encoding="utf-8"), filename=str(PAID_SCRIPT))
-    assignment = next(
+    assert not any(
         node
         for node in tree.body
         if isinstance(node, ast.Assign)
@@ -204,15 +203,17 @@ def test_networked_materialization_image_installs_a_system_ca_bundle() -> None:
             isinstance(target, ast.Name) and target.id == "python_image" for target in node.targets
         )
     )
-    apt_calls = [
+    downloader = next(
         node
-        for node in ast.walk(assignment.value)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "apt_install"
-    ]
-    assert len(apt_calls) == 1
-    assert [ast.literal_eval(argument) for argument in apt_calls[0].args] == ["ca-certificates"]
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "download_materialize_source"
+    )
+    assert not any(
+        isinstance(decorator, ast.Call)
+        and isinstance(decorator.func, ast.Attribute)
+        and decorator.func.attr == "function"
+        for decorator in downloader.decorator_list
+    )
 
 
 def test_manager_uses_sealed_app_name_and_passes_all_remote_bindings() -> None:
@@ -1302,6 +1303,265 @@ def _paid_module(monkeypatch: pytest.MonkeyPatch) -> Any:
         "2099-08-01T00:00:00Z",
     )
     return importlib.import_module("scripts.quantize_inkling_modal")
+
+
+def _install_toolchain_verification_fixture(
+    paid: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    live_python_freeze: str = "alpha==1\nbeta==2\n",
+) -> tuple[Path, list[list[str]]]:
+    root = tmp_path / "llama.cpp"
+    binary_directory = root / "build" / "bin"
+    binary_directory.mkdir(parents=True)
+    config = paid.InklingGGUFConfig()
+    (root / ".iql-build-commit").write_text(
+        f"{config.toolchain.commit}\n",
+        encoding="utf-8",
+    )
+
+    for binary_name, manifest_name in (
+        ("llama-quantize", ".iql-quantize.sha256"),
+        ("llama-gguf-split", ".iql-gguf-split.sha256"),
+    ):
+        binary = binary_directory / binary_name
+        binary.write_bytes(f"{binary_name}\n".encode())
+        (root / manifest_name).write_text(
+            f"{paid._sha256(binary)}  {binary}\n",
+            encoding="utf-8",
+        )
+
+    freeze_path = root / ".iql-python-freeze.txt"
+    freeze_path.write_text("alpha==1\nbeta==2\n", encoding="utf-8")
+    (root / ".iql-python-freeze.sha256").write_text(
+        f"{paid._sha256(freeze_path)}  {freeze_path}\n",
+        encoding="utf-8",
+    )
+    purelib_path = root / ".iql-python-purelib.txt"
+    purelib_path.write_text("/image/python/purelib\n", encoding="utf-8")
+    (root / ".iql-python-purelib.sha256").write_text(
+        f"{paid._sha256(purelib_path)}  {purelib_path}\n",
+        encoding="utf-8",
+    )
+    dpkg_path = root / ".iql-dpkg-inventory.txt"
+    dpkg_path.write_text("base-files=1\nca-certificates=2\n", encoding="utf-8")
+    (root / ".iql-dpkg-inventory.sha256").write_text(
+        f"{paid._sha256(dpkg_path)}  {dpkg_path}\n",
+        encoding="utf-8",
+    )
+
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        if argv[:4] == ["git", "-C", str(root), "rev-parse"]:
+            return subprocess.CompletedProcess(argv, 0, f"{config.toolchain.commit}\n", "")
+        if argv[:4] == ["git", "-C", str(root), "diff"]:
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if argv[:4] == ["git", "-C", str(root), "remote"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                f"{config.toolchain.repository}\n",
+                "",
+            )
+        if argv[:4] == [paid.sys.executable, "-m", "pip", "freeze"]:
+            return subprocess.CompletedProcess(argv, 0, live_python_freeze, "")
+        if argv[0] == "dpkg-query":
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                "ca-certificates=2\nbase-files=1\n",
+                "",
+            )
+        raise AssertionError(f"Unexpected subprocess argv: {argv!r}")
+
+    monkeypatch.setattr(paid, "LLAMA_CPP_DIR", root)
+    monkeypatch.setattr(paid.sysconfig, "get_path", lambda name: "/image/python/purelib")
+    monkeypatch.setattr(paid.subprocess, "run", run)
+    return root, calls
+
+
+def test_paid_python_inventory_build_and_runtime_use_the_same_purelib_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paid = _paid_module(monkeypatch)
+    requested_paths: list[str] = []
+
+    def get_path(name: str) -> str:
+        requested_paths.append(name)
+        return "/image/python/purelib"
+
+    monkeypatch.setattr(paid.sysconfig, "get_path", get_path)
+    output_path = tmp_path / "python-freeze.txt"
+    build_command = paid._python_inventory_build_command(output_path)
+
+    assert paid.PYTHON_INVENTORY_SCOPE == "image_sysconfig_purelib_v1"
+    assert f'sysconfig.get_path("{paid.PYTHON_INVENTORY_PATH_KEY}")' in build_command
+    assert "pip freeze --all --path" in build_command
+    assert str(output_path) in build_command
+    assert paid._python_inventory_argv() == [
+        paid.sys.executable,
+        "-m",
+        "pip",
+        "freeze",
+        "--all",
+        "--path",
+        "/image/python/purelib",
+    ]
+    assert requested_paths == [paid.PYTHON_INVENTORY_PATH_KEY]
+
+
+def test_paid_toolchain_accepts_only_the_exact_scoped_python_inventory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paid = _paid_module(monkeypatch)
+    _, calls = _install_toolchain_verification_fixture(
+        paid,
+        tmp_path,
+        monkeypatch,
+        live_python_freeze="beta==2\nalpha==1\n",
+    )
+
+    evidence = paid._verify_toolchain(paid.InklingGGUFConfig())
+
+    assert evidence["python_inventory_scope"] == "image_sysconfig_purelib_v1"
+    assert evidence["python_inventory_path"] == "/image/python/purelib"
+    assert evidence["python_inventory_size_bytes"] == len(b"alpha==1\nbeta==2\n")
+    assert evidence["python_inventory_sha256"] == hashlib.sha256(b"alpha==1\nbeta==2\n").hexdigest()
+    assert [
+        paid.sys.executable,
+        "-m",
+        "pip",
+        "freeze",
+        "--all",
+        "--path",
+        "/image/python/purelib",
+    ] in calls
+
+
+@pytest.mark.parametrize(
+    "live_python_freeze",
+    [
+        "alpha==1\nbeta==2\ngamma==3\n",
+        "alpha==1\n",
+        "alpha==1\nbeta==3\n",
+    ],
+    ids=["added", "removed", "version-drift"],
+)
+def test_paid_toolchain_rejects_any_scoped_python_inventory_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    live_python_freeze: str,
+) -> None:
+    paid = _paid_module(monkeypatch)
+    _install_toolchain_verification_fixture(
+        paid,
+        tmp_path,
+        monkeypatch,
+        live_python_freeze=live_python_freeze,
+    )
+
+    with pytest.raises(RuntimeError, match="Runtime Python distributions differ"):
+        paid._verify_toolchain(paid.InklingGGUFConfig())
+
+
+@pytest.mark.parametrize("drift", ["path", "hash"])
+def test_paid_toolchain_rejects_python_inventory_receipt_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    drift: str,
+) -> None:
+    paid = _paid_module(monkeypatch)
+    root, _ = _install_toolchain_verification_fixture(paid, tmp_path, monkeypatch)
+    freeze_path = root / ".iql-python-freeze.txt"
+    manifest = root / ".iql-python-freeze.sha256"
+    if drift == "path":
+        manifest.write_text(
+            f"{paid._sha256(freeze_path)}  {root / 'other-freeze.txt'}\n",
+            encoding="utf-8",
+        )
+        expected_error = "unexpected path"
+    else:
+        freeze_path.write_text("alpha==9\nbeta==2\n", encoding="utf-8")
+        expected_error = "differs from its image build receipt"
+
+    with pytest.raises(RuntimeError, match=expected_error):
+        paid._verify_toolchain(paid.InklingGGUFConfig())
+
+
+@pytest.mark.parametrize("drift", ["recorded-value", "manifest-path", "manifest-hash"])
+def test_paid_toolchain_rejects_python_purelib_build_path_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    drift: str,
+) -> None:
+    paid = _paid_module(monkeypatch)
+    root, _ = _install_toolchain_verification_fixture(paid, tmp_path, monkeypatch)
+    purelib_path = root / ".iql-python-purelib.txt"
+    manifest = root / ".iql-python-purelib.sha256"
+    if drift == "recorded-value":
+        purelib_path.write_text("/other/python/purelib\n", encoding="utf-8")
+        manifest.write_text(
+            f"{paid._sha256(purelib_path)}  {purelib_path}\n",
+            encoding="utf-8",
+        )
+        expected_error = "Runtime Python purelib path differs"
+    elif drift == "manifest-path":
+        manifest.write_text(
+            f"{paid._sha256(purelib_path)}  {root / 'other-purelib.txt'}\n",
+            encoding="utf-8",
+        )
+        expected_error = "unexpected path"
+    else:
+        manifest.write_text(
+            f"{'0' * 64}  {purelib_path}\n",
+            encoding="utf-8",
+        )
+        expected_error = "differs from its image build receipt"
+
+    with pytest.raises(RuntimeError, match=expected_error):
+        paid._verify_toolchain(paid.InklingGGUFConfig())
+
+
+def test_paid_source_binding_verifies_toolchain_before_the_full_source_inventory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paid = _paid_module(monkeypatch)
+    source_mount = tmp_path / "source"
+    run_id = "run-order"
+    source_root = source_mount / "runs" / run_id
+    source_root.mkdir(parents=True)
+    (source_root / "source.success.json").write_text("{}\n", encoding="utf-8")
+    calls: list[str] = []
+    toolchain = {"commit": paid.InklingGGUFConfig().toolchain.commit}
+
+    def verify_toolchain(_: Any) -> dict[str, str]:
+        calls.append("toolchain")
+        return toolchain
+
+    def verify_source(*_: Any, **__: Any) -> dict[str, Any]:
+        calls.append("source")
+        return {"verified": True}
+
+    monkeypatch.setattr(paid, "SOURCE_MOUNT", source_mount)
+    monkeypatch.setattr(paid, "_verify_toolchain", verify_toolchain)
+    monkeypatch.setattr(paid, "_verify_materialized_source", verify_source)
+    monkeypatch.setattr(paid, "verify_execution_bindings", lambda *args, **kwargs: None)
+
+    result = paid._verify_source_binding(
+        paid.InklingGGUFConfig(),
+        run_id,
+        object(),
+        object(),
+    )
+
+    assert result == toolchain
+    assert calls == ["toolchain", "source"]
 
 
 def test_paid_attempt_ledger_enforces_the_frozen_limit(

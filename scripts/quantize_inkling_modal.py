@@ -16,6 +16,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import sysconfig
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextvars import ContextVar
@@ -40,9 +41,12 @@ if modal.__version__ != EXPECTED_MODAL_VERSION:
 from inkling_quant_lab.exceptions import ConfigurationError  # noqa: E402
 from inkling_quant_lab.gguf.inkling import (  # noqa: E402
     EXPECTED_MODEL_BYTES,
+    INKLING_SOURCE_ADOPTION_REFERENCE_RELATIVE_PATH,
     ControlPlaneProvenance,
     InklingGGUFConfig,
+    InklingSourceAdoptionReference,
     PaidLaunchAcknowledgement,
+    SourceAdoptionArtifact,
     WorkflowPaths,
     audit_inkling_source,
     audit_pinned_inkling_online,
@@ -51,11 +55,13 @@ from inkling_quant_lab.gguf.inkling import (  # noqa: E402
     build_verification_plan,
     inkling_run_id,
     load_inkling_gguf_config,
+    load_inkling_source_adoption_reference,
     modal_stage_resources,
     require_initial_billing_window,
     require_materialize_initial_billing_window,
     require_stage_billing_window,
     validate_deployed_control_plane,
+    validate_inkling_source_adoption_reference,
     validate_paid_launch_acknowledgement,
     verify_execution_bindings,
 )
@@ -101,6 +107,15 @@ LLAMA_CPP_DIR = Path("/opt/llama.cpp")
 SOURCE_MOUNT = Path("/source")
 WORK_MOUNT = Path("/work")
 FINAL_MOUNT = Path("/final")
+LOCAL_SOURCE_ADOPTION_REFERENCE = (
+    LOCAL_PROJECT_ROOT / INKLING_SOURCE_ADOPTION_REFERENCE_RELATIVE_PATH
+)
+REMOTE_SOURCE_ADOPTION_REFERENCE = Path("/root/inkling_q3_k_m_source_adoption.json")
+SOURCE_ADOPTION_REFERENCE_PATH = (
+    LOCAL_SOURCE_ADOPTION_REFERENCE if modal.is_local() else REMOTE_SOURCE_ADOPTION_REFERENCE
+)
+PYTHON_INVENTORY_PATH_KEY = "purelib"
+PYTHON_INVENTORY_SCOPE = "image_sysconfig_purelib_v1"
 RUN_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,95}$")
 SAFE_METADATA_SUFFIXES = {
     ".json",
@@ -130,27 +145,36 @@ final_volume = modal.Volume.from_name(
     create_if_missing=True,
     version=DEFAULT_CONFIG.modal.volume_version,
 )
-hf_secret = modal.Secret.from_name(
-    DEFAULT_CONFIG.modal.hf_secret,
-    environment_name=DEFAULT_CONFIG.modal.hf_secret_environment,
-    required_keys=["HF_TOKEN"],
-)
 
-python_image = (
-    modal.Image.from_registry(DEBIAN_IMAGE, add_python="3.12")
-    .apt_install("ca-certificates")
-    .pip_install(
-        "pydantic==2.13.4",
-        "PyYAML==6.0.3",
-        "huggingface-hub==0.36.0",
-        "hf-xet==1.4.3",
+
+def _python_inventory_build_command(output_path: Path) -> str:
+    return (
+        "python -m pip freeze --all --path "
+        "\"$(python -c 'import sysconfig; "
+        f'print(sysconfig.get_path("{PYTHON_INVENTORY_PATH_KEY}"))\')" '
+        f"| LC_ALL=C sort > {output_path}"
     )
-    .env({"PYTHONPATH": "/root", "HF_HUB_DISABLE_TELEMETRY": "1"})
-)
-if modal.is_local():
-    python_image = python_image.add_local_dir(
-        LOCAL_PROJECT_ROOT / "src/inkling_quant_lab", REMOTE_PACKAGE, copy=True
-    )
+
+
+def _python_inventory_path() -> str:
+    purelib = sysconfig.get_path(PYTHON_INVENTORY_PATH_KEY)
+    if not purelib:
+        raise RuntimeError("Python purelib path is unavailable")
+    return purelib
+
+
+def _python_inventory_argv(purelib: str | None = None) -> list[str]:
+    resolved_purelib = _python_inventory_path() if purelib is None else purelib
+    return [
+        sys.executable,
+        "-m",
+        "pip",
+        "freeze",
+        "--all",
+        "--path",
+        resolved_purelib,
+    ]
+
 
 toolchain_image = (
     modal.Image.from_registry(DEBIAN_IMAGE, add_python="3.12")
@@ -175,6 +199,14 @@ toolchain_image = (
         ),
         f"git -C {LLAMA_CPP_DIR} rev-parse HEAD > {LLAMA_CPP_DIR}/.iql-build-commit",
         (
+            "python -c 'import sysconfig; print(sysconfig.get_path(\"purelib\"))' > "
+            f"{LLAMA_CPP_DIR}/.iql-python-purelib.txt"
+        ),
+        (
+            f"sha256sum {LLAMA_CPP_DIR}/.iql-python-purelib.txt > "
+            f"{LLAMA_CPP_DIR}/.iql-python-purelib.sha256"
+        ),
+        (
             f"sha256sum {LLAMA_CPP_DIR}/build/bin/llama-quantize > "
             f"{LLAMA_CPP_DIR}/.iql-quantize.sha256"
         ),
@@ -182,7 +214,7 @@ toolchain_image = (
             f"sha256sum {LLAMA_CPP_DIR}/build/bin/llama-gguf-split > "
             f"{LLAMA_CPP_DIR}/.iql-gguf-split.sha256"
         ),
-        (f"python -m pip freeze --all | LC_ALL=C sort > {LLAMA_CPP_DIR}/.iql-python-freeze.txt"),
+        _python_inventory_build_command(LLAMA_CPP_DIR / ".iql-python-freeze.txt"),
         (
             f"sha256sum {LLAMA_CPP_DIR}/.iql-python-freeze.txt > "
             f"{LLAMA_CPP_DIR}/.iql-python-freeze.sha256"
@@ -208,6 +240,11 @@ toolchain_image = (
 if modal.is_local():
     toolchain_image = toolchain_image.add_local_dir(
         LOCAL_PROJECT_ROOT / "src/inkling_quant_lab", REMOTE_PACKAGE, copy=True
+    )
+    toolchain_image = toolchain_image.add_local_file(
+        LOCAL_SOURCE_ADOPTION_REFERENCE,
+        str(REMOTE_SOURCE_ADOPTION_REFERENCE),
+        copy=True,
     )
 
 MATERIALIZE_RESOURCES = modal_stage_resources(DEFAULT_CONFIG, "materialize_source")
@@ -274,6 +311,25 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
         encoding="utf-8",
     )
     os.replace(temporary, path)
+
+
+def _atomic_bytes(path: Path, value: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_bytes(value)
+    os.replace(temporary, path)
+
+
+def _immutable_bytes(path: Path, value: bytes) -> None:
+    """Publish exact checked bytes once without rewriting prior evidence."""
+
+    if path.exists() or path.is_symlink():
+        if path.is_symlink() or not path.is_file():
+            raise RuntimeError(f"Immutable metadata path is unsafe: {path}")
+        if path.read_bytes() != value:
+            raise RuntimeError(f"Refusing to replace immutable metadata: {path}")
+        return
+    _atomic_bytes(path, value)
 
 
 def _immutable_json(path: Path, value: Mapping[str, Any]) -> None:
@@ -1049,14 +1105,38 @@ def _run_streaming(command: Sequence[str], *, log_path: Path, cwd: Path | None =
         raise RuntimeError(f"Command {command[0]} failed with exit code {return_code}")
 
 
-def _verify_materialized_source(
+def _inventory_stat_fingerprint(
+    snapshot: Path,
+    records: Sequence[Mapping[str, Any]],
+) -> tuple[tuple[str, int, int, int, int], ...]:
+    facts: list[tuple[str, int, int, int, int]] = []
+    for record in records:
+        relative = record.get("path")
+        if not isinstance(relative, str):
+            raise RuntimeError("Inventory contains a non-string path")
+        path = _safe_child(snapshot, relative)
+        metadata = path.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+            raise RuntimeError(f"Inventory contains an unsafe file: {relative}")
+        facts.append(
+            (
+                relative,
+                metadata.st_dev,
+                metadata.st_ino,
+                metadata.st_size,
+                metadata.st_mtime_ns,
+            )
+        )
+    return tuple(facts)
+
+
+def _verify_direct_materialized_source(
     config: InklingGGUFConfig,
-    run_id: str,
+    run_root: Path,
     control_plane: ControlPlaneProvenance,
 ) -> dict[str, Any]:
-    """Revalidate the complete local snapshot behind an immutable success receipt."""
+    """Revalidate one directly downloaded snapshot and its original receipt."""
 
-    run_root = _safe_child(SOURCE_MOUNT, "runs", run_id)
     _verify_bound_control_plane(run_root, control_plane)
     snapshot = _safe_child(run_root, "snapshot")
     receipt_path = _safe_child(run_root, "source.success.json")
@@ -1089,7 +1169,11 @@ def _verify_materialized_source(
         raise RuntimeError("Materialized source inventory is malformed or incomplete")
     source_records = list(records.values())
     _verify_inventory_membership(snapshot, source_records)
+    before_fingerprint = _inventory_stat_fingerprint(snapshot, source_records)
     _verify_records(snapshot, source_records)
+    if _inventory_stat_fingerprint(snapshot, source_records) != before_fingerprint:
+        raise RuntimeError("Materialized source inventory changed during full verification")
+    _verify_inventory_membership(snapshot, source_records)
     weight_index = _read_json(weight_index_path)
     audit = audit_inkling_source(
         config,
@@ -1126,29 +1210,399 @@ def _verify_materialized_source(
     return receipt
 
 
-@app.function(
-    image=python_image,
-    cpu=(MATERIALIZE_RESOURCES.cpu_cores, MATERIALIZE_RESOURCES.cpu_cores),
-    memory=(
-        MATERIALIZE_RESOURCES.memory_gib * 1024,
-        MATERIALIZE_RESOURCES.memory_gib * 1024,
-    ),
-    timeout=int(MATERIALIZE_RESOURCES.max_hours * 3600),
-    startup_timeout=MATERIALIZE_RESOURCES.startup_timeout_seconds,
-    retries=0,
-    max_containers=1,
-    single_use_containers=True,
-    secrets=[hf_secret],
-    volumes={str(SOURCE_MOUNT): source_volume},
-)
-@_capture_stage_failures("materialize_source")
-def materialize_source(
+def _reference_control_plane_file(
+    control_plane: ControlPlaneProvenance,
+) -> tuple[str, int]:
+    matches = [
+        item
+        for item in control_plane.files
+        if item.path == INKLING_SOURCE_ADOPTION_REFERENCE_RELATIVE_PATH
+    ]
+    if len(matches) != 1:
+        raise RuntimeError("Control plane lacks one exact source-adoption reference")
+    return matches[0].sha256, matches[0].size_bytes
+
+
+def _load_bound_source_adoption_reference(
+    config: InklingGGUFConfig,
+    run_id: str,
+    control_plane: ControlPlaneProvenance,
+) -> InklingSourceAdoptionReference:
+    if run_id != _run_id(config, control_plane):
+        raise RuntimeError("Source-adoption target run ID is not bound to this control plane")
+    run_root = _safe_child(SOURCE_MOUNT, "runs", run_id)
+    path = _safe_child(run_root, "source.adoption.json")
+    expected_sha256, expected_size = _reference_control_plane_file(control_plane)
+    if path.stat().st_size != expected_size or _sha256(path) != expected_sha256:
+        raise RuntimeError("Source-adoption reference differs from the current control-plane file")
+    try:
+        reference = load_inkling_source_adoption_reference(path)
+        return validate_inkling_source_adoption_reference(
+            reference,
+            target_config=config,
+            target_control_plane_sha256=control_plane.tree_sha256,
+        )
+    except ConfigurationError as error:
+        raise RuntimeError(f"Invalid source-adoption reference: {error}") from error
+
+
+def _reference_remote_artifacts(
+    reference: InklingSourceAdoptionReference,
+) -> tuple[SourceAdoptionArtifact, ...]:
+    return (
+        reference.source_success_receipt,
+        reference.source_inventory,
+        reference.origin_resolved_config,
+        reference.origin_control_plane,
+        reference.origin_materialize_attempt_ledger,
+        reference.origin_materialize_invocation_history,
+        reference.snapshot_config,
+        reference.snapshot_weight_index,
+    )
+
+
+def _reference_artifact_path(artifact: SourceAdoptionArtifact) -> Path:
+    candidate = Path(artifact.path)
+    try:
+        relative = candidate.relative_to(SOURCE_MOUNT)
+    except ValueError as error:
+        raise RuntimeError("Source-adoption artifact escapes the source Volume") from error
+    if not relative.parts:
+        raise RuntimeError("Source-adoption artifact cannot name the source Volume root")
+    return _safe_child(SOURCE_MOUNT, *relative.parts)
+
+
+def _verify_reference_remote_artifacts(reference: InklingSourceAdoptionReference) -> None:
+    for artifact in _reference_remote_artifacts(reference):
+        path = _reference_artifact_path(artifact)
+        if path.stat().st_size != artifact.size_bytes or _sha256(path) != artifact.sha256:
+            raise RuntimeError(f"Referenced source evidence changed: {artifact.path}")
+
+
+def _verify_adopted_source_origin(
+    config: InklingGGUFConfig,
+    run_id: str,
+    control_plane: ControlPlaneProvenance,
+) -> tuple[InklingSourceAdoptionReference, dict[str, Any]]:
+    """Rehash the pinned direct source in place without writing to its run tree."""
+
+    reference = _load_bound_source_adoption_reference(config, run_id, control_plane)
+    _verify_reference_remote_artifacts(reference)
+    origin_root = Path(reference.source_run_root)
+    expected_origin_root = _safe_child(SOURCE_MOUNT, "runs", reference.origin_run_id)
+    if origin_root != expected_origin_root or origin_root == _safe_child(
+        SOURCE_MOUNT, "runs", run_id
+    ):
+        raise RuntimeError("Source-adoption origin run path is unsafe or self-referential")
+    origin_config = InklingGGUFConfig.model_validate(
+        _read_json(_reference_artifact_path(reference.origin_resolved_config))
+    )
+    origin_control_plane = ControlPlaneProvenance.model_validate(
+        _read_json(_reference_artifact_path(reference.origin_control_plane))
+    )
+    if (
+        origin_config.config_hash() != reference.origin_config_hash
+        or origin_config.canonical_dict() != config.canonical_dict()
+        or origin_control_plane.tree_sha256 != reference.origin_control_plane_sha256
+        or _run_id(origin_config, origin_control_plane) != reference.origin_run_id
+    ):
+        raise RuntimeError("Source-adoption origin config/control/run binding changed")
+    origin_receipt = _verify_direct_materialized_source(
+        origin_config,
+        origin_root,
+        origin_control_plane,
+    )
+    _verify_reference_remote_artifacts(reference)
+    return reference, origin_receipt
+
+
+def _adopted_source_origin_record(
+    reference: InklingSourceAdoptionReference,
+) -> dict[str, Any]:
+    return {
+        "run_id": reference.origin_run_id,
+        "config_hash": reference.origin_config_hash,
+        "control_plane_sha256": reference.origin_control_plane_sha256,
+        "source_success_sha256": reference.source_success_receipt.sha256,
+        "source_inventory_sha256": reference.source_inventory.sha256,
+        "source_config_sha256": reference.snapshot_config.sha256,
+        "weight_index_file_sha256": reference.snapshot_weight_index.sha256,
+        "materialize_function_call_id": reference.materialize_function_call_id,
+        "materialize_input_id": reference.materialize_input_id,
+        "materialize_task_id": reference.materialize_task_id,
+    }
+
+
+def _attempt_binding(
+    run_root: Path,
+    entry: InvocationHistoryEntry,
+) -> dict[str, Any]:
+    path, event, sha256 = entry
+    return {
+        "invocation_sequence": event["sequence"],
+        "invocation_history_path": path.relative_to(run_root).as_posix(),
+        "invocation_history_sha256": sha256,
+        "call_id": event["call_id"],
+        "input_id": event["input_id"],
+        "task_id": event["task_id"],
+        "launch_intent_sha256": event["launch_intent_sha256"],
+    }
+
+
+def _latest_attempt_binding(
+    run_root: Path,
+    config: InklingGGUFConfig,
+    control_plane: ControlPlaneProvenance,
+) -> dict[str, Any]:
+    """Validate the materialization ledger and return its exact latest event identity."""
+
+    limit = _stage_limit(config, "materialize_source")
+    history = _invocation_history(
+        run_root,
+        config,
+        "materialize_source",
+        control_plane,
+        kind="attempt",
+        limit=limit,
+    )
+    ledger = _read_json(_safe_child(run_root, "control", "materialize_source.attempts.json"))
+    if not history:
+        raise RuntimeError("Adopted source has no immutable materialization invocation history")
+    latest_path, latest_event, latest_sha256 = history[-1]
+    if (
+        ledger.get("attempts") != len(history)
+        or ledger.get("limit") != limit
+        or ledger.get("config_hash") != config.config_hash()
+        or ledger.get("control_plane_sha256") != control_plane.tree_sha256
+        or ledger.get("last_history_path") != latest_path.relative_to(run_root).as_posix()
+        or ledger.get("last_history_sha256") != latest_sha256
+        or ledger.get("last_call_id") != latest_event.get("call_id")
+        or ledger.get("last_input_id") != latest_event.get("input_id")
+        or ledger.get("last_task_id") != latest_event.get("task_id")
+        or ledger.get("launch_intent_sha256") != latest_event.get("launch_intent_sha256")
+    ):
+        raise RuntimeError("Adopted source materialization attempt ledger drifted")
+    return _attempt_binding(run_root, (latest_path, latest_event, latest_sha256))
+
+
+def _adoption_validation_record(
+    *,
+    run_id: str,
+    config: InklingGGUFConfig,
+    control_plane: ControlPlaneProvenance,
+    source_success_sha256: str,
+    source_adoption_reference_sha256: str,
+    toolchain: Mapping[str, Any],
+    invocation_binding: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema_version": "inkling-adopted-source-completed-validation-v1",
+        "status": "success",
+        "verified": True,
+        "run_id": run_id,
+        "config_hash": config.config_hash(),
+        "control_plane_sha256": control_plane.tree_sha256,
+        "source_success_sha256": source_success_sha256,
+        "source_adoption_reference_sha256": source_adoption_reference_sha256,
+        "toolchain": dict(toolchain),
+        **dict(invocation_binding),
+    }
+
+
+def _adoption_validation_path(run_root: Path, record: Mapping[str, Any]) -> Path:
+    sequence = record.get("invocation_sequence")
+    if not isinstance(sequence, int) or sequence < 1:
+        raise RuntimeError("Adoption validation has an invalid invocation sequence")
+    record_id = _invocation_event_id(record)
+    return _safe_child(
+        run_root,
+        "control",
+        "history",
+        f"materialize_source.completed_validation.{sequence}.{record_id}.json",
+    )
+
+
+def _completed_adoption_validations(
+    run_root: Path,
+) -> dict[int, dict[str, Any]]:
+    history_root = _safe_child(run_root, "control", "history")
+    records: dict[int, dict[str, Any]] = {}
+    for path in sorted(history_root.glob("materialize_source.completed_validation.*.json")):
+        record = _read_json(path)
+        sequence = record.get("invocation_sequence")
+        if (
+            not isinstance(sequence, int)
+            or sequence < 1
+            or path != _adoption_validation_path(run_root, record)
+            or sequence in records
+        ):
+            raise RuntimeError("Adopted source completed-validation history drifted")
+        records[sequence] = record
+    return records
+
+
+def _verify_success_invocation_binding(
+    run_root: Path,
+    config: InklingGGUFConfig,
+    control_plane: ControlPlaneProvenance,
+    receipt: Mapping[str, Any],
+    *,
+    toolchain: Mapping[str, Any],
+    pending_latest_validation: Mapping[str, Any] | None = None,
+) -> None:
+    latest = _latest_attempt_binding(run_root, config, control_plane)
+    limit = _stage_limit(config, "materialize_source")
+    history = _invocation_history(
+        run_root,
+        config,
+        "materialize_source",
+        control_plane,
+        kind="attempt",
+        limit=limit,
+    )
+    creation_sequence = receipt.get("invocation_sequence")
+    if (
+        not isinstance(creation_sequence, int)
+        or creation_sequence < 1
+        or creation_sequence > len(history)
+    ):
+        raise RuntimeError("Adopted source receipt has no valid immutable creation invocation")
+    creation = _attempt_binding(run_root, history[creation_sequence - 1])
+    if any(receipt.get(name) != value for name, value in creation.items()):
+        raise RuntimeError(
+            "Adopted source receipt is not bound to its exact immutable creation invocation"
+        )
+
+    validations = _completed_adoption_validations(run_root)
+    latest_sequence = int(latest["invocation_sequence"])
+    expected_validation_sequences = set(range(creation_sequence + 1, latest_sequence + 1))
+    if pending_latest_validation is not None:
+        if dict(pending_latest_validation) != latest or latest_sequence == creation_sequence:
+            raise RuntimeError(
+                "Pending adopted-source validation is not the exact latest invocation"
+            )
+        expected_validation_sequences.remove(latest_sequence)
+    if set(validations) != expected_validation_sequences:
+        raise RuntimeError("Adopted source completed-validation chain is incomplete or unexpected")
+
+    if not validations:
+        return
+    source_success_sha256 = _sha256(_safe_child(run_root, "source.success.json"))
+    reference_sha256 = receipt.get("source_adoption_reference_sha256")
+    if not isinstance(reference_sha256, str):
+        raise RuntimeError("Adopted source receipt has no adoption reference identity")
+    for sequence in sorted(validations):
+        expected = _adoption_validation_record(
+            run_id=str(receipt.get("run_id")),
+            config=config,
+            control_plane=control_plane,
+            source_success_sha256=source_success_sha256,
+            source_adoption_reference_sha256=reference_sha256,
+            toolchain=toolchain,
+            invocation_binding=_attempt_binding(run_root, history[sequence - 1]),
+        )
+        if validations[sequence] != expected:
+            raise RuntimeError("Adopted source completed-validation receipt drifted")
+
+
+def _verify_materialized_source(
+    config: InklingGGUFConfig,
+    run_id: str,
+    control_plane: ControlPlaneProvenance,
+    *,
+    toolchain: Mapping[str, Any] | None = None,
+    pending_latest_validation: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Revalidate a direct or explicitly adopted complete source snapshot."""
+
+    run_root = _safe_child(SOURCE_MOUNT, "runs", run_id)
+    _verify_bound_control_plane(run_root, control_plane)
+    receipt = _read_json(_safe_child(run_root, "source.success.json"))
+    if receipt.get("materialization_kind") != "adopted_verified_source_v1":
+        if any(
+            item.path == INKLING_SOURCE_ADOPTION_REFERENCE_RELATIVE_PATH
+            for item in control_plane.files
+        ):
+            raise RuntimeError(
+                "This adoption-bound control plane rejects direct current-run source receipts"
+            )
+        return _verify_direct_materialized_source(config, run_root, control_plane)
+    if toolchain is None:
+        raise RuntimeError("Adopted source verification requires current toolchain evidence")
+    target_snapshot = _safe_child(run_root, "snapshot")
+    if target_snapshot.exists():
+        raise RuntimeError("Adopted source run must not contain a target-run snapshot")
+
+    reference, origin_receipt = _verify_adopted_source_origin(config, run_id, control_plane)
+    adoption_path = _safe_child(run_root, "source.adoption.json")
+    expected = {
+        "schema_version": "inkling-adopted-source-success-v2",
+        "status": "success",
+        "verified": True,
+        "config_hash": config.config_hash(),
+        "control_plane_sha256": control_plane.tree_sha256,
+        "run_id": run_id,
+        "materialization_kind": "adopted_verified_source_v1",
+        "source_dir": reference.snapshot_path,
+        "source_adoption_reference_sha256": reference.reference_sha256,
+        "source_adoption_file_sha256": _sha256(adoption_path),
+        "origin": _adopted_source_origin_record(reference),
+        "model_id": config.source.model_id,
+        "revision": config.source.revision,
+        "license": config.source.license,
+        "weight_index_sha256": reference.weight_index_canonical_sha256,
+        "source_tensor_bytes": reference.indexed_tensor_bytes,
+        "materialized_weight_file_bytes": reference.materialized_weight_file_bytes,
+        "source_tensor_count": reference.source_tensor_count,
+        "source_shard_count": reference.source_shard_count,
+        "file_count": reference.materialized_file_count,
+        "inventory_sha256": reference.source_inventory.sha256,
+        "source_config_sha256": reference.snapshot_config.sha256,
+        "warnings": origin_receipt.get("warnings"),
+        "toolchain": dict(toolchain),
+    }
+    mismatches = [key for key, value in expected.items() if receipt.get(key) != value]
+    if (
+        not isinstance(receipt.get("call_id"), str)
+        or not str(receipt["call_id"]).startswith("fc-")
+        or not isinstance(receipt.get("input_id"), str)
+        or not str(receipt["input_id"]).startswith("in-")
+        or not isinstance(receipt.get("task_id"), str)
+        or not str(receipt["task_id"]).startswith("ta-")
+        or not isinstance(receipt.get("invocation_sequence"), int)
+        or receipt["invocation_sequence"] < 1
+        or not isinstance(receipt.get("invocation_history_path"), str)
+        or re.fullmatch(
+            r"control/history/materialize_source\.attempt\.[1-9][0-9]*\.[0-9a-f]{64}\.json",
+            str(receipt.get("invocation_history_path")),
+        )
+        is None
+        or re.fullmatch(r"[0-9a-f]{64}", str(receipt.get("invocation_history_sha256"))) is None
+        or re.fullmatch(r"[0-9a-f]{64}", str(receipt.get("launch_intent_sha256"))) is None
+    ):
+        mismatches.append("invocation_binding")
+    if mismatches:
+        raise RuntimeError(
+            "Adopted source success receipt drifted: " + ", ".join(sorted(mismatches))
+        )
+    _verify_success_invocation_binding(
+        run_root,
+        config,
+        control_plane,
+        receipt,
+        toolchain=toolchain,
+        pending_latest_validation=pending_latest_validation,
+    )
+    return receipt
+
+
+def download_materialize_source(
     config_json: str,
     run_id: str,
     budget_acknowledgement_json: str,
     control_plane_json: str,
 ) -> dict[str, Any]:
-    """Download exact-revision files one at a time, committing after every file."""
+    """Unselected direct downloader retained for a separately sealed future run."""
 
     from huggingface_hub import HfApi, hf_hub_download
 
@@ -1301,7 +1755,7 @@ def materialize_source(
                 "materialize_source",
                 include_startup=True,
             )
-            continuation = materialize_source.spawn(
+            continuation = download_materialize_source.spawn(  # type: ignore[attr-defined]
                 config_json,
                 run_id,
                 budget_acknowledgement_json,
@@ -1359,7 +1813,7 @@ def materialize_source(
             "materialize_source",
             include_startup=True,
         )
-        continuation = materialize_source.spawn(
+        continuation = download_materialize_source.spawn(  # type: ignore[attr-defined]
             config_json,
             run_id,
             budget_acknowledgement_json,
@@ -1410,16 +1864,199 @@ def materialize_source(
     return {"status": "success", "run_id": run_id, **receipt}
 
 
+def _checked_source_adoption_payload(
+    config: InklingGGUFConfig,
+    control_plane: ControlPlaneProvenance,
+) -> tuple[bytes, InklingSourceAdoptionReference]:
+    path = SOURCE_ADOPTION_REFERENCE_PATH
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError("Checked source-adoption reference is missing or unsafe")
+    expected_sha256, expected_size = _reference_control_plane_file(control_plane)
+    payload = path.read_bytes()
+    if len(payload) != expected_size or hashlib.sha256(payload).hexdigest() != expected_sha256:
+        raise RuntimeError("Deployed source-adoption reference differs from the control plane")
+    try:
+        reference = load_inkling_source_adoption_reference(path)
+        validate_inkling_source_adoption_reference(
+            reference,
+            target_config=config,
+            target_control_plane_sha256=control_plane.tree_sha256,
+        )
+    except ConfigurationError as error:
+        raise RuntimeError(f"Invalid deployed source-adoption reference: {error}") from error
+    return payload, reference
+
+
+@app.function(
+    image=toolchain_image,
+    cpu=(MATERIALIZE_RESOURCES.cpu_cores, MATERIALIZE_RESOURCES.cpu_cores),
+    memory=(
+        MATERIALIZE_RESOURCES.memory_gib * 1024,
+        MATERIALIZE_RESOURCES.memory_gib * 1024,
+    ),
+    timeout=int(MATERIALIZE_RESOURCES.max_hours * 3600),
+    startup_timeout=MATERIALIZE_RESOURCES.startup_timeout_seconds,
+    retries=0,
+    max_containers=1,
+    single_use_containers=True,
+    block_network=True,
+    volumes={str(SOURCE_MOUNT): source_volume},
+)
+@_capture_stage_failures("materialize_source")
+def materialize_source(
+    config_json: str,
+    run_id: str,
+    budget_acknowledgement_json: str,
+    control_plane_json: str,
+) -> dict[str, Any]:
+    """Adopt the exact verified source in place after a complete independent rehash."""
+
+    config, control_plane, acknowledgement = _remote_config(
+        config_json,
+        run_id,
+        budget_acknowledgement_json,
+        control_plane_json,
+        "materialize_source",
+    )
+    source_volume.reload()
+    run_root = _safe_child(SOURCE_MOUNT, "runs", run_id)
+    run_root.mkdir(parents=True, exist_ok=True)
+    _bind_config(run_root, config)
+    _bind_control_plane(run_root, control_plane)
+    _arm_failure_recording(
+        run_root,
+        config,
+        "materialize_source",
+        control_plane,
+        acknowledgement,
+        source_volume,
+    )
+    success = _safe_child(run_root, "source.success.json")
+    if success.exists():
+        _begin_attempt(
+            run_root,
+            config,
+            "materialize_source",
+            control_plane,
+            acknowledgement.launch_intent_sha256,
+        )
+        source_volume.commit()
+        toolchain = _verify_toolchain(config)
+        invocation_binding = _latest_attempt_binding(run_root, config, control_plane)
+        _verify_materialized_source(
+            config,
+            run_id,
+            control_plane,
+            toolchain=toolchain,
+            pending_latest_validation=invocation_binding,
+        )
+        receipt = _read_json(success)
+        validation = _adoption_validation_record(
+            run_id=run_id,
+            config=config,
+            control_plane=control_plane,
+            source_success_sha256=_sha256(success),
+            source_adoption_reference_sha256=str(receipt["source_adoption_reference_sha256"]),
+            toolchain=toolchain,
+            invocation_binding=invocation_binding,
+        )
+        _immutable_json(_adoption_validation_path(run_root, validation), validation)
+        source_volume.commit()
+        _verify_success_invocation_binding(
+            run_root,
+            config,
+            control_plane,
+            receipt,
+            toolchain=toolchain,
+        )
+        return {"status": "already_successful", "run_id": run_id}
+
+    _begin_attempt(
+        run_root,
+        config,
+        "materialize_source",
+        control_plane,
+        acknowledgement.launch_intent_sha256,
+    )
+    source_volume.commit()
+    toolchain = _verify_toolchain(config)
+    target_snapshot = _safe_child(run_root, "snapshot")
+    if target_snapshot.exists() or target_snapshot.is_symlink():
+        raise RuntimeError("Adoption target must not contain a snapshot copy or link")
+    payload, checked_reference = _checked_source_adoption_payload(config, control_plane)
+    adoption_path = _safe_child(run_root, "source.adoption.json")
+    _immutable_bytes(adoption_path, payload)
+    source_volume.commit()
+    reference, origin_receipt = _verify_adopted_source_origin(config, run_id, control_plane)
+    if reference != checked_reference:
+        raise RuntimeError("Committed source-adoption reference differs from the deployed copy")
+    invocation_binding = _latest_attempt_binding(run_root, config, control_plane)
+    receipt = {
+        "schema_version": "inkling-adopted-source-success-v2",
+        "status": "success",
+        "verified": True,
+        "config_hash": config.config_hash(),
+        "control_plane_sha256": control_plane.tree_sha256,
+        "run_id": run_id,
+        "materialization_kind": "adopted_verified_source_v1",
+        "source_dir": reference.snapshot_path,
+        "source_adoption_reference_sha256": reference.reference_sha256,
+        "source_adoption_file_sha256": _sha256(adoption_path),
+        "origin": _adopted_source_origin_record(reference),
+        "model_id": config.source.model_id,
+        "revision": config.source.revision,
+        "license": config.source.license,
+        "weight_index_sha256": reference.weight_index_canonical_sha256,
+        "source_tensor_bytes": reference.indexed_tensor_bytes,
+        "materialized_weight_file_bytes": reference.materialized_weight_file_bytes,
+        "source_tensor_count": reference.source_tensor_count,
+        "source_shard_count": reference.source_shard_count,
+        "file_count": reference.materialized_file_count,
+        "inventory_sha256": reference.source_inventory.sha256,
+        "source_config_sha256": reference.snapshot_config.sha256,
+        "warnings": origin_receipt.get("warnings"),
+        "toolchain": toolchain,
+        **invocation_binding,
+    }
+    _immutable_json(success, receipt)
+    source_volume.commit()
+    return {"status": "success", "run_id": run_id, **receipt}
+
+
+def _source_dir_for_run(run_id: str) -> Path:
+    run_root = _safe_child(SOURCE_MOUNT, "runs", run_id)
+    receipt = _read_json(_safe_child(run_root, "source.success.json"))
+    raw_source_dir = receipt.get("source_dir")
+    if not isinstance(raw_source_dir, str):
+        raise RuntimeError("Source success receipt has no valid source_dir")
+    candidate = Path(raw_source_dir)
+    try:
+        relative = candidate.relative_to(SOURCE_MOUNT)
+    except ValueError as error:
+        raise RuntimeError("Source success receipt source_dir escapes the source Volume") from error
+    if (
+        len(relative.parts) != 3
+        or relative.parts[0] != "runs"
+        or RUN_ID_PATTERN.fullmatch(relative.parts[1]) is None
+        or relative.parts[2] != "snapshot"
+    ):
+        raise RuntimeError("Source success receipt source_dir is not a canonical run snapshot")
+    source_dir = _safe_child(SOURCE_MOUNT, *relative.parts)
+    if source_dir.is_symlink() or not source_dir.is_dir():
+        raise RuntimeError("Source success receipt source_dir is missing or unsafe")
+    return source_dir
+
+
 def _execution_paths(run_id: str, *, partial_work: Path, partial_final: Path) -> WorkflowPaths:
     return WorkflowPaths(
-        source_dir=_safe_child(SOURCE_MOUNT, "runs", run_id, "snapshot"),
+        source_dir=_source_dir_for_run(run_id),
         work_dir=partial_work,
         final_dir=partial_final,
         llama_cpp_dir=LLAMA_CPP_DIR,
     )
 
 
-def _verify_toolchain(config: InklingGGUFConfig) -> dict[str, str]:
+def _verify_toolchain(config: InklingGGUFConfig) -> dict[str, Any]:
     commit = subprocess.run(
         ["git", "-C", str(LLAMA_CPP_DIR), "rev-parse", "HEAD"],
         check=True,
@@ -1470,8 +2107,20 @@ def _verify_toolchain(config: InklingGGUFConfig) -> dict[str, str]:
         raise RuntimeError("Python dependency receipt has an unexpected path")
     if _sha256(freeze_path) != freeze_expected:
         raise RuntimeError("Python dependency inventory differs from its image build receipt")
+    purelib_path = LLAMA_CPP_DIR / ".iql-python-purelib.txt"
+    purelib_manifest = LLAMA_CPP_DIR / ".iql-python-purelib.sha256"
+    purelib_expected, purelib_raw_path = purelib_manifest.read_text(encoding="utf-8").split(
+        maxsplit=1
+    )
+    if Path(purelib_raw_path.strip()).resolve() != purelib_path.resolve():
+        raise RuntimeError("Python purelib path receipt has an unexpected path")
+    if _sha256(purelib_path) != purelib_expected:
+        raise RuntimeError("Python purelib path differs from its image build receipt")
+    runtime_purelib = _python_inventory_path()
+    if purelib_path.read_text(encoding="utf-8") != f"{runtime_purelib}\n":
+        raise RuntimeError("Runtime Python purelib path differs from the image build path")
     live_freeze = subprocess.run(
-        [sys.executable, "-m", "pip", "freeze", "--all"],
+        _python_inventory_argv(runtime_purelib),
         check=True,
         capture_output=True,
         text=True,
@@ -1504,6 +2153,13 @@ def _verify_toolchain(config: InklingGGUFConfig) -> dict[str, str]:
         "repository": config.toolchain.repository,
         "commit": commit,
         "dpkg_inventory_sha256": dpkg_expected,
+        "python_inventory_scope": PYTHON_INVENTORY_SCOPE,
+        "python_inventory_path": runtime_purelib,
+        "python_inventory_size_bytes": len(canonical_live_freeze.encode("utf-8")),
+        "python_inventory_sha256": hashlib.sha256(
+            canonical_live_freeze.encode("utf-8")
+        ).hexdigest(),
+        "python_inventory_path_sha256": purelib_expected,
         "python_freeze_sha256": freeze_expected,
         **binary_hashes,
     }
@@ -1524,12 +2180,17 @@ def _verify_source_binding(
     run_id: str,
     paths: WorkflowPaths,
     control_plane: ControlPlaneProvenance,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     receipt_path = _safe_child(SOURCE_MOUNT, "runs", run_id, "source.success.json")
     if not receipt_path.is_file():
         raise RuntimeError("Exact source materialization has not completed")
-    receipt = _verify_materialized_source(config, run_id, control_plane)
     toolchain = _verify_toolchain(config)
+    receipt = _verify_materialized_source(
+        config,
+        run_id,
+        control_plane,
+        toolchain=toolchain,
+    )
     verify_execution_bindings(
         config,
         paths,
@@ -1544,7 +2205,7 @@ def _verify_bf16_dependency(
     run_id: str,
     *,
     control_plane: ControlPlaneProvenance,
-    toolchain: Mapping[str, str],
+    toolchain: Mapping[str, Any],
 ) -> tuple[dict[str, Any], str]:
     source_receipt_path = _safe_child(SOURCE_MOUNT, "runs", run_id, "source.success.json")
     work_root = _safe_child(WORK_MOUNT, "runs", run_id)
@@ -1575,7 +2236,7 @@ def _verify_mmproj_dependency(
     run_id: str,
     *,
     control_plane: ControlPlaneProvenance,
-    toolchain: Mapping[str, str],
+    toolchain: Mapping[str, Any],
     source_receipt_sha256: str,
     bf16_receipt_sha256: str,
 ) -> tuple[dict[str, Any], str]:
@@ -1609,7 +2270,7 @@ def _verify_final_dependency_chain(
     run_id: str,
     *,
     control_plane: ControlPlaneProvenance,
-    actual_toolchain: Mapping[str, str],
+    actual_toolchain: Mapping[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any], list[Any], list[Any], str, str]:
     """Rehash the actual source, receipt chain, BF16 input, and every final output."""
 
@@ -1620,9 +2281,14 @@ def _verify_final_dependency_chain(
         _verify_bound_control_plane(root, control_plane)
 
     source_receipt_path = _safe_child(source_root, "source.success.json")
-    source_receipt = _verify_materialized_source(config, run_id, control_plane)
+    source_receipt = _verify_materialized_source(
+        config,
+        run_id,
+        control_plane,
+        toolchain=actual_toolchain,
+    )
     source_receipt_sha = _sha256(source_receipt_path)
-    source_dir = _safe_child(source_root, "snapshot")
+    source_dir = _source_dir_for_run(run_id)
     verify_execution_bindings(
         config,
         WorkflowPaths(
