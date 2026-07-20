@@ -40,6 +40,7 @@ modal:
       cpu_cores: 8
       memory_gib: 32
       gpu_count: 0
+      ephemeral_disk_mib: 524288
       startup_timeout_seconds: 900
       max_hours: "4"
       max_attempts: 12
@@ -47,6 +48,7 @@ modal:
       cpu_cores: 32
       memory_gib: 192
       gpu_count: 0
+      ephemeral_disk_mib: 3145728
       startup_timeout_seconds: 900
       max_hours: "23"
       max_attempts: 2
@@ -55,6 +57,7 @@ modal:
       cpu_cores: 8
       memory_gib: 32
       gpu_count: 0
+      ephemeral_disk_mib: 524288
       startup_timeout_seconds: 900
       max_hours: "12"
       max_attempts: 2
@@ -63,6 +66,7 @@ modal:
       cpu_cores: 32
       memory_gib: 192
       gpu_count: 0
+      ephemeral_disk_mib: 3145728
       startup_timeout_seconds: 900
       max_hours: "23"
       max_attempts: 2
@@ -71,6 +75,7 @@ modal:
       cpu_cores: 16
       memory_gib: 64
       gpu_count: 0
+      ephemeral_disk_mib: 524288
       startup_timeout_seconds: 900
       max_hours: "12"
       max_attempts: 2
@@ -80,6 +85,7 @@ modal:
       memory_gib: 64
       gpu_type: B300
       gpu_count: 2
+      ephemeral_disk_mib: 524288
       startup_timeout_seconds: 900
       max_hours: "2"
       max_attempts: 1

@@ -54,6 +54,7 @@ from inkling_quant_lab.gguf.inkling import (  # noqa: E402
     build_quantize_command,
     build_verification_plan,
     inkling_run_id,
+    inkling_run_id_for_config_hash,
     load_inkling_gguf_config,
     load_inkling_source_adoption_reference,
     modal_stage_resources,
@@ -63,6 +64,7 @@ from inkling_quant_lab.gguf.inkling import (  # noqa: E402
     validate_deployed_control_plane,
     validate_inkling_source_adoption_reference,
     validate_paid_launch_acknowledgement,
+    validate_source_adoption_origin_config,
     verify_execution_bindings,
 )
 from inkling_quant_lab.gguf.publication import (  # noqa: E402
@@ -1134,6 +1136,8 @@ def _verify_direct_materialized_source(
     config: InklingGGUFConfig,
     run_root: Path,
     control_plane: ControlPlaneProvenance,
+    *,
+    expected_config_hash: str | None = None,
 ) -> dict[str, Any]:
     """Revalidate one directly downloaded snapshot and its original receipt."""
 
@@ -1144,9 +1148,12 @@ def _verify_direct_materialized_source(
     source_config_path = _safe_child(snapshot, "config.json")
     weight_index_path = _safe_child(snapshot, "model.safetensors.index.json")
     receipt = _read_json(receipt_path)
+    bound_config_hash = (
+        config.config_hash() if expected_config_hash is None else expected_config_hash
+    )
     if (
         receipt.get("verified") is not True
-        or receipt.get("config_hash") != config.config_hash()
+        or receipt.get("config_hash") != bound_config_hash
         or receipt.get("control_plane_sha256") != control_plane.tree_sha256
         or receipt.get("model_id") != config.source.model_id
         or receipt.get("revision") != config.source.revision
@@ -1159,7 +1166,7 @@ def _verify_direct_materialized_source(
     inventory = _read_json(inventory_path)
     records = inventory.get("files")
     if (
-        inventory.get("config_hash") != config.config_hash()
+        inventory.get("config_hash") != bound_config_hash
         or inventory.get("model_id") != config.source.model_id
         or inventory.get("revision") != config.source.revision
         or not isinstance(records, dict)
@@ -1294,23 +1301,33 @@ def _verify_adopted_source_origin(
         SOURCE_MOUNT, "runs", run_id
     ):
         raise RuntimeError("Source-adoption origin run path is unsafe or self-referential")
-    origin_config = InklingGGUFConfig.model_validate(
-        _read_json(_reference_artifact_path(reference.origin_resolved_config))
-    )
+    origin_config_payload = _read_json(_reference_artifact_path(reference.origin_resolved_config))
+    try:
+        origin_config = validate_source_adoption_origin_config(
+            origin_config_payload,
+            target_config=config,
+            expected_origin_config_hash=reference.origin_config_hash,
+        )
+    except ConfigurationError as error:
+        raise RuntimeError("Source-adoption origin config compatibility changed") from error
     origin_control_plane = ControlPlaneProvenance.model_validate(
         _read_json(_reference_artifact_path(reference.origin_control_plane))
     )
     if (
-        origin_config.config_hash() != reference.origin_config_hash
-        or origin_config.canonical_dict() != config.canonical_dict()
-        or origin_control_plane.tree_sha256 != reference.origin_control_plane_sha256
-        or _run_id(origin_config, origin_control_plane) != reference.origin_run_id
+        origin_control_plane.tree_sha256 != reference.origin_control_plane_sha256
+        or inkling_run_id_for_config_hash(
+            origin_config,
+            reference.origin_config_hash,
+            origin_control_plane.tree_sha256,
+        )
+        != reference.origin_run_id
     ):
         raise RuntimeError("Source-adoption origin config/control/run binding changed")
     origin_receipt = _verify_direct_materialized_source(
         origin_config,
         origin_root,
         origin_control_plane,
+        expected_config_hash=reference.origin_config_hash,
     )
     _verify_reference_remote_artifacts(reference)
     return reference, origin_receipt
@@ -1894,6 +1911,7 @@ def _checked_source_adoption_payload(
         MATERIALIZE_RESOURCES.memory_gib * 1024,
         MATERIALIZE_RESOURCES.memory_gib * 1024,
     ),
+    ephemeral_disk=MATERIALIZE_RESOURCES.ephemeral_disk_mib,
     timeout=int(MATERIALIZE_RESOURCES.max_hours * 3600),
     startup_timeout=MATERIALIZE_RESOURCES.startup_timeout_seconds,
     retries=0,
@@ -2388,6 +2406,7 @@ def _verify_final_dependency_chain(
         TEXT_CONVERT_RESOURCES.memory_gib * 1024,
         TEXT_CONVERT_RESOURCES.memory_gib * 1024,
     ),
+    ephemeral_disk=TEXT_CONVERT_RESOURCES.ephemeral_disk_mib,
     timeout=int(TEXT_CONVERT_RESOURCES.max_hours * 3600),
     startup_timeout=TEXT_CONVERT_RESOURCES.startup_timeout_seconds,
     retries=0,
@@ -2558,6 +2577,7 @@ def convert_text_bf16(
     image=toolchain_image,
     cpu=(MMPROJ_RESOURCES.cpu_cores, MMPROJ_RESOURCES.cpu_cores),
     memory=(MMPROJ_RESOURCES.memory_gib * 1024, MMPROJ_RESOURCES.memory_gib * 1024),
+    ephemeral_disk=MMPROJ_RESOURCES.ephemeral_disk_mib,
     timeout=int(MMPROJ_RESOURCES.max_hours * 3600),
     startup_timeout=MMPROJ_RESOURCES.startup_timeout_seconds,
     retries=0,
@@ -2763,6 +2783,7 @@ def convert_multimodal_projector(
         QUANTIZE_RESOURCES.memory_gib * 1024,
         QUANTIZE_RESOURCES.memory_gib * 1024,
     ),
+    ephemeral_disk=QUANTIZE_RESOURCES.ephemeral_disk_mib,
     timeout=int(QUANTIZE_RESOURCES.max_hours * 3600),
     startup_timeout=QUANTIZE_RESOURCES.startup_timeout_seconds,
     retries=0,
@@ -2987,6 +3008,7 @@ def quantize_text(
     image=toolchain_image,
     cpu=(VERIFY_RESOURCES.cpu_cores, VERIFY_RESOURCES.cpu_cores),
     memory=(VERIFY_RESOURCES.memory_gib * 1024, VERIFY_RESOURCES.memory_gib * 1024),
+    ephemeral_disk=VERIFY_RESOURCES.ephemeral_disk_mib,
     timeout=int(VERIFY_RESOURCES.max_hours * 3600),
     startup_timeout=VERIFY_RESOURCES.startup_timeout_seconds,
     retries=0,

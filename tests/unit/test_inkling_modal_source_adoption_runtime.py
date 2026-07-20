@@ -178,13 +178,23 @@ def test_origin_verification_rechecks_evidence_around_the_full_snapshot_hash(
     source_mount = tmp_path / "source"
     origin_control = inkling_control_plane_provenance(PROJECT_ROOT)
     config = paid.InklingGGUFConfig()
-    origin_run_id = paid.inkling_run_id(config, origin_control.tree_sha256)
+    legacy_config = config.canonical_dict()
+    for stage in legacy_config["modal"]["stages"]:
+        stage.pop("ephemeral_disk_mib")
+    legacy_config_hash = hashlib.sha256(
+        json.dumps(legacy_config, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    origin_run_id = paid.inkling_run_id_for_config_hash(
+        config,
+        legacy_config_hash,
+        origin_control.tree_sha256,
+    )
     origin_root = source_mount / "runs" / origin_run_id
     origin_root.mkdir(parents=True)
     resolved_config = origin_root / "resolved_config.json"
     origin_control_path = origin_root / "control_plane.json"
     resolved_config.write_text(
-        json.dumps(config.canonical_dict(), sort_keys=True) + "\n",
+        json.dumps(legacy_config, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     origin_control_path.write_text(
@@ -194,7 +204,7 @@ def test_origin_verification_rechecks_evidence_around_the_full_snapshot_hash(
     reference = SimpleNamespace(
         source_run_root=str(origin_root),
         origin_run_id=origin_run_id,
-        origin_config_hash=config.config_hash(),
+        origin_config_hash=legacy_config_hash,
         origin_control_plane_sha256=origin_control.tree_sha256,
         origin_resolved_config=paid.SourceAdoptionArtifact(
             path=str(resolved_config),
@@ -222,7 +232,7 @@ def test_origin_verification_rechecks_evidence_around_the_full_snapshot_hash(
     monkeypatch.setattr(
         paid,
         "_verify_direct_materialized_source",
-        lambda *_: events.append("snapshot") or {"verified": True},
+        lambda *_, **__: events.append("snapshot") or {"verified": True},
     )
 
     observed_reference, receipt = paid._verify_adopted_source_origin(

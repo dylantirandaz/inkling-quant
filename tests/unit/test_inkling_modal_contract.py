@@ -98,6 +98,15 @@ def test_paid_functions_share_the_four_part_remote_gate_and_stable_concurrency()
         assert startup_value.attr == "startup_timeout_seconds"
         assert isinstance(startup_value.value, ast.Name)
         assert startup_value.value.id == PAID_RESOURCE_NAMES[name]
+        disk_keywords = [
+            keyword for keyword in decorator.keywords if keyword.arg == "ephemeral_disk"
+        ]
+        assert len(disk_keywords) == 1
+        disk_value = disk_keywords[0].value
+        assert isinstance(disk_value, ast.Attribute)
+        assert disk_value.attr == "ephemeral_disk_mib"
+        assert isinstance(disk_value.value, ast.Name)
+        assert disk_value.value.id == PAID_RESOURCE_NAMES[name]
         assert literals["block_network"] is True
 
     remote_gate = functions["_remote_config"]

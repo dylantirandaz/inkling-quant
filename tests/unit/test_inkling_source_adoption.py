@@ -25,6 +25,7 @@ from inkling_quant_lab.gguf.inkling import (
     load_inkling_source_adoption_reference,
     validate_deployed_control_plane,
     validate_inkling_source_adoption_reference,
+    validate_source_adoption_origin_config,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -105,6 +106,66 @@ def test_adoption_reference_binds_a_distinct_target_run() -> None:
 
     assert validated is reference
     assert target_control_plane_sha256 != reference.origin_control_plane_sha256
+
+
+def test_legacy_origin_config_allows_only_the_new_ephemeral_disk_delta() -> None:
+    target = InklingGGUFConfig()
+    legacy = target.canonical_dict()
+    stages = legacy["modal"]["stages"]
+    assert isinstance(stages, list)
+    for stage in stages:
+        assert isinstance(stage, dict)
+        stage.pop("ephemeral_disk_mib")
+
+    validated = validate_source_adoption_origin_config(
+        legacy,
+        target_config=target,
+        expected_origin_config_hash=ORIGIN_CONFIG_HASH,
+    )
+    assert validated == target
+    assert (
+        validate_source_adoption_origin_config(
+            target.canonical_dict(),
+            target_config=target,
+            expected_origin_config_hash=target.config_hash(),
+        )
+        == target
+    )
+
+    partial_legacy = target.canonical_dict()
+    partial_legacy["modal"]["stages"][0].pop("ephemeral_disk_mib")
+    with pytest.raises(ConfigurationError, match="only ephemeral_disk_mib"):
+        validate_source_adoption_origin_config(
+            partial_legacy,
+            target_config=target,
+            expected_origin_config_hash=ORIGIN_CONFIG_HASH,
+        )
+
+    changed_disk = target.canonical_dict()
+    changed_disk["modal"]["stages"][1]["ephemeral_disk_mib"] = 2_621_440
+    with pytest.raises(ConfigurationError, match="only ephemeral_disk_mib"):
+        validate_source_adoption_origin_config(
+            changed_disk,
+            target_config=target,
+            expected_origin_config_hash=ORIGIN_CONFIG_HASH,
+        )
+
+    with pytest.raises(ConfigurationError, match="hash differs"):
+        validate_source_adoption_origin_config(
+            legacy,
+            target_config=target,
+            expected_origin_config_hash="0" * 64,
+        )
+
+    quantization = legacy["quantization"]
+    assert isinstance(quantization, dict)
+    quantization["threads"] = 31
+    with pytest.raises(ConfigurationError, match="only ephemeral_disk_mib"):
+        validate_source_adoption_origin_config(
+            legacy,
+            target_config=target,
+            expected_origin_config_hash=ORIGIN_CONFIG_HASH,
+        )
 
 
 @pytest.mark.parametrize(

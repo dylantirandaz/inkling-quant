@@ -348,6 +348,7 @@ def test_cost_ceiling_is_below_both_compute_and_user_caps() -> None:
             stage.memory_gib,
             stage.gpu_type,
             stage.gpu_count,
+            stage.ephemeral_disk_mib,
             stage.startup_timeout_seconds,
             stage.max_hours,
             stage.max_attempts,
@@ -355,13 +356,28 @@ def test_cost_ceiling_is_below_both_compute_and_user_caps() -> None:
         )
         for stage in config.modal.stages
     ] == [
-        ("materialize_source", 8, 32, None, 0, 900, Decimal("4"), 12, 0),
-        ("convert_text_bf16", 32, 192, None, 0, 900, Decimal("23"), 2, 1),
-        ("convert_multimodal_projector", 8, 32, None, 0, 900, Decimal("12"), 2, 1),
-        ("quantize_text", 32, 192, None, 0, 900, Decimal("23"), 2, 1),
-        ("verify_export", 16, 64, None, 0, 900, Decimal("12"), 2, 1),
-        ("smoke_test", 16, 64, "B300", 2, 900, Decimal("2"), 1, 0),
+        ("materialize_source", 8, 32, None, 0, 524_288, 900, Decimal("4"), 12, 0),
+        ("convert_text_bf16", 32, 192, None, 0, 3_145_728, 900, Decimal("23"), 2, 1),
+        (
+            "convert_multimodal_projector",
+            8,
+            32,
+            None,
+            0,
+            524_288,
+            900,
+            Decimal("12"),
+            2,
+            1,
+        ),
+        ("quantize_text", 32, 192, None, 0, 3_145_728, 900, Decimal("23"), 2, 1),
+        ("verify_export", 16, 64, None, 0, 524_288, 900, Decimal("12"), 2, 1),
+        ("smoke_test", 16, 64, "B300", 2, 524_288, 900, Decimal("2"), 1, 0),
     ]
+    assert all(
+        Decimal(stage.ephemeral_disk_mib) / Decimal(1024 * 20) <= Decimal(stage.memory_gib)
+        for stage in config.modal.stages
+    )
     assert ceiling <= config.budget.planned_compute_usd
     assert config.budget.planned_compute_usd == Decimal("600")
     assert config.budget.planned_storage_usd == Decimal("150")
@@ -472,6 +488,21 @@ def test_negative_rates_and_budget_envelopes_are_rejected() -> None:
 
     raw = InklingGGUFConfig().model_dump(mode="json")
     raw["modal"]["stages"][1]["startup_timeout_seconds"] = 899
+    with pytest.raises(ValueError, match="resource/timeout/attempt matrix"):
+        InklingGGUFConfig.model_validate(raw)
+
+    raw = InklingGGUFConfig().model_dump(mode="json")
+    raw["modal"]["stages"][1]["ephemeral_disk_mib"] = 3_145_729
+    with pytest.raises(ValueError, match="less than or equal to 3145728"):
+        InklingGGUFConfig.model_validate(raw)
+
+    raw = InklingGGUFConfig().model_dump(mode="json")
+    raw["modal"]["stages"][0]["ephemeral_disk_mib"] = 655_361
+    with pytest.raises(ValueError, match="impute more RAM"):
+        InklingGGUFConfig.model_validate(raw)
+
+    raw = InklingGGUFConfig().model_dump(mode="json")
+    raw["modal"]["stages"][1]["ephemeral_disk_mib"] = 524_288
     with pytest.raises(ValueError, match="resource/timeout/attempt matrix"):
         InklingGGUFConfig.model_validate(raw)
 

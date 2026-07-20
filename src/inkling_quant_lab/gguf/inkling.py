@@ -57,6 +57,8 @@ SOURCE_ADOPTION_HASH_DOMAIN: Final = b"inkling-source-adoption-reference-v1\0"
 MODAL_CPU_CORE_HOUR_USD: Final = Decimal("0.04716")
 MODAL_MEMORY_GIB_HOUR_USD: Final = Decimal("0.007992")
 MODAL_B300_GPU_HOUR_USD: Final = Decimal("7.0992")
+MODAL_MAX_EPHEMERAL_DISK_MIB: Final = 3_145_728
+MODAL_DEFAULT_EPHEMERAL_DISK_MIB: Final = 524_288
 MODAL_STORAGE_DELETION_LAG_DAYS: Final = 4
 FULL_INITIAL_BILLING_WINDOW_POLICY: Final = "full_workflow_plus_storage_lag_v1"
 SHORT_INITIAL_BILLING_WINDOW_POLICY: Final = "operator_accepted_short_initial_window_v1"
@@ -176,6 +178,7 @@ class ModalStageResources(StrictFrozenModel):
     memory_gib: int = Field(ge=1, le=512)
     gpu_type: Literal["B300"] | None = None
     gpu_count: int = Field(default=0, ge=0, le=8)
+    ephemeral_disk_mib: int = Field(ge=1, le=MODAL_MAX_EPHEMERAL_DISK_MIB)
     startup_timeout_seconds: int = Field(ge=60, le=30 * 60)
     max_hours: Decimal = Field(gt=0, le=Decimal("23"))
     max_attempts: int = Field(default=1, ge=1, le=24)
@@ -185,6 +188,10 @@ class ModalStageResources(StrictFrozenModel):
     def gpu_fields_are_consistent(self) -> ModalStageResources:
         if (self.gpu_type is None) != (self.gpu_count == 0):
             raise ValueError("gpu_type and gpu_count must be set together")
+        if self.ephemeral_disk_mib > self.memory_gib * 1024 * 20:
+            raise ValueError(
+                "ephemeral disk would impute more RAM than the configured memory request"
+            )
         return self
 
 
@@ -194,6 +201,7 @@ def _default_stages() -> tuple[ModalStageResources, ...]:
             name="materialize_source",
             cpu_cores=8,
             memory_gib=32,
+            ephemeral_disk_mib=MODAL_DEFAULT_EPHEMERAL_DISK_MIB,
             startup_timeout_seconds=15 * 60,
             max_hours=Decimal("4"),
             max_attempts=12,
@@ -202,6 +210,7 @@ def _default_stages() -> tuple[ModalStageResources, ...]:
             name="convert_text_bf16",
             cpu_cores=32,
             memory_gib=192,
+            ephemeral_disk_mib=MODAL_MAX_EPHEMERAL_DISK_MIB,
             startup_timeout_seconds=15 * 60,
             max_hours=Decimal("23"),
             max_attempts=2,
@@ -211,6 +220,7 @@ def _default_stages() -> tuple[ModalStageResources, ...]:
             name="convert_multimodal_projector",
             cpu_cores=8,
             memory_gib=32,
+            ephemeral_disk_mib=MODAL_DEFAULT_EPHEMERAL_DISK_MIB,
             startup_timeout_seconds=15 * 60,
             max_hours=Decimal("12"),
             max_attempts=2,
@@ -220,6 +230,7 @@ def _default_stages() -> tuple[ModalStageResources, ...]:
             name="quantize_text",
             cpu_cores=32,
             memory_gib=192,
+            ephemeral_disk_mib=MODAL_MAX_EPHEMERAL_DISK_MIB,
             startup_timeout_seconds=15 * 60,
             max_hours=Decimal("23"),
             max_attempts=2,
@@ -229,6 +240,7 @@ def _default_stages() -> tuple[ModalStageResources, ...]:
             name="verify_export",
             cpu_cores=16,
             memory_gib=64,
+            ephemeral_disk_mib=MODAL_DEFAULT_EPHEMERAL_DISK_MIB,
             startup_timeout_seconds=15 * 60,
             max_hours=Decimal("12"),
             max_attempts=2,
@@ -240,6 +252,7 @@ def _default_stages() -> tuple[ModalStageResources, ...]:
             memory_gib=64,
             gpu_type="B300",
             gpu_count=2,
+            ephemeral_disk_mib=MODAL_DEFAULT_EPHEMERAL_DISK_MIB,
             startup_timeout_seconds=15 * 60,
             max_hours=Decimal("2"),
             max_attempts=1,
@@ -623,26 +636,99 @@ def load_inkling_source_adoption_reference(
     return reference
 
 
+def _config_without_ephemeral_disk(config: InklingGGUFConfig) -> dict[str, Any]:
+    """Return the exact legacy config projection predating explicit disk resources."""
+
+    legacy = config.canonical_dict()
+    modal_config = legacy.get("modal")
+    if not isinstance(modal_config, dict):
+        raise ConfigurationError("Checked target config has no Modal resource mapping")
+    stages = modal_config.get("stages")
+    if not isinstance(stages, list):
+        raise ConfigurationError("Checked target config has no Modal stage resource list")
+    for stage in stages:
+        if not isinstance(stage, dict) or not isinstance(
+            stage.pop("ephemeral_disk_mib", None), int
+        ):
+            raise ConfigurationError("Checked target config has no explicit ephemeral disk value")
+    return legacy
+
+
+def _source_adoption_compatible_config_hashes(config: InklingGGUFConfig) -> frozenset[str]:
+    return frozenset(
+        {
+            config.config_hash(),
+            _canonical_sha256(_config_without_ephemeral_disk(config)),
+        }
+    )
+
+
+def validate_source_adoption_origin_config(
+    origin_config: Mapping[str, Any],
+    *,
+    target_config: InklingGGUFConfig,
+    expected_origin_config_hash: str,
+) -> InklingGGUFConfig:
+    """Allow exact target config or its exact disk-field-free legacy encoding only."""
+
+    current = target_config.canonical_dict()
+    legacy = _config_without_ephemeral_disk(target_config)
+    if origin_config != current and origin_config != legacy:
+        raise ConfigurationError(
+            "Source adoption permits only ephemeral_disk_mib to differ from the origin config",
+            component="inkling_source_adoption",
+        )
+    if _canonical_sha256(origin_config) != expected_origin_config_hash:
+        raise ConfigurationError(
+            "Source adoption origin config hash differs from its exact config bytes",
+            component="inkling_source_adoption",
+        )
+    upgraded = json.loads(json.dumps(origin_config, sort_keys=True, ensure_ascii=False))
+    if origin_config == legacy:
+        upgraded_stages = upgraded["modal"]["stages"]
+        current_stages = current["modal"]["stages"]
+        for upgraded_stage, current_stage in zip(
+            upgraded_stages,
+            current_stages,
+            strict=True,
+        ):
+            upgraded_stage["ephemeral_disk_mib"] = current_stage["ephemeral_disk_mib"]
+    try:
+        validated = InklingGGUFConfig.model_validate(upgraded)
+    except ValidationError as error:
+        raise ConfigurationError(
+            "Source adoption origin config is not valid under the checked schema",
+            component="inkling_source_adoption",
+        ) from error
+    if validated.canonical_dict() != current:
+        raise ConfigurationError(
+            "Upgraded source adoption origin config differs from the checked target",
+            component="inkling_source_adoption",
+        )
+    return validated
+
+
 def validate_inkling_source_adoption_reference(
     reference: InklingSourceAdoptionReference,
     *,
     target_config: InklingGGUFConfig,
     target_control_plane_sha256: str,
 ) -> InklingSourceAdoptionReference:
-    """Bind a direct source reference to a distinct, config-identical target run."""
+    """Bind a direct source reference to a distinct, source-identical target run."""
 
     if re.fullmatch(r"[0-9a-f]{64}", target_control_plane_sha256) is None:
         raise ConfigurationError(
             "target_control_plane_sha256 must be SHA-256",
             component="inkling_source_adoption",
         )
-    if target_config.config_hash() != reference.origin_config_hash:
+    if reference.origin_config_hash not in _source_adoption_compatible_config_hashes(target_config):
         raise ConfigurationError(
-            "Source adoption requires the exact origin configuration",
+            "Source adoption requires the exact origin config plus only the disk-resource delta",
             component="inkling_source_adoption",
         )
-    expected_origin_run_id = inkling_run_id(
+    expected_origin_run_id = inkling_run_id_for_config_hash(
         target_config,
+        reference.origin_config_hash,
         reference.origin_control_plane_sha256,
     )
     if expected_origin_run_id != reference.origin_run_id:
@@ -908,14 +994,28 @@ def _deployed_file_identity(path: Path) -> tuple[str, int]:
     return hashlib.sha256(payload).hexdigest(), len(payload)
 
 
+def inkling_run_id_for_config_hash(
+    config: InklingGGUFConfig,
+    config_hash: str,
+    control_plane_sha256: str,
+) -> str:
+    if re.fullmatch(r"[0-9a-f]{64}", control_plane_sha256) is None:
+        raise ConfigurationError("control_plane_sha256 must be SHA-256")
+    if re.fullmatch(r"[0-9a-f]{64}", config_hash) is None:
+        raise ConfigurationError("config_hash must be SHA-256")
+    return (
+        f"inkling-q3km-{config.source.revision[:8]}-{config.toolchain.commit[:8]}-"
+        f"{config_hash[:10]}-{control_plane_sha256[:10]}"
+    )
+
+
 def inkling_run_id(config: InklingGGUFConfig, control_plane_sha256: str) -> str:
     """Derive one run namespace from source, config, toolchain, and orchestration bytes."""
 
-    if re.fullmatch(r"[0-9a-f]{64}", control_plane_sha256) is None:
-        raise ConfigurationError("control_plane_sha256 must be SHA-256")
-    return (
-        f"inkling-q3km-{config.source.revision[:8]}-{config.toolchain.commit[:8]}-"
-        f"{config.config_hash()[:10]}-{control_plane_sha256[:10]}"
+    return inkling_run_id_for_config_hash(
+        config,
+        config.config_hash(),
+        control_plane_sha256,
     )
 
 
@@ -1590,6 +1690,7 @@ __all__ = [
     "configured_deployable_wall_time_hours",
     "inkling_control_plane_provenance",
     "inkling_run_id",
+    "inkling_run_id_for_config_hash",
     "inkling_source_adoption_reference_sha256",
     "load_inkling_gguf_config",
     "load_inkling_source_adoption_reference",
@@ -1600,5 +1701,6 @@ __all__ = [
     "validate_deployed_control_plane",
     "validate_inkling_source_adoption_reference",
     "validate_paid_launch_acknowledgement",
+    "validate_source_adoption_origin_config",
     "verify_execution_bindings",
 ]

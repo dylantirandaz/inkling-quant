@@ -61,6 +61,7 @@ from inkling_quant_lab.gguf.inkling import (  # noqa: E402
     require_materialize_initial_billing_window,
     require_stage_billing_window,
     validate_inkling_source_adoption_reference,
+    validate_source_adoption_origin_config,
 )
 
 CONFIG_PATH: Final = PROJECT_ROOT / "configs/experiments/inkling_q3_k_m_modal.yaml"
@@ -586,8 +587,16 @@ def _validate_source_adoption_volume_records(
     snapshot_config = records["snapshot_config"]
     weight_index = records["snapshot_weight_index"]
 
-    if resolved_config != config.canonical_dict():
-        raise RuntimeError("Origin resolved configuration differs from the checked target config")
+    try:
+        validate_source_adoption_origin_config(
+            resolved_config,
+            target_config=config,
+            expected_origin_config_hash=reference.origin_config_hash,
+        )
+    except ConfigurationError as error:
+        raise RuntimeError(
+            "Origin resolved configuration differs beyond the checked disk-resource delta"
+        ) from error
     try:
         origin_control = ControlPlaneProvenance.model_validate(control_plane_record)
     except ValueError as error:

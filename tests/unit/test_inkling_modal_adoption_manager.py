@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from inkling_quant_lab.exceptions import ConfigurationError
 from inkling_quant_lab.gguf.inkling import (
     INKLING_SOURCE_ADOPTION_REFERENCE_RELATIVE_PATH,
     InklingGGUFConfig,
@@ -129,6 +130,38 @@ def test_exact_remote_adoption_json_uses_reference_path_size_and_hash() -> None:
             mount_path="/source",
             label="origin source receipt",
         )
+
+
+def test_manager_routes_origin_config_through_disk_only_compatibility(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = pytest.importorskip("scripts.manage_inkling_modal")
+    config = InklingGGUFConfig()
+    legacy = config.canonical_dict()
+    for stage in legacy["modal"]["stages"]:
+        stage.pop("ephemeral_disk_mib")
+    records = {name: {} for name in manager.SOURCE_ADOPTION_VOLUME_ARTIFACTS}
+    records["origin_resolved_config"] = legacy
+    observed: list[object] = []
+
+    def reject_after_observing(
+        origin_config: object,
+        *,
+        target_config: object,
+        expected_origin_config_hash: str,
+    ) -> None:
+        observed.extend((origin_config, target_config, expected_origin_config_hash))
+        raise ConfigurationError("sentinel")
+
+    monkeypatch.setattr(
+        manager,
+        "validate_source_adoption_origin_config",
+        reject_after_observing,
+    )
+    with pytest.raises(RuntimeError, match="disk-resource delta"):
+        manager._validate_source_adoption_volume_records(config, REFERENCE, records)
+
+    assert observed == [legacy, config, REFERENCE.origin_config_hash]
 
 
 def test_completed_adoption_validations_bind_exact_marker_bytes_and_record_id(
