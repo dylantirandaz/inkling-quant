@@ -253,21 +253,166 @@ def test_origin_call_graph_requires_one_successful_childless_exact_root(
         manager._require_origin_call_graph_success(REFERENCE)
 
 
-def test_origin_app_must_be_exactly_stopped_with_zero_tasks(
+def _origin_deployment(manager: Any) -> dict[str, object]:
+    return {
+        "app_name": REFERENCE.origin_app_name,
+        "version": 1,
+        "tag": f"iql-{REFERENCE.origin_control_plane_sha256[:32]}",
+        "time_deployed": "2026-07-18 14:28:45-05:00",
+        "modal_client": manager.EXPECTED_MODAL_VERSION,
+    }
+
+
+def _origin_history(deployment: dict[str, object]) -> list[dict[str, object]]:
+    return [
+        {
+            "version": "v1",
+            "time_deployed": deployment["time_deployed"],
+            "client": deployment["modal_client"],
+            "deployed_by": "fixture-user",
+            "commit": None,
+            "tag": deployment["tag"],
+        }
+    ]
+
+
+def _origin_snapshot(manager: Any, deployment: dict[str, object]) -> dict[str, object]:
+    lifecycle = {
+        "app_state": manager.api_pb2.APP_STATE_STOPPED,
+        "created_at": 1.0,
+        "created_by": "fixture-user",
+        "deployed_at": 2.0,
+        "deployed_by": "fixture-user",
+        "version": deployment["version"],
+        "stopped_at": 3.0,
+        "stopped_by": "fixture-user",
+    }
+    return {
+        "by_id_lifecycle": lifecycle,
+        "by_name_app_id": "",
+        "by_name_previous_app_id": REFERENCE.origin_app_id,
+        "by_name_environment_name": "inkling-quant",
+        "by_name_lifecycle": dict(lifecycle),
+        "active_task_ids": (),
+    }
+
+
+def test_origin_app_uses_exact_live_identity_state_tasks_and_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = pytest.importorskip("scripts.manage_inkling_modal")
-    row = {
-        "app_id": REFERENCE.origin_app_id,
-        "description": REFERENCE.origin_app_name,
-        "state": "stopped",
-        "tasks": "0",
-    }
-    monkeypatch.setattr(manager, "_modal_app_list", lambda _config: [row])
+    deployment = _origin_deployment(manager)
+    history = _origin_history(deployment)
+    snapshot = _origin_snapshot(manager, deployment)
+    identifiers: list[str] = []
+    snapshot_reads = 0
+
+    def app_history(_config: object, *, app_name: str) -> list[dict[str, object]]:
+        identifiers.append(app_name)
+        return history
+
+    def app_snapshot(_config: object, _reference: object) -> dict[str, object]:
+        nonlocal snapshot_reads
+        snapshot_reads += 1
+        return snapshot
+
+    monkeypatch.setattr(manager, "_modal_history", app_history)
+    monkeypatch.setattr(manager, "_modal_origin_app_snapshot", app_snapshot)
+    monkeypatch.setattr(
+        manager, "_read_exact_local_adoption_json", lambda *_args, **_kwargs: deployment
+    )
+
     manager._require_origin_app_stopped(InklingGGUFConfig(), REFERENCE)
 
-    row["tasks"] = "1"
-    with pytest.raises(RuntimeError, match="stopped with zero active tasks"):
+    assert snapshot_reads == 2
+    assert identifiers == [REFERENCE.origin_app_id, REFERENCE.origin_app_name]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("by_name_app_id", REFERENCE.origin_app_id),
+        ("by_name_previous_app_id", "ap-0000000000000000000000"),
+        ("by_name_environment_name", "main"),
+        ("active_task_ids", ("ta-active",)),
+    ],
+)
+def test_origin_app_rejects_live_name_or_task_drift(
+    field: str,
+    value: object,
+) -> None:
+    manager = pytest.importorskip("scripts.manage_inkling_modal")
+    deployment = _origin_deployment(manager)
+    snapshot = _origin_snapshot(manager, deployment)
+    snapshot[field] = value
+
+    with pytest.raises(RuntimeError, match="exact ID/name as stopped with zero active tasks"):
+        manager._validate_origin_app_snapshot(
+            snapshot,
+            config=InklingGGUFConfig(),
+            reference=REFERENCE,
+            version=1,
+        )
+
+
+def test_origin_app_rejects_live_lifecycle_drift() -> None:
+    manager = pytest.importorskip("scripts.manage_inkling_modal")
+    deployment = _origin_deployment(manager)
+    snapshot = _origin_snapshot(manager, deployment)
+    by_id = snapshot["by_id_lifecycle"]
+    assert isinstance(by_id, dict)
+    by_id["app_state"] = manager.api_pb2.APP_STATE_DEPLOYED
+
+    with pytest.raises(RuntimeError, match="exact ID/name as stopped with zero active tasks"):
+        manager._validate_origin_app_snapshot(
+            snapshot,
+            config=InklingGGUFConfig(),
+            reference=REFERENCE,
+            version=1,
+        )
+
+
+def test_aged_out_origin_app_rejects_id_name_history_disagreement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = pytest.importorskip("scripts.manage_inkling_modal")
+    deployment = _origin_deployment(manager)
+    history = _origin_history(deployment)
+    snapshot = _origin_snapshot(manager, deployment)
+
+    monkeypatch.setattr(
+        manager,
+        "_modal_history",
+        lambda _config, *, app_name: (
+            history if app_name == REFERENCE.origin_app_id else [dict(history[0], version="v2")]
+        ),
+    )
+    monkeypatch.setattr(manager, "_modal_origin_app_snapshot", lambda *_args: snapshot)
+    monkeypatch.setattr(
+        manager, "_read_exact_local_adoption_json", lambda *_args, **_kwargs: deployment
+    )
+
+    with pytest.raises(RuntimeError, match="ID/name deployment histories disagree"):
+        manager._require_origin_app_stopped(InklingGGUFConfig(), REFERENCE)
+
+
+def test_origin_app_rejects_live_change_during_history_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = pytest.importorskip("scripts.manage_inkling_modal")
+    deployment = _origin_deployment(manager)
+    history = _origin_history(deployment)
+    snapshot = _origin_snapshot(manager, deployment)
+    changed_snapshot = dict(snapshot, active_task_ids=("ta-active",))
+    snapshots = [snapshot, changed_snapshot]
+
+    monkeypatch.setattr(manager, "_modal_history", lambda *_args, **_kwargs: history)
+    monkeypatch.setattr(manager, "_modal_origin_app_snapshot", lambda *_args: snapshots.pop(0))
+    monkeypatch.setattr(
+        manager, "_read_exact_local_adoption_json", lambda *_args, **_kwargs: deployment
+    )
+
+    with pytest.raises(RuntimeError, match="changed while its history was checked"):
         manager._require_origin_app_stopped(InklingGGUFConfig(), REFERENCE)
 
 

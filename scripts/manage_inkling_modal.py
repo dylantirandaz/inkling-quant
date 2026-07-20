@@ -30,7 +30,10 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 import modal  # noqa: E402
+from modal._utils.async_utils import synchronizer  # noqa: E402
 from modal.call_graph import InputInfo, InputStatus  # noqa: E402
+from modal.client import _Client  # noqa: E402
+from modal_proto import api_pb2  # noqa: E402
 
 EXPECTED_MODAL_VERSION: Final = "1.5.0"
 if modal.__version__ != EXPECTED_MODAL_VERSION:
@@ -770,49 +773,139 @@ def _require_origin_call_graph_success(reference: InklingSourceAdoptionReference
         raise RuntimeError("Checked origin reference permits unexpected materialize continuations")
 
 
-def _modal_app_list(config: InklingGGUFConfig) -> list[dict[str, Any]]:
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "modal",
-            "app",
-            "list",
-            "-e",
-            config.modal.environment_name,
-            "--json",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        shell=False,
+def _modal_app_lifecycle_identity(lifecycle: Any) -> dict[str, Any]:
+    return {
+        "app_state": lifecycle.app_state,
+        "created_at": lifecycle.created_at,
+        "created_by": lifecycle.created_by,
+        "deployed_at": lifecycle.deployed_at,
+        "deployed_by": lifecycle.deployed_by,
+        "version": lifecycle.version,
+        "stopped_at": lifecycle.stopped_at,
+        "stopped_by": lifecycle.stopped_by,
+    }
+
+
+@synchronizer.create_blocking
+async def _modal_origin_app_snapshot(
+    config: InklingGGUFConfig,
+    reference: InklingSourceAdoptionReference,
+) -> dict[str, Any]:
+    """Resolve one stopped App through exact ID/name RPCs and enumerate active tasks."""
+
+    client = await _Client.from_env()
+    by_id = await client.stub.AppGetLifecycle(
+        api_pb2.AppGetLifecycleRequest(app_id=reference.origin_app_id)
     )
-    value = json.loads(result.stdout)
-    if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
-        raise RuntimeError("Modal App list returned an unexpected JSON shape")
-    return value
+    by_name = await client.stub.AppGetByDeploymentName(
+        api_pb2.AppGetByDeploymentNameRequest(
+            name=reference.origin_app_name,
+            environment_name=config.modal.environment_name,
+        )
+    )
+    tasks = await client.stub.TaskList(
+        api_pb2.TaskListRequest(
+            environment_name=config.modal.environment_name,
+            app_id=reference.origin_app_id,
+        )
+    )
+    return {
+        "by_id_lifecycle": _modal_app_lifecycle_identity(by_id.lifecycle),
+        "by_name_app_id": by_name.app_id,
+        "by_name_previous_app_id": by_name.previous_app_id,
+        "by_name_environment_name": by_name.environment_name,
+        "by_name_lifecycle": _modal_app_lifecycle_identity(by_name.lifecycle),
+        "active_task_ids": tuple(sorted(task.task_id for task in tasks.tasks)),
+    }
+
+
+def _validate_origin_app_snapshot(
+    snapshot: Mapping[str, Any],
+    *,
+    config: InklingGGUFConfig,
+    reference: InklingSourceAdoptionReference,
+    version: int,
+) -> None:
+    expected_keys = {
+        "by_id_lifecycle",
+        "by_name_app_id",
+        "by_name_previous_app_id",
+        "by_name_environment_name",
+        "by_name_lifecycle",
+        "active_task_ids",
+    }
+    by_id_lifecycle = snapshot.get("by_id_lifecycle")
+    if (
+        set(snapshot) != expected_keys
+        or not isinstance(by_id_lifecycle, dict)
+        or snapshot.get("by_name_lifecycle") != by_id_lifecycle
+        or by_id_lifecycle.get("app_state") != api_pb2.APP_STATE_STOPPED
+        or by_id_lifecycle.get("version") != version
+        or not isinstance(by_id_lifecycle.get("stopped_at"), float)
+        or by_id_lifecycle["stopped_at"] <= 0
+        or snapshot.get("by_name_app_id") != ""
+        or snapshot.get("by_name_previous_app_id") != reference.origin_app_id
+        or snapshot.get("by_name_environment_name") != config.modal.environment_name
+        or snapshot.get("active_task_ids") != ()
+    ):
+        raise RuntimeError(
+            "Pinned origin App must resolve by exact ID/name as stopped with zero active tasks"
+        )
 
 
 def _require_origin_app_stopped(
     config: InklingGGUFConfig,
     reference: InklingSourceAdoptionReference,
 ) -> None:
-    candidates = [
-        row
-        for row in _modal_app_list(config)
-        if row.get("app_id") == reference.origin_app_id
-        or row.get("description") == reference.origin_app_name
-    ]
-    if len(candidates) != 1:
-        raise RuntimeError("Expected exactly one Modal App matching the pinned origin ID/name")
-    row = candidates[0]
+    deployment = _read_exact_local_adoption_json(
+        reference.local_deployment_receipt,
+        label="local_deployment_receipt",
+    )
+    expected_tag = f"iql-{reference.origin_control_plane_sha256[:32]}"
+    version = deployment.get("version")
+    time_deployed = deployment.get("time_deployed")
+    modal_client = deployment.get("modal_client")
     if (
-        row.get("app_id") != reference.origin_app_id
-        or row.get("description") != reference.origin_app_name
-        or row.get("state") != reference.origin_app_required_state
-        or row.get("tasks") not in (reference.origin_app_required_active_tasks, "0")
+        deployment.get("app_name") != reference.origin_app_name
+        or deployment.get("tag") != expected_tag
+        or not isinstance(version, int)
+        or version < 1
+        or not isinstance(time_deployed, str)
+        or not time_deployed
+        or modal_client != EXPECTED_MODAL_VERSION
     ):
-        raise RuntimeError("Pinned origin App must remain stopped with zero active tasks")
+        raise RuntimeError("Pinned origin deployment receipt lacks exact history identity")
+
+    snapshot_before_history = _modal_origin_app_snapshot(config, reference)
+    _validate_origin_app_snapshot(
+        snapshot_before_history,
+        config=config,
+        reference=reference,
+        version=version,
+    )
+
+    history_by_id = _modal_history(config, app_name=reference.origin_app_id)
+    history_by_name = _modal_history(config, app_name=reference.origin_app_name)
+    if history_by_id != history_by_name:
+        raise RuntimeError("Pinned origin App ID/name deployment histories disagree")
+    history_version, row = _deployment_row(history_by_id, tag=expected_tag)
+    _require_newest_deployment(history_by_id, version=history_version)
+    if history_version != version:
+        raise RuntimeError("Pinned origin App history version drifted")
+    _require_mapping_fields(
+        row,
+        {
+            "version": f"v{version}",
+            "tag": expected_tag,
+            "time_deployed": time_deployed,
+            "client": modal_client,
+        },
+        label="Pinned origin App deployment history",
+    )
+
+    snapshot_after_history = _modal_origin_app_snapshot(config, reference)
+    if snapshot_after_history != snapshot_before_history:
+        raise RuntimeError("Pinned origin App changed while its history was checked")
 
 
 def _require_source_adoption_origin_ready(
