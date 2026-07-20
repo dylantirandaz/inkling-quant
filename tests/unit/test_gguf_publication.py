@@ -115,6 +115,31 @@ def test_publication_uses_only_volume_v1_safe_atomic_rename(
     assert canonical.is_dir()
 
 
+def test_publication_accepts_a_mount_alias_above_the_run_root(tmp_path: Path) -> None:
+    real_mount = tmp_path / "real-mount"
+    real_run_root = real_mount / "runs" / "run-id"
+    real_partial = real_run_root / ".partial-q3-1"
+    real_partial.mkdir(parents=True)
+    output = real_partial / "inkling-Q3_K_M.gguf"
+    output.write_bytes(b"quantized model")
+
+    logical_mount = tmp_path / "logical-mount"
+    logical_mount.symlink_to(real_mount, target_is_directory=True)
+    run_root = logical_mount / "runs" / "run-id"
+    partial = run_root / ".partial-q3-1"
+    canonical = run_root / "q3_k_m"
+
+    _prepare(run_root, partial, canonical, (_record(output, real_partial),))
+    receipt = _finalize(run_root, partial, canonical)
+
+    assert receipt.canonical_directory == "q3_k_m"
+    assert tuple(item.path for item in receipt.outputs) == ("q3_k_m/inkling-Q3_K_M.gguf",)
+    assert publication_intent_path(run_root, STAGE) == run_root / "control" / (
+        f"{STAGE}.publication.intent.json"
+    )
+    assert canonical.joinpath("inkling-Q3_K_M.gguf").read_bytes() == b"quantized model"
+
+
 def test_finalize_recovers_after_directory_was_already_renamed(tmp_path: Path) -> None:
     run_root, partial, canonical, outputs = _attempt(tmp_path)
     _prepare(run_root, partial, canonical, outputs)
@@ -237,6 +262,51 @@ def test_prepare_rejects_a_symlinked_attempt_directory(tmp_path: Path) -> None:
             partial_directory=partial,
             canonical_directory=run_root / "canonical",
             outputs=(_record(output, outside),),
+        )
+
+
+def test_publication_rejects_a_symlinked_run_root(tmp_path: Path) -> None:
+    real_run_root = tmp_path / "real-run"
+    real_run_root.mkdir()
+    run_root = tmp_path / "run"
+    run_root.symlink_to(real_run_root, target_is_directory=True)
+
+    with pytest.raises(ArtifactIntegrityError, match="Run root is not a regular directory"):
+        publication_intent_path(run_root, STAGE)
+
+
+def test_prepare_rejects_an_internal_symlink_path_component(tmp_path: Path) -> None:
+    run_root = tmp_path / "run"
+    actual_parent = run_root / "actual"
+    partial = actual_parent / ".partial"
+    partial.mkdir(parents=True)
+    output = partial / "output.gguf"
+    output.write_bytes(b"payload")
+    alias = run_root / "alias"
+    alias.symlink_to(actual_parent, target_is_directory=True)
+
+    with pytest.raises(ArtifactIntegrityError, match="Publication path contains a symlink"):
+        prepare_publication_intent(
+            run_root,
+            config_hash=CONFIG_HASH,
+            stage=STAGE,
+            partial_directory=alias / ".partial",
+            canonical_directory=alias / "canonical",
+            outputs=(_record(output, partial),),
+        )
+
+
+def test_prepare_rejects_an_absolute_path_outside_the_run_root(tmp_path: Path) -> None:
+    run_root, partial, _, outputs = _attempt(tmp_path)
+
+    with pytest.raises(ArtifactIntegrityError, match="Publication path escapes run root"):
+        prepare_publication_intent(
+            run_root,
+            config_hash=CONFIG_HASH,
+            stage=STAGE,
+            partial_directory=partial,
+            canonical_directory=tmp_path / "outside",
+            outputs=outputs,
         )
 
 

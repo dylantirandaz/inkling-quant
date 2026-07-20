@@ -268,7 +268,12 @@ def _validated_root(run_root: Path) -> Path:
     requested = Path(run_root).expanduser()
     if requested.is_symlink() or not requested.is_dir():
         raise _integrity_error(f"Run root is not a regular directory: {run_root}")
-    return requested.resolve(strict=True)
+    # Preserve the caller-visible spelling of a mounted path.  Modal Volume
+    # mounts can resolve from /work/... to an internal /__modal/volumes/...
+    # path even though no symlink exists at or below the run root.  Lexical
+    # binding and physical containment are intentionally checked separately in
+    # _bound_directory.
+    return Path(os.path.abspath(requested))
 
 
 def _validate_hash(value: str, label: str) -> None:
@@ -287,16 +292,18 @@ def _bound_directory(root: Path, requested: Path) -> tuple[Path, Path]:
         raise _integrity_error(f"Publication path contains parent traversal: {requested}")
     candidate = raw if raw.is_absolute() else root / raw
     try:
-        relative = candidate.relative_to(root)
+        lexical_relative = candidate.relative_to(root)
     except ValueError as error:
         raise _integrity_error(f"Publication path escapes run root: {requested}") from error
-    if not relative.parts or relative == Path("."):
+    if not lexical_relative.parts or lexical_relative == Path("."):
         raise _integrity_error("Publication directory cannot be the run root")
-    _reject_symlink_components(root, relative)
+    _reject_symlink_components(root, lexical_relative)
+
+    resolved_root = root.resolve(strict=True)
     resolved = candidate.resolve(strict=False)
-    if resolved == root or not resolved.is_relative_to(root):
+    if resolved == resolved_root or not resolved.is_relative_to(resolved_root):
         raise _integrity_error(f"Publication path escapes run root: {requested}")
-    return resolved, resolved.relative_to(root)
+    return resolved, resolved.relative_to(resolved_root)
 
 
 def _validate_directory_pair(
