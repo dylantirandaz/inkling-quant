@@ -408,7 +408,15 @@ def test_success_writes_start_before_no_shell_offline_execution_and_freezes(
         assert "src/inkling_quant_lab/nested/extra_fixture.py" in start["file_sha256"]
         assert "configs/models/hf_stories15m_moe.yaml" in start["file_sha256"]
         assert "configs/quantization/native_dynamic_int8.yaml" in start["file_sha256"]
-        assert {"AGENTS.md", "SPEC.md", "SDD.md", "TDD.md"}.issubset(start["file_sha256"])
+        ignored_documentation = {
+            "AGENTS.md",
+            "SPEC.md",
+            "SDD.md",
+            "TDD.md",
+            "docs/adr/ADR-025-prospective-tinystories-int8-noninferiority.md",
+        }
+        assert ignored_documentation.isdisjoint(start["file_sha256"])
+        assert all(not (root / relative).exists() for relative in ignored_documentation)
         assert list(start["file_sha256"]) == sorted(start["file_sha256"])
         assert stat.S_IMODE(attempt.stat().st_mode) == 0o555
         assert all(
@@ -480,6 +488,36 @@ def test_stale_preregistration_binding_is_frozen_and_never_launched(
         assert completion["failure"]["type"] == "PreflightError"
         assert "stale preregistered file binding" in (attempt / "stderr.log").read_text()
         assert stat.S_IMODE(attempt.stat().st_mode) == 0o555
+    finally:
+        _thaw(attempt)
+
+
+def test_non_runtime_document_binding_is_rejected_without_reading_the_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, dataset, preregistration_path, preregistration = _project_fixture(tmp_path, monkeypatch)
+    preregistration["bindings"]["files"]["AGENTS.md"] = "0" * 64
+    preregistration_path.write_text(json.dumps(preregistration), encoding="utf-8")
+    calls: list[bool] = []
+    monkeypatch.setattr(
+        attempt_runner.subprocess,
+        "run",
+        lambda *args, **kwargs: calls.append(True),
+    )
+    attempt = root / attempt_runner.ATTEMPT_ROOT / "attempt-1"
+    try:
+        result = attempt_runner.run_attempt(
+            ordinal=1,
+            dataset_path=dataset,
+            preregistration_path=preregistration_path,
+            project_root=root,
+        )
+        completion = json.loads((attempt / "completion.json").read_text(encoding="utf-8"))
+
+        assert not (root / "AGENTS.md").exists()
+        assert result.status == "failed_preflight"
+        assert calls == []
+        assert "non-runtime file bindings" in completion["failure"]["message"]
     finally:
         _thaw(attempt)
 

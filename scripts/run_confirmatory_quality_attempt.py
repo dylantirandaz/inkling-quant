@@ -32,7 +32,6 @@ EVALUATOR = Path("scripts/evaluate_public_moe_native_quality.py")
 STATISTICAL_MODULE = Path("src/inkling_quant_lab/evaluation/noninferiority.py")
 REPEAT_VERIFIER = Path("scripts/verify_confirmatory_quality_repeats.py")
 RUNNER = Path("scripts/run_confirmatory_quality_attempt.py")
-ADR = Path("docs/adr/ADR-025-prospective-tinystories-int8-noninferiority.md")
 ATTEMPT_ROOT = Path("artifacts/research-slices/stories15m-native-int8-confirmatory-256")
 HARDWARE_LABEL = "Apple M3 MacBook Air (8 cores, 16 GB)"
 PROTOCOL_ID = "stories15m-native-int8-confirmatory-quality-v1"
@@ -63,13 +62,8 @@ REQUIRED_BOUND_FILES = (
     PROTOCOL_CONFIG,
     Path("pyproject.toml"),
     Path("uv.lock"),
-    ADR,
     Path("configs/models/hf_stories15m_moe.yaml"),
     Path("configs/quantization/native_dynamic_int8.yaml"),
-    Path("AGENTS.md"),
-    Path("SPEC.md"),
-    Path("SDD.md"),
-    Path("TDD.md"),
 )
 SOURCE_CLOSURE_ROOT = Path("src/inkling_quant_lab")
 SEALED_ATTEMPT_FILES = frozenset(
@@ -539,7 +533,6 @@ def _validate_preregistration(
     scientific: dict[str, str],
     dataset: dict[str, Any],
     environment: dict[str, Any],
-    project_root: Path,
 ) -> None:
     top = _exact_keys(
         preregistration,
@@ -601,18 +594,12 @@ def _validate_preregistration(
     missing = sorted(set(current_files) - set(declared_files))
     if missing:
         raise PreflightError(f"preregistration omits required file bindings: {missing}")
-    for relative_text, expected_sha256 in declared_files.items():
-        relative = Path(relative_text)
-        try:
-            actual = _sha256_file(_project_file(project_root, relative))
-        except (OSError, ValueError) as error:
-            raise PreflightError(
-                f"invalid preregistered file binding {relative_text}: {error}"
-            ) from error
-        if expected_sha256 != actual:
+    unexpected = sorted(set(declared_files) - set(current_files))
+    if unexpected:
+        raise PreflightError(f"preregistration contains non-runtime file bindings: {unexpected}")
+    for relative_text, actual_sha256 in current_files.items():
+        if declared_files[relative_text] != actual_sha256:
             raise PreflightError(f"stale preregistered file binding: {relative_text}")
-    if any(declared_files[path] != digest for path, digest in current_files.items()):
-        raise PreflightError("current required file hashes differ from preregistration")
 
     resolved = _exact_keys(
         bindings["resolved_config_sha256"],
@@ -909,7 +896,6 @@ def run_attempt(
                 scientific=scientific,
                 dataset=dataset_fact,
                 environment=environment,
-                project_root=root,
             )
             preflight_complete = True
             child_environment = dict(os.environ)

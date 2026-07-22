@@ -470,3 +470,13 @@ def test_help_lists_complete_public_command_surface() -> None:
         "doctor",
     ):
         assert command in result.output
+
+
+def test_help_defines_moe_and_explains_remote_code_safety() -> None:
+    inspect_result = runner.invoke(app, ["inspect-model", "--help"])
+    run_result = runner.invoke(app, ["run", "--help"])
+
+    assert inspect_result.exit_code == 0, inspect_result.output
+    assert "mixture-of-experts (MoE)" in inspect_result.output
+    assert run_result.exit_code == 0, run_result.output
+    assert "audit and pin the code" in run_result.output

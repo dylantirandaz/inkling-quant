@@ -88,7 +88,6 @@ _CANDIDATE_CONFIG = Path(
     "configs/experiments/hf_stories15m_tinystories_native_int8_confirmatory_256.yaml"
 )
 _PROTOCOL_CONFIG = Path("configs/evaluations/stories15m_native_int8_confirmatory_256.yaml")
-_ADR = Path("docs/adr/ADR-025-prospective-tinystories-int8-noninferiority.md")
 _REQUIRED_BOUND_FILES = (
     Path("scripts/__init__.py"),
     _RUNNER,
@@ -100,13 +99,8 @@ _REQUIRED_BOUND_FILES = (
     _PROTOCOL_CONFIG,
     Path("pyproject.toml"),
     Path("uv.lock"),
-    _ADR,
     Path("configs/models/hf_stories15m_moe.yaml"),
     Path("configs/quantization/native_dynamic_int8.yaml"),
-    Path("AGENTS.md"),
-    Path("SPEC.md"),
-    Path("SDD.md"),
-    Path("TDD.md"),
 )
 _SOURCE_CLOSURE_ROOT = Path("src/inkling_quant_lab")
 _ATTEMPT_FILES = {
@@ -1048,8 +1042,11 @@ def _validate_preregistration(
     missing_required = sorted(required_paths - set(files))
     if missing_required:
         raise RepeatVerificationError("preregistration omits required bound project files")
+    unexpected = sorted(set(files) - required_paths)
+    if unexpected:
+        raise RepeatVerificationError("preregistration contains non-runtime bound project files")
     validated_files: dict[str, str] = {}
-    for relative_text in sorted(files):
+    for relative_text in sorted(required_paths):
         relative = Path(relative_text)
         if relative.is_absolute() or ".." in relative.parts or relative.as_posix() != relative_text:
             raise RepeatVerificationError("preregistration contains an unsafe bound-file path")

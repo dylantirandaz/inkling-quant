@@ -861,6 +861,13 @@ def test_fixed_attempt_envelopes_and_preregistration_produce_the_only_claim(
     tmp_path: Path,
 ) -> None:
     first, second, preregistration = _sealed_pair(tmp_path)
+    ignored_documentation = {
+        "AGENTS.md",
+        "SPEC.md",
+        "SDD.md",
+        "TDD.md",
+        "docs/adr/ADR-025-prospective-tinystories-int8-noninferiority.md",
+    }
 
     aggregate = verifier.verify_confirmatory_attempts(
         first, second, preregistration, project_root=tmp_path
@@ -871,9 +878,10 @@ def test_fixed_attempt_envelopes_and_preregistration_produce_the_only_claim(
     assert aggregate["confirmatory_claim_ready"] is True
     assert aggregate["claim_producing_path"] is True
     assert aggregate["preregistration_sha256"] == _sha256_file(preregistration)
-    assert aggregate["bindings"]["bound_file_count"] == len(
-        json.loads(preregistration.read_text(encoding="utf-8"))["bindings"]["files"]
-    )
+    bound_files = json.loads(preregistration.read_text(encoding="utf-8"))["bindings"]["files"]
+    assert ignored_documentation.isdisjoint(bound_files)
+    assert all(not (tmp_path / relative).exists() for relative in ignored_documentation)
+    assert aggregate["bindings"]["bound_file_count"] == len(bound_files)
     serialized = json.dumps(aggregate, sort_keys=True)
     assert "story-000147" not in serialized
     assert "mean_nll" not in serialized
@@ -938,6 +946,23 @@ def test_tampered_envelope_or_preregistration_fails_closed(tmp_path: Path, targe
 
     assert aggregate["status"] == "failed"
     assert aggregate["confirmatory_claim_ready"] is False
+
+
+def test_non_runtime_document_binding_cannot_enter_a_future_preregistration(
+    tmp_path: Path,
+) -> None:
+    first, second, preregistration = _sealed_pair(tmp_path)
+    value = json.loads(preregistration.read_text(encoding="utf-8"))
+    value["bindings"]["files"]["AGENTS.md"] = "0" * 64
+    _write(preregistration, value)
+
+    aggregate = verifier.verify_confirmatory_attempts(
+        first, second, preregistration, project_root=tmp_path
+    )
+
+    assert not (tmp_path / "AGENTS.md").exists()
+    assert aggregate["status"] == "failed"
+    assert any("non-runtime bound project files" in reason for reason in aggregate["reasons"])
 
 
 def test_symlinked_envelope_file_fails_closed(tmp_path: Path) -> None:

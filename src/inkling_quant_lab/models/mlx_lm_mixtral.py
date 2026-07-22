@@ -455,7 +455,7 @@ class MLXMixtralAdapter:
         capture_logits = config.routing.capture_router_logits
 
         def wrapper_class(layer_id: str, original: Any) -> Any:
-            class CaptureGate(nn.Module):  # type: ignore[misc, name-defined]
+            class CaptureGate(nn.Module):  # type: ignore[misc]
                 def __init__(self) -> None:
                     super().__init__()
                     self.gate = original

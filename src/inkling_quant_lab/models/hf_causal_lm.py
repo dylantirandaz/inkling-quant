@@ -428,8 +428,8 @@ class HFCausalLMAdapter:
     ) -> _OfflineSourceMetadataFiles:
         """Resolve and hash only the exact cached config/tokenizer files."""
 
-        self._require_dependencies()
         revision = self._validate_safe_identity(config)
+        self._require_dependencies()
         if not config.model.local_files_only:
             raise CapabilityError(
                 "Source-weight-free loading requires model.local_files_only=true",
@@ -512,8 +512,8 @@ class HFCausalLMAdapter:
         return resolved, tokenizer, files.file_sha256
 
     def _hf_config(self, config: ExperimentConfig) -> Any:
-        self._require_dependencies()
         revision = self._validate_safe_identity(config)
+        self._require_dependencies()
         key = (config.model.model_id, revision, config.model.local_files_only)
         if key in self._config_cache:
             return self._config_cache[key]

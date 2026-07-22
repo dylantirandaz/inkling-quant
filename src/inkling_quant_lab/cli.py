@@ -35,7 +35,13 @@ from inkling_quant_lab.security import Redactor, safe_path
 
 app = typer.Typer(
     name="iql",
-    help="Quantize, evaluate, compare, and report reproducible model experiments.",
+    help=(
+        "Run reproducible model experiments. "
+        "Quantize models. "
+        "Evaluate models. "
+        "Compare runs. "
+        "Create reports."
+    ),
     add_completion=False,
     no_args_is_help=True,
     pretty_exceptions_enable=False,
@@ -313,16 +319,33 @@ def _backend_lines(backends: dict[str, list[dict[str, Any]]]) -> list[str]:
 
 @app.command("validate")
 def validate_command(
-    config_path: Annotated[Path, typer.Argument(help="Experiment YAML to validate.")],
+    config_path: Annotated[
+        Path,
+        typer.Argument(help="Specify the experiment YAML file to validate."),
+    ],
     set_values: Annotated[
         list[str] | None,
-        typer.Option("--set", metavar="KEY=VALUE", help="Repeatable dotted config override."),
+        typer.Option(
+            "--set",
+            metavar="KEY=VALUE",
+            help=(
+                "Override one configuration value with a dotted key. "
+                "Repeat this option to override another value."
+            ),
+        ),
     ] = None,
     json_output: Annotated[
-        bool, typer.Option("--json", help="Emit exactly one machine-readable JSON document.")
+        bool,
+        typer.Option(
+            "--json",
+            help="Write exactly one machine-readable JSON document to standard output.",
+        ),
     ] = False,
 ) -> None:
-    """Resolve and validate an experiment without loading model weights."""
+    """Resolve the experiment configuration.
+
+    Validate the configuration without loading model weights.
+    """
 
     try:
         config = load_config(config_path, tuple(set_values or ()))
@@ -351,23 +374,40 @@ def validate_command(
 
 @app.command("run")
 def run_command(
-    config_path: Annotated[Path, typer.Argument(help="Experiment YAML to execute.")],
+    config_path: Annotated[
+        Path,
+        typer.Argument(help="Specify the experiment YAML file to run."),
+    ],
     set_values: Annotated[
         list[str] | None,
-        typer.Option("--set", metavar="KEY=VALUE", help="Repeatable dotted config override."),
+        typer.Option(
+            "--set",
+            metavar="KEY=VALUE",
+            help=(
+                "Override one configuration value with a dotted key. "
+                "Repeat this option to override another value."
+            ),
+        ),
     ] = None,
     allow_remote_code: Annotated[
         bool,
         typer.Option(
             "--allow-remote-code",
-            help="Explicitly allow audited, pinned remote model code for this execution.",
+            help=(
+                "Allow remote model code for this run. "
+                "Use this option only after you audit and pin the code."
+            ),
         ),
     ] = False,
     json_output: Annotated[
-        bool, typer.Option("--json", help="Emit exactly one machine-readable JSON document.")
+        bool,
+        typer.Option(
+            "--json",
+            help="Write exactly one machine-readable JSON document to standard output.",
+        ),
     ] = False,
 ) -> None:
-    """Create a new immutable run and execute its governed stages."""
+    """Create an immutable run. Execute all governed stages."""
 
     run_directory: Path | None = None
     redactor = Redactor()
@@ -406,23 +446,37 @@ def run_command(
 
 @app.command("resume")
 def resume_command(
-    run_directory: Annotated[Path, typer.Argument(help="Existing run directory to resume.")],
+    run_directory: Annotated[
+        Path,
+        typer.Argument(help="Specify the existing run directory."),
+    ],
     force_stage: Annotated[
         str | None,
-        typer.Option("--force-stage", metavar="STAGE", help="Invalidate and rerun this stage."),
+        typer.Option(
+            "--force-stage",
+            metavar="STAGE",
+            help="Invalidate STAGE. Rerun STAGE.",
+        ),
     ] = None,
     allow_remote_code: Annotated[
         bool,
         typer.Option(
             "--allow-remote-code",
-            help="Explicitly allow the run's audited, pinned remote model code.",
+            help=(
+                "Allow remote model code for this run. "
+                "Use this option only after you audit and pin the code."
+            ),
         ),
     ] = False,
     json_output: Annotated[
-        bool, typer.Option("--json", help="Emit exactly one machine-readable JSON document.")
+        bool,
+        typer.Option(
+            "--json",
+            help="Write exactly one machine-readable JSON document to standard output.",
+        ),
     ] = False,
 ) -> None:
-    """Verify persisted evidence and continue an incomplete or forced run."""
+    """Verify the stored run evidence. Continue an incomplete run. Rerun a forced stage."""
 
     directory = _resolved(run_directory)
     redactor = _redactor_for_run(directory)
@@ -470,24 +524,47 @@ def resume_command(
 def inspect_model_command(
     model_config: Annotated[
         str,
-        typer.Argument(help="Model identifier, fragment, or complete experiment YAML."),
+        typer.Argument(
+            help=(
+                "Specify a model identifier, a model fragment, or a complete experiment YAML file."
+            )
+        ),
     ],
     set_values: Annotated[
         list[str] | None,
-        typer.Option("--set", metavar="KEY=VALUE", help="Repeatable dotted config override."),
+        typer.Option(
+            "--set",
+            metavar="KEY=VALUE",
+            help=(
+                "Override one configuration value with a dotted key. "
+                "Repeat this option to override another value."
+            ),
+        ),
     ] = None,
     allow_remote_code: Annotated[
         bool,
         typer.Option(
             "--allow-remote-code",
-            help="Explicitly allow audited, pinned remote model code for this inspection.",
+            help=(
+                "Allow remote model code for this inspection. "
+                "Use this option only after you audit and pin the code."
+            ),
         ),
     ] = False,
     json_output: Annotated[
-        bool, typer.Option("--json", help="Emit exactly one machine-readable JSON document.")
+        bool,
+        typer.Option(
+            "--json",
+            help="Write exactly one machine-readable JSON document to standard output.",
+        ),
     ] = False,
 ) -> None:
-    """Load one model safely and report capabilities, inventory, and MoE discovery."""
+    """Load one model safely.
+
+    Report the model capabilities.
+    Report the module inventory.
+    Discover the mixture-of-experts (MoE) structure.
+    """
 
     runtime: Any | None = None
     try:
@@ -569,25 +646,35 @@ def inspect_model_command(
 @app.command("compare")
 def compare_command(
     run_directories: Annotated[
-        list[Path], typer.Argument(help="Baseline run followed by one or more candidate runs.")
+        list[Path],
+        typer.Argument(
+            help="Specify the baseline run first. Then specify one or more candidate runs."
+        ),
     ],
     output_root: Annotated[
         Path | None,
-        typer.Option("--output-root", help="Directory under which to create the comparison."),
+        typer.Option("--output-root", help="Create the comparison under this directory."),
     ] = None,
     unsafe_overrides: Annotated[
         list[str] | None,
         typer.Option(
             "--unsafe-override",
             metavar="DIMENSION",
-            help="Explicitly waive one comparison compatibility dimension; repeatable.",
+            help=(
+                "Waive one comparison compatibility dimension. "
+                "Repeat this option to waive another dimension."
+            ),
         ),
     ] = None,
     json_output: Annotated[
-        bool, typer.Option("--json", help="Emit exactly one machine-readable JSON document.")
+        bool,
+        typer.Option(
+            "--json",
+            help="Write exactly one machine-readable JSON document to standard output.",
+        ),
     ] = False,
 ) -> None:
-    """Compare completed runs under the strict compatibility contract."""
+    """Compare completed runs. Enforce the compatibility contract."""
 
     try:
         if len(run_directories) < 2:
@@ -623,17 +710,27 @@ def compare_command(
 @app.command("report")
 def report_command(
     source: Annotated[
-        Path, typer.Argument(help="Completed run, comparison directory, or report_data.json.")
+        Path,
+        typer.Argument(
+            help=("Specify a completed run, a comparison directory, or a report_data.json file.")
+        ),
     ],
     destination: Annotated[
         Path | None,
-        typer.Option("--destination", help="New immutable destination for regeneration."),
+        typer.Option(
+            "--destination",
+            help="Create the regenerated report at a new immutable destination.",
+        ),
     ] = None,
     json_output: Annotated[
-        bool, typer.Option("--json", help="Emit exactly one machine-readable JSON document.")
+        bool,
+        typer.Option(
+            "--json",
+            help="Write exactly one machine-readable JSON document to standard output.",
+        ),
     ] = False,
 ) -> None:
-    """Locate or regenerate a report using normalized artifacts only."""
+    """Locate an existing report. Regenerate a report only from normalized artifacts."""
 
     source_path = _resolved(source)
     destination_path = None if destination is None else _resolved(destination)
@@ -660,10 +757,14 @@ def report_command(
 @app.command("list-backends")
 def list_backends_command(
     json_output: Annotated[
-        bool, typer.Option("--json", help="Emit exactly one machine-readable JSON document.")
+        bool,
+        typer.Option(
+            "--json",
+            help="Write exactly one machine-readable JSON document to standard output.",
+        ),
     ] = False,
 ) -> None:
-    """List declared component availability without resolving lazy imports."""
+    """List declared components. Report declared availability. Leave lazy imports unresolved."""
 
     try:
         backends = _backend_payload()
@@ -680,10 +781,19 @@ def list_backends_command(
 @app.command("doctor")
 def doctor_command(
     json_output: Annotated[
-        bool, typer.Option("--json", help="Emit exactly one machine-readable JSON document.")
+        bool,
+        typer.Option(
+            "--json",
+            help="Write exactly one machine-readable JSON document to standard output.",
+        ),
     ] = False,
 ) -> None:
-    """Report the local environment, CPU device, and lazily declared backends."""
+    """Report the local environment.
+
+    Report available devices.
+    List declared backends.
+    Do not test backend capabilities.
+    """
 
     try:
         environment = probe_environment(Path.cwd().resolve())

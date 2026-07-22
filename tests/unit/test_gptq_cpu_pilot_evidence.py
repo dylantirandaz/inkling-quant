@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -25,6 +26,7 @@ SOURCE_BOUND_RUN_IDS = (
 ADAPTER_ISOLATED_RUN_ID = "hf-stories15m-gptq-cpu-pilot-20260717T075858584773Z-cd45e8d4-89c2db"
 EARLIER_CLEAN_RUN_ID = "hf-stories15m-gptq-cpu-pilot-20260717T075034920658Z-058c709a-5b8c99"
 SECONDARY_RUN_ID = "hf-stories15m-gptq-cpu-pilot-20260717T073445204598Z-058c709a-f89df0"
+RAW_ARTIFACT_VALIDATION_ENV = "IQL_VALIDATE_RAW_GPTQ_PILOT_ARTIFACTS"
 
 
 def _sha256(path: Path) -> str:
@@ -377,7 +379,7 @@ def test_evidence_keeps_history_and_unavailable_claims_explicit() -> None:
     assert all(claims[name] is False for name in false_claims)
 
 
-def test_checked_in_inputs_and_raw_artifacts_match_curated_bindings_when_present() -> None:
+def test_checked_in_inputs_match_curated_bindings() -> None:
     record = _record()
     for binding in record["configuration"]["checked_in_files"].values():
         path = PROJECT_ROOT / binding["path"]
@@ -388,9 +390,14 @@ def test_checked_in_inputs_and_raw_artifacts_match_curated_bindings_when_present
     assert _sha256(calibration_path) == calibration["fixture_sha256"]
     assert calibration_path.stat().st_size == calibration["fixture_size_bytes"]
 
+
+def test_raw_artifacts_match_curated_bindings_when_explicitly_requested() -> None:
+    if os.environ.get(RAW_ARTIFACT_VALIDATION_ENV) != "1":
+        pytest.skip(f"set {RAW_ARTIFACT_VALIDATION_ENV}=1 to validate ignored historical artifacts")
+
+    record = _record()
     run_root = PROJECT_ROOT / record["canonical_run"]["artifact_root"]
-    if not run_root.exists():
-        pytest.skip("raw governed GPTQ artifacts are not required in source archives")
+    assert run_root.is_dir(), f"raw governed GPTQ artifact root is missing: {run_root}"
 
     for binding in record["artifact_bindings"].values():
         path = PROJECT_ROOT / binding["path"]

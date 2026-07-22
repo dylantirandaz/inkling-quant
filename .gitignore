@@ -55,7 +55,6 @@ credentials*.json
 
 # Agent-only instructions, state, and editor integrations
 **/AGENTS.md
-!/AGENTS.md
 **/CLAUDE.md
 **/GEMINI.md
 .agents/
