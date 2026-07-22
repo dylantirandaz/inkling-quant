@@ -294,6 +294,3 @@ Do not apply a result to a different model, dataset, runtime, or hardware system
 
 The project uses the Apache License 2.0.
 See [LICENSE](LICENSE) for the license terms.
-
-This README uses project writing rules that are based on ASD-STE100 Simplified Technical English.
-The project does not claim formal ASD-STE100 certification.
