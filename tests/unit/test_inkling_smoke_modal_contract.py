@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 import sysconfig
+import threading
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -111,6 +112,39 @@ def _isolated_runner_functions(*names: str) -> dict[str, object]:
     return namespace
 
 
+def _isolated_runtime_monitor(run: Any) -> type[Any]:
+    module = _module(RUNNER_PATH)
+    monitor = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.ClassDef) and node.name == "_RuntimeMonitor"
+    )
+    namespace: dict[str, object] = {
+        "Any": Any,
+        "GPU_MONITOR_COMMAND_TIMEOUT_SECONDS": 0.25,
+        "GPU_MONITOR_STOP_TIMEOUT_SECONDS": 1.0,
+        "GPU_SAMPLE_INTERVAL_SECONDS": 0.001,
+        "Path": Path,
+        "Sequence": Sequence,
+        "parse_nvidia_smi_monitor_csv": lambda output, *, expected_uuids: (
+            SimpleNamespace(memory_used_mib=100, utilization_percent=10),
+            SimpleNamespace(memory_used_mib=200, utilization_percent=20),
+        ),
+        "re": re,
+        "subprocess": SimpleNamespace(
+            TimeoutExpired=subprocess.TimeoutExpired,
+            run=run,
+        ),
+        "threading": threading,
+    }
+    isolated = ast.Module(body=[monitor], type_ignores=[])
+    ast.fix_missing_locations(isolated)
+    exec(compile(isolated, str(RUNNER_PATH), "exec"), namespace)
+    result = namespace["_RuntimeMonitor"]
+    assert isinstance(result, type)
+    return result
+
+
 def _isolated_manager_functions(*names: str) -> dict[str, object]:
     module = _module(MANAGER_PATH)
     functions = [
@@ -155,10 +189,10 @@ def _execute(
     invocation,
     success_publication_started,
     success_publication_confirmed,
+    process=None,
+    monitor=None,
+    log_handle=None,
 ):
-    process = None
-    monitor = None
-    log_handle = None
     try:
         raise error
     except BaseException:
@@ -880,6 +914,188 @@ def test_server_environment_drops_llama_argument_overrides() -> None:
         "IQL_SMOKE_BACKEND_AUDIT": "1",
         "IQL_SMOKE_RAW_LOGIT_AUDIT": "1",
     }
+
+
+def test_runtime_monitor_keeps_inflight_nvidia_smi_timeout_during_stop_strict() -> None:
+    entered_second_sample = threading.Event()
+    monitor_holder: dict[str, Any] = {}
+    calls = 0
+
+    def run(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return SimpleNamespace(stdout="valid")
+        entered_second_sample.set()
+        monitor = monitor_holder["monitor"]
+        assert monitor._stop.wait(timeout=5)
+        raise subprocess.TimeoutExpired(
+            cmd=["nvidia-smi"],
+            timeout=0.25,
+        )
+
+    runtime_monitor = _isolated_runtime_monitor(run)
+    monitor = runtime_monitor(99_999_999, ("GPU-a", "GPU-b"))
+    monitor_holder["monitor"] = monitor
+    monitor.start()
+    assert entered_second_sample.wait(timeout=5)
+
+    with pytest.raises(RuntimeError, match="Runtime monitor failed") as caught:
+        monitor.stop()
+
+    assert isinstance(caught.value.__cause__, subprocess.TimeoutExpired)
+
+
+def test_runtime_monitor_keeps_active_nvidia_smi_timeout_strict() -> None:
+    failure = subprocess.TimeoutExpired(cmd=["nvidia-smi"], timeout=0.25)
+
+    def run(*args: object, **kwargs: object) -> SimpleNamespace:
+        raise failure
+
+    runtime_monitor = _isolated_runtime_monitor(run)
+    monitor = runtime_monitor(99_999_999, ("GPU-a", "GPU-b"))
+    monitor.start()
+    monitor._thread.join(timeout=5)
+    assert not monitor._thread.is_alive()
+
+    with pytest.raises(RuntimeError, match="Runtime monitor failed") as caught:
+        monitor.stop()
+
+    assert caught.value.__cause__ is failure
+
+
+def test_runtime_monitor_keeps_arbitrary_shutdown_errors_strict() -> None:
+    entered_second_sample = threading.Event()
+    monitor_holder: dict[str, Any] = {}
+    failure = OSError("nvidia-smi transport failed")
+    calls = 0
+
+    def run(*args: object, **kwargs: object) -> SimpleNamespace:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return SimpleNamespace(stdout="valid")
+        entered_second_sample.set()
+        monitor = monitor_holder["monitor"]
+        assert monitor._stop.wait(timeout=5)
+        raise failure
+
+    runtime_monitor = _isolated_runtime_monitor(run)
+    monitor = runtime_monitor(99_999_999, ("GPU-a", "GPU-b"))
+    monitor_holder["monitor"] = monitor
+    monitor.start()
+    assert entered_second_sample.wait(timeout=5)
+
+    with pytest.raises(RuntimeError, match="Runtime monitor failed") as caught:
+        monitor.stop()
+
+    assert caught.value.__cause__ is failure
+
+
+def test_runtime_monitor_requires_a_completed_sample() -> None:
+    def run(*args: object, **kwargs: object) -> SimpleNamespace:
+        raise AssertionError("stopped monitor must not start a resource sample")
+
+    runtime_monitor = _isolated_runtime_monitor(run)
+    monitor = runtime_monitor(99_999_999, ("GPU-a", "GPU-b"))
+    monitor._stop.set()
+    monitor.start()
+    monitor._thread.join(timeout=5)
+    assert not monitor._thread.is_alive()
+
+    with pytest.raises(RuntimeError, match="captured no resource samples"):
+        monitor.stop()
+
+
+def test_runtime_monitor_join_timeout_exceeds_nvidia_smi_timeout() -> None:
+    module = _module(RUNNER_PATH)
+    command_timeout = _assignment_literal(module, "GPU_MONITOR_COMMAND_TIMEOUT_SECONDS")
+    assert isinstance(command_timeout, float)
+    stop_assignment = next(
+        node
+        for node in module.body
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "GPU_MONITOR_STOP_TIMEOUT_SECONDS"
+        )
+    )
+    stop_expression = stop_assignment.value
+    assert isinstance(stop_expression, ast.BinOp)
+    assert isinstance(stop_expression.op, ast.Add)
+    assert isinstance(stop_expression.left, ast.Name)
+    assert stop_expression.left.id == "GPU_MONITOR_COMMAND_TIMEOUT_SECONDS"
+    stop_margin = ast.literal_eval(stop_expression.right)
+    assert isinstance(stop_margin, float)
+    assert command_timeout + stop_margin > command_timeout
+
+    source = RUNNER_PATH.read_text(encoding="utf-8")
+    assert "self._thread.join(timeout=GPU_MONITOR_STOP_TIMEOUT_SECONDS)" in source
+    assert "timeout=GPU_MONITOR_COMMAND_TIMEOUT_SECONDS," in source
+
+
+def test_smoke_runner_stops_monitor_before_server_and_retains_failure_cleanup() -> None:
+    source = RUNNER_PATH.read_text(encoding="utf-8")
+    smoke_start = source.index("def smoke_test(")
+    stop_phase_start = source.index('        phase = "stop_server"', smoke_start)
+    success_phase_start = source.index('        phase = "publish_success"', stop_phase_start)
+    stop_phase = source[stop_phase_start:success_phase_start]
+
+    monitor_stop = stop_phase.index("resources = monitor.stop()")
+    clear_monitor = stop_phase.index("monitor = None")
+    terminate_server = stop_phase.index("cleanup = _terminate_process(process)")
+    clear_process = stop_phase.index("process = None")
+    assert monitor_stop < clear_monitor < terminate_server < clear_process
+
+    exception_start = source.index("    except BaseException as error:", success_phase_start)
+    exception_cleanup_end = source.index("        if log_handle is not None:", exception_start)
+    exception_cleanup = source[exception_start:exception_cleanup_end]
+    assert exception_cleanup.index("if process is not None:") < exception_cleanup.index(
+        "if monitor is not None:"
+    )
+    assert exception_cleanup.index("_terminate_process(process)") < exception_cleanup.index(
+        "monitor.stop()"
+    )
+
+
+def test_smoke_runner_terminates_server_when_monitor_stop_fails() -> None:
+    events: list[str] = []
+    process = object()
+    error = RuntimeError("Runtime monitor failed")
+
+    class FailingMonitor:
+        def stop(self) -> None:
+            events.append("monitor.stop")
+            raise error
+
+    class LogHandle:
+        def close(self) -> None:
+            events.append("log.close")
+
+    namespace = _isolated_smoke_exception_handler()
+
+    def terminate(observed_process: object) -> None:
+        assert observed_process is process
+        events.append("process.terminate")
+
+    namespace["_terminate_process"] = terminate
+    handler = namespace["_execute"]
+    assert callable(handler)
+
+    with pytest.raises(RuntimeError) as handled:
+        handler(
+            error,
+            None,
+            None,
+            False,
+            False,
+            process=process,
+            monitor=FailingMonitor(),
+            log_handle=LogHandle(),
+        )
+
+    assert handled.value is error
+    assert events == ["process.terminate", "monitor.stop", "log.close"]
 
 
 def test_atomic_bytes_types_post_rename_readback_error_as_unknown(

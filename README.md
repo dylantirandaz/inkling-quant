@@ -39,22 +39,35 @@ The final verification checked the export structure, file set, sizes, and checks
 It did not measure the quality of the quantized Inkling model.
 The project does not yet have an accepted inference-smoke result for the final files.
 
-The latest controlled smoke attempt completed the text, image, and audio probes.
-The terminal evidence check then failed because one required CUDA device-count line was absent.
-The command enabled INFO logging after another option had already initialized CUDA.
-This result is an evidence-configuration failure.
+The latest controlled smoke attempt used terminal evidence version 5.
+It reached server readiness and finished the declared text, image, and audio probe calls.
+It then entered the `stop_server` phase.
+The resource monitor timed out while the server released its CUDA resources.
+The runner had stopped the server before it stopped the monitor.
+
+The immutable failure receipt has SHA-256
+`2d5d55f6fe38f092a8231bdf6a5093dd6c5fb48644369c31b960bcaac9009f0b`.
+The server log has SHA-256
+`5d03d157fe1408a51062a965a6899fe76e0bf5d45b8846fc6c67d8cd6b66da62`.
+The safe model-load, GPU, memory, projector, and architecture failure signals were all false.
+The failure receipt does not contain validated probe results.
+This result is an evidence-capture failure.
 It is not a model failure, and it is not a smoke-test pass.
 
-The corrected source patch enables INFO logging before the parser handles environment or command
-arguments. The command still puts `--log-verbosity 4` before all other server options. The runner
-also removes inherited `LLAMA_ARG_*` overrides.
+The correction stops and joins the monitor while the server is still active.
+It then stops the server.
+The monitor join limit is longer than the `nvidia-smi` command limit.
+A monitor timeout, another monitor error, or an empty sample set still fails the run.
 
-A version 4 passing receipt must bind backend index 0 to backend and device name `CUDA0`. It must
-bind backend index 1 to backend and device name `CUDA1`. At least one audited graph must use
-both devices. An auxiliary projector graph may use `CUDA0` only. Every audited graph must have
-positive GPU compute and no CPU or other accelerator fallback. Historical version 3 receipts keep
-their original validation rules and hashes.
-The corrected remote run needs a new sealed identity and a new confirmation.
+A version 5 passing receipt must check the active output vocabulary and the padded output rows.
+It must also meet the strict version 4 GPU rules.
+Backend index 0 must use backend and device name `CUDA0`.
+Backend index 1 must use backend and device name `CUDA1`.
+At least one audited graph must use both devices.
+An auxiliary projector graph can use `CUDA0` only.
+Every audited graph must have positive GPU work and no CPU or other accelerator fallback.
+Historical receipts keep their original validation rules and hashes.
+A corrected remote run needs a new sealed identity and a new confirmation.
 
 The Git repository does not contain the model files.
 The files are too large for Git, and the project does not upload model weights by default.

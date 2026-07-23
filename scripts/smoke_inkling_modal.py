@@ -149,6 +149,8 @@ POST_SPAWN_ACCEPTANCE_TIMEOUT_SECONDS: Final = 120.0
 POST_SPAWN_ACCEPTANCE_POLL_SECONDS: Final = 0.25
 HASH_WORKERS: Final = 8
 GPU_SAMPLE_INTERVAL_SECONDS: Final = 1.0
+GPU_MONITOR_COMMAND_TIMEOUT_SECONDS: Final = 15.0
+GPU_MONITOR_STOP_TIMEOUT_SECONDS: Final = GPU_MONITOR_COMMAND_TIMEOUT_SECONDS + 5.0
 STORAGE_DELETION_LAG_DAYS: Final = 4
 BUILD_TARGETS: Final = (
     "llama-cli",
@@ -2020,7 +2022,7 @@ class _RuntimeMonitor:
 
     def stop(self) -> dict[str, Any]:
         self._stop.set()
-        self._thread.join(timeout=15)
+        self._thread.join(timeout=GPU_MONITOR_STOP_TIMEOUT_SECONDS)
         if self._thread.is_alive():
             raise RuntimeError("Runtime monitor did not stop")
         if self._error is not None:
@@ -2058,7 +2060,7 @@ class _RuntimeMonitor:
             check=True,
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=GPU_MONITOR_COMMAND_TIMEOUT_SECONDS,
             shell=False,
         ).stdout
         samples = parse_nvidia_smi_monitor_csv(output, expected_uuids=self._gpu_uuids)
@@ -2662,10 +2664,10 @@ def smoke_test(
             for probe in config.probes
         ]
         phase = "stop_server"
-        cleanup = _terminate_process(process)
-        process = None
         resources = monitor.stop()
         monitor = None
+        cleanup = _terminate_process(process)
+        process = None
         log_handle.close()
         log_handle = None
         log_bytes = _read_server_log()
