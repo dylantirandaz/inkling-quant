@@ -26,7 +26,7 @@ The workflow used the official model and the pinned software revisions below.
 | Projector output | BF16 GGUF file |
 | Projector size | 183,264,288 bytes |
 | Final manifest SHA-256 | `23db1314d521210bab5d53df20ed432f784774c59d98e8db3de9004702e1ac7a` |
-| Final receipt SHA-256 | `73b5157098f2202dd8ebd57990ff86970a01137dc3fa0dab2b3de0b427679222` |
+| Final verification receipt SHA-256 | `08b4928333720962e1192ef0af12672c8155c70ddc03813376cbd431c2409291` |
 
 GGUF is a file format for models that use the `llama.cpp` runtime.
 BF16 is the 16-bit brain floating-point data type.
@@ -37,7 +37,7 @@ The workflow records this omission and does not hide it.
 
 The final verification checked the export structure, file set, sizes, and checksums.
 It did not measure the quality of the quantized Inkling model.
-It did not run a full inference test on the final files.
+The project does not yet have an accepted inference-smoke result for the final files.
 
 The Git repository does not contain the model files.
 The files are too large for Git, and the project does not upload model weights by default.

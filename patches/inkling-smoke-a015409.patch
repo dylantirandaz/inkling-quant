@@ -1,0 +1,370 @@
+diff --git a/ggml/src/ggml-backend.cpp b/ggml/src/ggml-backend.cpp
+index 8761592..2743859 100644
+--- a/ggml/src/ggml-backend.cpp
++++ b/ggml/src/ggml-backend.cpp
+@@ -14,6 +14,7 @@
+ #include "ggml-impl.h"
+ 
+ #include <assert.h>
++#include <inttypes.h>
+ #include <limits.h>
+ #include <stdarg.h>
+ #include <stdio.h>
+@@ -1010,6 +1011,115 @@ static void ggml_backend_sched_set_if_supported(ggml_backend_sched_t sched, stru
+     }
+ }
+ 
++static void ggml_backend_sched_iql_audit(ggml_backend_sched_t sched, struct ggml_cgraph * graph) {
++    size_t backend_compute_counts[GGML_SCHED_MAX_BACKENDS] = {};
++    size_t compute_count = 0;
++    size_t gpu_count = 0;
++    size_t cpu_count = 0;
++    size_t accelerator_count = 0;
++    size_t other_count = 0;
++    size_t unassigned_count = 0;
++    size_t cpu_diagnostics = 0;
++
++    for (int i = 0; i < graph->n_nodes; ++i) {
++        struct ggml_tensor * node = graph->nodes[i];
++        if (node->op == GGML_OP_NONE || ggml_is_view_op(node->op)) {
++            continue;
++        }
++
++        ++compute_count;
++        const int backend_id = tensor_backend_id(node);
++        if (backend_id < 0 || backend_id >= sched->n_backends) {
++            ++unassigned_count;
++            continue;
++        }
++
++        ++backend_compute_counts[backend_id];
++        ggml_backend_t backend = sched->backends[backend_id];
++
++        ggml_backend_dev_t device = ggml_backend_get_device(backend);
++        if (device == NULL) {
++            ++unassigned_count;
++            continue;
++        }
++
++        switch (ggml_backend_dev_type(device)) {
++            case GGML_BACKEND_DEVICE_TYPE_GPU:
++            case GGML_BACKEND_DEVICE_TYPE_IGPU:
++                ++gpu_count;
++                break;
++            case GGML_BACKEND_DEVICE_TYPE_CPU:
++                ++cpu_count;
++                if (cpu_diagnostics < 8) {
++                    GGML_LOG_INFO(
++                            "IQL_SMOKE_CPU_NODE_V1 graph_uid=%" PRIu64 " ordinal=%d op=%s name=%s\n",
++                            graph->uid,
++                            i,
++                            ggml_op_name(node->op),
++                            node->name);
++                    ++cpu_diagnostics;
++                }
++                break;
++            case GGML_BACKEND_DEVICE_TYPE_ACCEL:
++                ++accelerator_count;
++                break;
++            case GGML_BACKEND_DEVICE_TYPE_META:
++                ++other_count;
++                break;
++        }
++    }
++
++    for (int backend_id = 0; backend_id < sched->n_backends; ++backend_id) {
++        if (backend_compute_counts[backend_id] == 0) {
++            continue;
++        }
++
++        ggml_backend_t backend = sched->backends[backend_id];
++        ggml_backend_dev_t device = ggml_backend_get_device(backend);
++        const char * device_name = "null";
++        const char * device_type_name = "unassigned";
++        if (device != NULL) {
++            device_name = ggml_backend_dev_name(device);
++            switch (ggml_backend_dev_type(device)) {
++                case GGML_BACKEND_DEVICE_TYPE_CPU:
++                    device_type_name = "cpu";
++                    break;
++                case GGML_BACKEND_DEVICE_TYPE_GPU:
++                    device_type_name = "gpu";
++                    break;
++                case GGML_BACKEND_DEVICE_TYPE_IGPU:
++                    device_type_name = "igpu";
++                    break;
++                case GGML_BACKEND_DEVICE_TYPE_ACCEL:
++                    device_type_name = "accel";
++                    break;
++                case GGML_BACKEND_DEVICE_TYPE_META:
++                    device_type_name = "meta";
++                    break;
++            }
++        }
++
++        GGML_LOG_INFO(
++                "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=%" PRIu64 " backend_index=%d backend_name=%s device_name=%s device_type=%s compute=%zu\n",
++                graph->uid,
++                backend_id,
++                ggml_backend_name(backend),
++                device_name,
++                device_type_name,
++                backend_compute_counts[backend_id]);
++    }
++
++    GGML_LOG_INFO(
++            "IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=%" PRIu64 " phase=post_assignment_pre_split scope=non_view_compute compute=%zu gpu=%zu cpu=%zu accel=%zu other=%zu unassigned=%zu\n",
++            graph->uid,
++            compute_count,
++            gpu_count,
++            cpu_count,
++            accelerator_count,
++            other_count,
++            unassigned_count);
++}
++
+ // assigns backends to ops and splits the graph into subgraphs that can be computed on the same backend
+ void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct ggml_cgraph * graph) {
+     // reset splits
+@@ -1242,6 +1352,8 @@ void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct ggml_cgra
+         GGML_ASSERT(*cur_backend_id != -1);
+     }
+ 
++    ggml_backend_sched_iql_audit(sched, graph);
++
+     // pass 5: split graph, find tensors that need to be copied
+     {
+         int i_split = 0;
+diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
+index 28f8bb7..fad59d6 100644
+--- a/src/llama-model-loader.cpp
++++ b/src/llama-model-loader.cpp
+@@ -541,6 +541,7 @@ llama_model_loader::llama_model_loader(
+     }
+ 
+     tensor_buft_overrides = param_tensor_buft_overrides_p;
++    uint16_t iql_expected_split_count = 1;
+ 
+     if (!fname.empty()) {
+         // Load the main GGUF
+@@ -591,6 +592,7 @@ llama_model_loader::llama_model_loader(
+         }
+         uint16_t n_split = 0;
+         get_key(llm_kv(LLM_KV_SPLIT_COUNT), n_split, false);
++        iql_expected_split_count = std::max<uint16_t>(1, n_split);
+ 
+         // Load additional GGML contexts
+         if (n_split > 1) {
+@@ -707,6 +709,13 @@ llama_model_loader::llama_model_loader(
+     n_kv      = gguf_get_n_kv(metadata);
+     n_tensors = weights_map.size();
+ 
++    LLAMA_LOG_INFO(
++            "IQL_SMOKE_TEXT_SHARDS_V1 expected=%u opened=%zu contexts=%zu tensors=%zu\n",
++            iql_expected_split_count,
++            files.size(),
++            contexts.size(),
++            weights_map.size());
++
+     fver = (enum llama_fver) gguf_get_version(metadata);
+ 
+     LLAMA_LOG_INFO("%s: loaded meta data with %d key-value pairs and %d tensors from %s (version %s)\n",
+@@ -1426,6 +1435,13 @@ bool llama_model_loader::load_all_data(
+     }
+     GGML_ASSERT(size_data != 0 && "call init_mappings() first");
+ 
++    if (iql_loaded_tensor_counts.empty()) {
++        iql_loaded_tensor_counts.resize(files.size(), 0);
++        iql_loaded_tensor_bytes.resize(files.size(), 0);
++    }
++    GGML_ASSERT(iql_loaded_tensor_counts.size() == files.size());
++    GGML_ASSERT(iql_loaded_tensor_bytes.size() == files.size());
++
+     std::vector<no_init<uint8_t>> read_buf;
+     std::vector<std::future<std::pair<ggml_tensor *, bool>>> validation_result;
+ 
+@@ -1647,6 +1663,9 @@ bool llama_model_loader::load_all_data(
+             }
+         }
+ 
++        GGML_ASSERT(weight->idx < iql_loaded_tensor_counts.size());
++        ++iql_loaded_tensor_counts[weight->idx];
++        iql_loaded_tensor_bytes[weight->idx] += n_size;
+         size_done += n_size;
+     }
+ 
+@@ -1689,8 +1708,31 @@ bool llama_model_loader::load_all_data(
+         if (progress_callback) {
+             // Even though the model is done loading, we still honor
+             // cancellation since we need to free allocations.
+-            return progress_callback(1.0f, progress_callback_user_data);
++            if (!progress_callback(1.0f, progress_callback_user_data)) {
++                return false;
++            }
+         }
++
++        size_t accounted_files = 0;
++        size_t loaded_tensors = 0;
++        size_t loaded_bytes = 0;
++        for (size_t idx = 0; idx < files.size(); ++idx) {
++            if (iql_loaded_tensor_counts[idx] > 0) {
++                ++accounted_files;
++            }
++            loaded_tensors += iql_loaded_tensor_counts[idx];
++            loaded_bytes += iql_loaded_tensor_bytes[idx];
++        }
++
++        LLAMA_LOG_INFO(
++                "IQL_SMOKE_TEXT_LOAD_V1 opened=%zu accounted=%zu tensors=%zu bytes=%zu size_done=%zu size_data=%zu mmap=%d\n",
++                files.size(),
++                accounted_files,
++                loaded_tensors,
++                loaded_bytes,
++                size_done,
++                size_data,
++                use_mmap ? 1 : 0);
+     }
+ 
+     return true;
+diff --git a/src/llama-model-loader.h b/src/llama-model-loader.h
+index c476026..b495fe7 100644
+--- a/src/llama-model-loader.h
++++ b/src/llama-model-loader.h
+@@ -102,6 +102,8 @@ struct llama_model_loader {
+     size_t size_done = 0;
+     size_t size_data = 0;
+     std::vector<std::pair<size_t, size_t>> mmaps_used;
++    std::vector<size_t> iql_loaded_tensor_counts;
++    std::vector<size_t> iql_loaded_tensor_bytes;
+ 
+     // define a comparator for the buft -> ctx map to ensure that the order is well-defined:
+     struct ggml_backend_buft_comparator {
+diff --git a/tools/mtmd/clip.cpp b/tools/mtmd/clip.cpp
+index dbd0708..addf7ae 100644
+--- a/tools/mtmd/clip.cpp
++++ b/tools/mtmd/clip.cpp
+@@ -2882,13 +2882,17 @@ struct clip_model_loader {
+                         throw std::runtime_error(string_format("%s: failed to seek for tensor %s\n", __func__, t->name));
+                     }
+                     size_t num_bytes = ggml_nbytes(cur);
+-                    if (ggml_backend_buft_is_host(buft)) {
+-                        // for the CPU and Metal backend, we can read directly into the tensor
+-                        fin.read(reinterpret_cast<char *>(cur->data), num_bytes);
+-                    } else {
+-                        // read into a temporary buffer first, then copy to device memory
++                    const bool is_host_buffer = ggml_backend_buft_is_host(buft);
++                    void * read_destination = cur->data;
++                    if (!is_host_buffer) {
+                         read_buf.resize(num_bytes);
+-                        fin.read(reinterpret_cast<char *>(read_buf.data()), num_bytes);
++                        read_destination = read_buf.data();
++                    }
++                    fin.read(reinterpret_cast<char *>(read_destination), num_bytes);
++                    if (!fin) {
++                        throw std::runtime_error(string_format("%s: failed to read tensor %s\n", __func__, t->name));
++                    }
++                    if (!is_host_buffer) {
+                         ggml_backend_tensor_set(cur, read_buf.data(), 0, num_bytes);
+                     }
+                     data_loaded += num_bytes;
+@@ -2899,7 +2903,14 @@ struct clip_model_loader {
+                         }
+                     }
+                 }
+-                LOG_DBG("%s: loaded %zu tensors from %s\n", __func__, tensors_to_load.size(), fname.c_str());
++                const char * modality = model.modality == CLIP_MODALITY_AUDIO ? "audio" : "vision";
++                const char * projector = model.proj_type == PROJECTOR_TYPE_INKLING ? "inkling" : "other";
++                LOG_INF(
++                        "IQL_SMOKE_PROJECTOR_TENSORS_V1 modality=%s projector=%s tensors=%zu bytes=%zu\n",
++                        modality,
++                        projector,
++                        tensors_to_load.size(),
++                        data_loaded);
+             } else {
+                 LOG_DBG("%s: no_alloc is set, skipping tensor data loading (%zu tensors)\n", __func__, tensors_to_load.size());
+             }
+diff --git a/tools/mtmd/mtmd.cpp b/tools/mtmd/mtmd.cpp
+index 3e81e44..85f25f2 100644
+--- a/tools/mtmd/mtmd.cpp
++++ b/tools/mtmd/mtmd.cpp
+@@ -384,6 +384,18 @@ struct mtmd_context {
+         if (ctx_a) {
+             init_audio();
+         }
++
++        const bool vision_is_inkling =
++                ctx_v != nullptr && clip_get_projector_type(ctx_v) == PROJECTOR_TYPE_INKLING;
++        const bool audio_is_inkling =
++                ctx_a != nullptr && clip_get_projector_type(ctx_a) == PROJECTOR_TYPE_INKLING;
++        LOG_INF(
++                "IQL_SMOKE_PROJECTOR_READY_V1 opened=1 vision=%d audio=%d vision_type=%s audio_type=%s n_embd=%d\n",
++                ctx_v != nullptr ? 1 : 0,
++                ctx_a != nullptr ? 1 : 0,
++                vision_is_inkling ? "inkling" : "other",
++                audio_is_inkling ? "inkling" : "other",
++                n_embd_clip);
+     }
+ 
+     void init_vision() {
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+index 7564ad4..1cb4051 100644
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -18,6 +18,7 @@
+ #include "mtmd-helper.h"
+ 
+ #include <algorithm>
++#include <cmath>
+ #include <cstddef>
+ #include <cinttypes>
+ #include <exception>
+@@ -1961,6 +1962,49 @@ private:
+                 });
+             }
+         } else {
++            const float * logits = llama_get_logits_ith(ctx_tgt, idx);
++            const uint32_t n_logits = llama_get_sampled_logits_count_ith(ctx_tgt, idx);
++            const int32_t n_vocab = llama_vocab_n_tokens(vocab);
++
++            size_t finite_count = 0;
++            size_t nan_count = 0;
++            size_t positive_infinity_count = 0;
++            size_t negative_infinity_count = 0;
++
++            if (logits != nullptr) {
++                for (uint32_t i = 0; i < n_logits; ++i) {
++                    const float value = logits[i];
++                    if (std::isfinite(value)) {
++                        ++finite_count;
++                    } else if (std::isnan(value)) {
++                        ++nan_count;
++                    } else if (value > 0.0f) {
++                        ++positive_infinity_count;
++                    } else {
++                        ++negative_infinity_count;
++                    }
++                }
++            }
++
++            SRV_INF(
++                    "IQL_SMOKE_RAW_LOGITS_V1 task_id=%d slot_id=%d completion_index=%d batch_index=%d count=%u finite=%zu nan=%zu pos_inf=%zu neg_inf=%zu\n",
++                    slot.task ? slot.task->id : -1,
++                    slot.id,
++                    slot.n_decoded,
++                    idx,
++                    n_logits,
++                    finite_count,
++                    nan_count,
++                    positive_infinity_count,
++                    negative_infinity_count);
++
++            if (logits == nullptr) {
++                throw std::runtime_error("IQL smoke raw-logit audit received a null logits pointer");
++            }
++            if (n_logits != static_cast<uint32_t>(n_vocab)) {
++                throw std::runtime_error("IQL smoke raw-logit audit received an incomplete logits vector");
++            }
++
+             std::vector<llama_token_data> cur = get_token_probabilities(ctx_tgt, idx, n_probs_request);
+             const size_t max_probs = cur.size();
+             const size_t n_probs = std::min(max_probs, n_probs_request);

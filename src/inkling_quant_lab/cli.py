@@ -47,6 +47,22 @@ app = typer.Typer(
     pretty_exceptions_enable=False,
     context_settings={"help_option_names": ["-h", "--help"]},
 )
+evidence_app = typer.Typer(
+    name="evidence",
+    help="Inspect, validate, and compare exact machine-readable experiment evidence.",
+    no_args_is_help=True,
+    pretty_exceptions_enable=False,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
+app.add_typer(evidence_app, name="evidence")
+compatibility_app = typer.Typer(
+    name="compatibility",
+    help="Inspect and validate exact machine-readable compatibility matrices.",
+    no_args_is_help=True,
+    pretty_exceptions_enable=False,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
+app.add_typer(compatibility_app, name="compatibility")
 
 _EXIT_CODES = {
     "CONFIGURATION_ERROR": 2,
@@ -242,6 +258,56 @@ def _report_artifact(source: Path, *, destination: Path | None) -> Path:
     from inkling_quant_lab.pipeline.comparison_artifacts import report_artifact
 
     return report_artifact(source, destination=destination)
+
+
+def _inspect_evidence(path: Path) -> dict[str, Any]:
+    from inkling_quant_lab.evidence import inspect_evidence_record, load_evidence_record
+
+    return inspect_evidence_record(load_evidence_record(path))
+
+
+def _validate_evidence(path: Path) -> dict[str, Any]:
+    from inkling_quant_lab.evidence import load_evidence_record, validate_evidence_record
+
+    return validate_evidence_record(load_evidence_record(path))
+
+
+def _compare_evidence(
+    baseline: Path,
+    candidate: Path,
+    *,
+    unsafe_overrides: set[str] | None,
+) -> dict[str, Any]:
+    from inkling_quant_lab.evidence import (
+        compare_evidence_records,
+        evidence_comparison_payload,
+        load_evidence_record,
+    )
+
+    result = compare_evidence_records(
+        load_evidence_record(baseline),
+        load_evidence_record(candidate),
+        unsafe_overrides=unsafe_overrides,
+    )
+    return evidence_comparison_payload(result)
+
+
+def _inspect_compatibility(path: Path) -> dict[str, Any]:
+    from inkling_quant_lab.compatibility import (
+        inspect_compatibility_matrix,
+        load_compatibility_matrix,
+    )
+
+    return inspect_compatibility_matrix(load_compatibility_matrix(path))
+
+
+def _validate_compatibility(path: Path) -> dict[str, Any]:
+    from inkling_quant_lab.compatibility import (
+        load_compatibility_matrix,
+        validate_compatibility_matrix,
+    )
+
+    return validate_compatibility_matrix(load_compatibility_matrix(path))
 
 
 def _planned_run_directory(config: ExperimentConfig, run_id: str, project_root: Path) -> Path:
@@ -638,6 +704,184 @@ def inspect_model_command(
             f"Modules: {inventory['module_count']}\n"
             f"Parameters: {inventory['parameter_count']}\n"
             f"MoE: {moe_summary}"
+        ),
+        json_output=json_output,
+    )
+
+
+@evidence_app.command("inspect")
+def evidence_inspect_command(
+    record: Annotated[
+        Path,
+        typer.Argument(help="Read one exact iql-evidence-v1 JSON record."),
+    ],
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Write exactly one machine-readable JSON document to standard output.",
+        ),
+    ] = False,
+) -> None:
+    """Inspect the scope, artifacts, metrics, and limitations of an evidence record."""
+
+    try:
+        payload = _inspect_evidence(record)
+    except Exception as error:
+        _abort(error, json_output=json_output)
+    _emit_success(
+        payload,
+        (
+            f"Evidence record: {payload['record_id']}\n"
+            f"Experiment status: {payload['experiment_status']}\n"
+            f"Comparison ready: {payload['comparison_ready']}\n"
+            f"Record SHA-256: {payload['record_file_sha256']}"
+        ),
+        json_output=json_output,
+    )
+
+
+@evidence_app.command("validate")
+def evidence_validate_command(
+    record: Annotated[
+        Path,
+        typer.Argument(help="Validate one exact iql-evidence-v1 JSON record."),
+    ],
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Write exactly one machine-readable JSON document to standard output.",
+        ),
+    ] = False,
+) -> None:
+    """Validate schema, payload integrity, scope, and artifact identities."""
+
+    try:
+        payload = _validate_evidence(record)
+    except Exception as error:
+        _abort(error, json_output=json_output)
+    _emit_success(
+        payload,
+        (
+            f"Evidence record is valid: {payload['record_id']}\n"
+            f"Comparison ready: {payload['comparison_ready']}\n"
+            "Referenced artifact bytes were not read by this standalone validation."
+        ),
+        json_output=json_output,
+    )
+
+
+@evidence_app.command("compare")
+def evidence_compare_command(
+    baseline: Annotated[
+        Path,
+        typer.Argument(help="Read the baseline iql-evidence-v1 JSON record."),
+    ],
+    candidate: Annotated[
+        Path,
+        typer.Argument(help="Read the candidate iql-evidence-v1 JSON record."),
+    ],
+    unsafe_overrides: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--unsafe-override",
+            metavar="DIMENSION",
+            help=(
+                "Waive one comparison compatibility dimension. "
+                "Repeat this option to waive another dimension."
+            ),
+        ),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Write exactly one machine-readable JSON document to standard output.",
+        ),
+    ] = False,
+) -> None:
+    """Compare two validated records without writing files or running a model."""
+
+    try:
+        payload = _compare_evidence(
+            baseline,
+            candidate,
+            unsafe_overrides=set(unsafe_overrides) if unsafe_overrides else None,
+        )
+    except Exception as error:
+        _abort(error, json_output=json_output)
+    comparison = cast(dict[str, Any], payload["comparison"])
+    _emit_success(
+        payload,
+        (
+            "Evidence records are compatible.\n"
+            f"Baseline: {cast(dict[str, Any], payload['baseline'])['record_id']}\n"
+            f"Candidate: {cast(dict[str, Any], payload['candidate'])['record_id']}\n"
+            f"Unsafe override: {comparison['unsafe_override']}"
+        ),
+        json_output=json_output,
+    )
+
+
+@compatibility_app.command("inspect")
+def compatibility_inspect_command(
+    matrix: Annotated[
+        Path,
+        typer.Argument(help="Read one exact iql-compatibility-matrix-v1 JSON file."),
+    ],
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Write exactly one machine-readable JSON document to standard output.",
+        ),
+    ] = False,
+) -> None:
+    """Inspect every exact cell and its bounded claims without writing files."""
+
+    try:
+        payload = _inspect_compatibility(matrix)
+    except Exception as error:
+        _abort(error, json_output=json_output)
+    _emit_success(
+        payload,
+        (
+            f"Compatibility matrix: {payload['matrix_id']}\n"
+            f"Exact cells: {payload['cell_count']}\n"
+            f"Scope policy: {payload['scope_policy']}\n"
+            f"Matrix SHA-256: {payload['matrix_file_sha256']}"
+        ),
+        json_output=json_output,
+    )
+
+
+@compatibility_app.command("validate")
+def compatibility_validate_command(
+    matrix: Annotated[
+        Path,
+        typer.Argument(help="Validate one exact iql-compatibility-matrix-v1 JSON file."),
+    ],
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Write exactly one machine-readable JSON document to standard output.",
+        ),
+    ] = False,
+) -> None:
+    """Validate matrix integrity, exact scope, evidence, and claim consistency."""
+
+    try:
+        payload = _validate_compatibility(matrix)
+    except Exception as error:
+        _abort(error, json_output=json_output)
+    _emit_success(
+        payload,
+        (
+            f"Compatibility matrix is valid: {payload['matrix_id']}\n"
+            f"Exact cells: {payload['cell_count']}\n"
+            f"All referenced evidence bytes verified: {payload['referenced_bytes_verified']}"
         ),
         json_output=json_output,
     )

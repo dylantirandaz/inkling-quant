@@ -1,0 +1,99 @@
+{
+  "schema_version": "iql-compatibility-matrix-v1",
+  "payload_sha256": "a5e1398558dbe040f5c3a362f220462c282b9eb6f9fccdfe92dc1ee6aeebf323",
+  "payload": {
+    "matrix_id": "inkling-q3-k-m-compatibility-v1",
+    "scope_policy": "exact_cell_only",
+    "scope_warning": "Read each machine-readable experiment record before using its result. Do not apply a result to a different model, dataset, runtime, software, hardware, or protocol.",
+    "cells": [
+      {
+        "cell_id": "inkling-q3-k-m-structural-modal-cpu-v1",
+        "execution_role": "structural_verification",
+        "model": {
+          "model_id": "thinkingmachines/Inkling",
+          "revision": "86b4d430ab871652a707666b89203a866888c5e5"
+        },
+        "artifacts": [
+          {
+            "artifact_id": "export-manifest",
+            "kind": "export_manifest",
+            "location": "modal-volume://inkling-final-v1/runs/inkling-q3km-86b4d430-a015409e-ffd466dd93-8083cf41e1/verification/export_manifest.json",
+            "sha256": "23db1314d521210bab5d53df20ed432f784774c59d98e8db3de9004702e1ac7a"
+          },
+          {
+            "artifact_id": "multimodal-projector",
+            "kind": "multimodal_projector",
+            "location": "modal-volume://inkling-final-v1/runs/inkling-q3km-86b4d430-a015409e-ffd466dd93-8083cf41e1/mmproj/mmproj-BF16.gguf",
+            "sha256": "8f954d089a753671321316bd4fbcffae6465748814ca6c1ec3e70f62427514f7"
+          }
+        ],
+        "runtime": {
+          "name": "llama.cpp-export-verifier",
+          "repository": "https://github.com/danielhanchen/llama.cpp.git",
+          "commit": "a015409e6c27b84f60d688823d4c0126a11571fd"
+        },
+        "software": {
+          "container_image": "debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818",
+          "identity_kind": "control_plane_tree",
+          "software_identity_sha256": "8083cf41e104b3f7164c02a1ad50ab027f630167970c4eb7e0589a6d079c1037",
+          "cuda": {
+            "status": "absent",
+            "version": null
+          }
+        },
+        "hardware": {
+          "provider": "modal",
+          "gpu_model": "none",
+          "gpu_count": 0
+        },
+        "evidence": [
+          {
+            "reference_id": "verified-export-reference",
+            "kind": "structural_verification",
+            "location": "configs/experiments/inkling_q3_k_m_verified_export.json",
+            "sha256": "1086fec05c9b6b4400caf9be21cbbbb8e6e5c4138164c5e02af010359f84ad96"
+          },
+          {
+            "reference_id": "verify-export-receipt",
+            "kind": "structural_verification",
+            "location": "modal-volume://inkling-final-v1/runs/inkling-q3km-86b4d430-a015409e-ffd466dd93-8083cf41e1/verify_export.success.json",
+            "sha256": "08b4928333720962e1192ef0af12672c8155c70ddc03813376cbd431c2409291"
+          }
+        ],
+        "claims": {
+          "structurally_verified": {
+            "status": "supported",
+            "evidence_refs": [
+              "verified-export-reference",
+              "verify-export-receipt"
+            ],
+            "reason": "The exact export manifest, all 49 Q3_K_M shard hashes, and the BF16 projector hash passed structural verification."
+          },
+          "smoke_passed": {
+            "status": "not_measured",
+            "evidence_refs": [],
+            "reason": "No completed inference smoke receipt exists for this exact export and environment."
+          },
+          "quality_measured": {
+            "status": "not_measured",
+            "evidence_refs": [],
+            "reason": "No matched BF16-versus-Q3 quality evidence exists for this exact cell."
+          },
+          "performance_measured": {
+            "status": "not_measured",
+            "evidence_refs": [],
+            "reason": "No deployment performance evidence exists for this exact cell."
+          },
+          "mtp_supported": {
+            "status": "unsupported",
+            "evidence_refs": [
+              "verified-export-reference",
+              "verify-export-receipt"
+            ],
+            "reason": "This exact export omits all 160 model.mtp.* tensors, and the pinned runtime has no Inkling MTP execution graph."
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,129 @@
+schema_version: inkling-smoke-config-v1
+verified_export_reference_path: configs/experiments/inkling_q3_k_m_verified_export.json
+verified_export_reference_sha256: 9f0fae0a48058e73aab38c2b4f6c86916b69fd32343e0f7b821c7faac5b33198
+
+runtime:
+  repository: https://github.com/danielhanchen/llama.cpp.git
+  commit: a015409e6c27b84f60d688823d4c0126a11571fd
+  instrumentation_schema_version: inkling-llama-smoke-instrumentation-v1
+  instrumentation_patch_path: patches/inkling-smoke-a015409.patch
+  instrumentation_patch_sha256: b276d12a4af96c803b71fee6f7be91c230b0fb30b6be04637f61f33d07b10ecf
+  image:
+    image: nvidia/cuda:13.1.2-devel-ubuntu24.04
+    digest: sha256:952e42d23230610a2714c8484f38e9c934ed68e6f9c9c7fac62dcd5f98858a6e
+    platform: linux/amd64
+  build_targets:
+    - llama-cli
+    - llama-server
+    - llama-bench
+    - llama-perplexity
+  cmake_definitions:
+    - GGML_CUDA=ON
+    - GGML_NATIVE=OFF
+    - LLAMA_CURL=OFF
+    - LLAMA_BUILD_UI=OFF
+    - LLAMA_USE_PREBUILT_UI=OFF
+    - CMAKE_CUDA_ARCHITECTURES=103
+    - CMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,/opt/iql-cuda-driver-link
+  server_endpoint: /completion
+  log_verbosity: 4
+  context_size: 8192
+  gpu_layers: all
+  split_mode: layer
+  tensor_split: [1, 1]
+  no_cpu_fallback: true
+  network_access: false
+  trust_remote_code: false
+
+resources:
+  provider: modal
+  gpu_type: B300
+  gpu_count: 2
+  compute_capability: "10.3"
+  cpu_cores: 16
+  memory_gib: 64
+  ephemeral_disk_mib: 524288
+  startup_timeout_seconds: 900
+  max_hours: 2
+  max_attempts: 1
+  max_recovery_attempts: 0
+
+storage:
+  final_volume: inkling-final-v1
+  final_run_subpath: runs/inkling-q3km-86b4d430-a015409e-ffd466dd93-8083cf41e1
+  final_mount_path: /subject
+  final_read_only: true
+  evidence_volume: inkling-smoke-evidence-v1
+  evidence_mount_path: /evidence
+  evidence_append_only_after_success: true
+  attempt_registry: inkling-smoke-attempt-registry-v1
+  attempt_registry_append_only: true
+
+probes:
+  - probe_id: text_greedy_v1
+    modality: text
+    prompt: Reply with exactly one short sentence that identifies the color of snow.
+    prompt_sha256: 99fa8c49b59ec88fba4b5e3ecaf132727741c50e3c817f4c52bfd09cebe145d8
+    fixture: none
+    seed: 42
+    temperature: 0.0
+    n_predict: 8
+    n_probs: 5
+    post_sampling_probs: false
+    stream: false
+    cache_prompt: false
+    return_tokens: true
+    timings_per_token: true
+    trials: 2
+  - probe_id: image_greedy_v1
+    modality: image
+    prompt: Describe the synthetic checkerboard image in one short sentence.
+    prompt_sha256: e282bb36d06dad41a8dd2ce29f4c9b76f9cec21c61e4094ef3918f304207e5b2
+    fixture: synthetic_rgb8_png_16x16_checkerboard_v1
+    seed: 42
+    temperature: 0.0
+    n_predict: 8
+    n_probs: 5
+    post_sampling_probs: false
+    stream: false
+    cache_prompt: false
+    return_tokens: true
+    timings_per_token: true
+    trials: 2
+  - probe_id: audio_greedy_v1
+    modality: audio
+    prompt: Describe the synthetic audio clip in one short sentence.
+    prompt_sha256: 95a6367324fb49c1d0aeddba5b95d6b1fecb73c63744b753b39440f25df2adc2
+    fixture: synthetic_pcm_s16le_wav_16000hz_mono_silence_250ms_v1
+    seed: 42
+    temperature: 0.0
+    n_predict: 8
+    n_probs: 5
+    post_sampling_probs: false
+    stream: false
+    cache_prompt: false
+    return_tokens: true
+    timings_per_token: true
+    trials: 2
+
+evidence:
+  record_prompt_text: false
+  record_output_text: false
+  record_token_ids: true
+  record_logprob_summary: true
+  record_command_arguments: true
+  record_artifact_hashes: true
+  record_runtime_commit: true
+  record_hardware: true
+  record_timings: true
+  record_peak_memory: true
+
+claims:
+  purpose: load_and_inference_smoke_only
+  mtp_included: false
+  mtp_supported: false
+  quality_measured: false
+  benchmark_measured: false
+  performance_claim_allowed: false
+  quality_retention_claim_allowed: false
+  compatibility_scope: single_exact_matrix_cell

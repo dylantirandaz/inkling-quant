@@ -16,6 +16,32 @@ MetricDirection: TypeAlias = Literal["maximize", "minimize", "neutral"]
 MetricStatus: TypeAlias = Literal["available", "unavailable", "unsupported", "failed"]
 ParetoDirection: TypeAlias = Literal["maximize", "minimize"]
 
+_FORBIDDEN_IDENTITY_VALUES = frozenset(
+    {
+        "*",
+        "any",
+        "example",
+        "n/a",
+        "na",
+        "none",
+        "placeholder",
+        "tbd",
+        "todo",
+        "unknown",
+        "unspecified",
+    }
+)
+
+
+def _require_exact_identity(value: str, *, label: str) -> str:
+    """Reject whitespace and obvious placeholders in governed identity fields."""
+
+    if not value or value.strip() != value:
+        raise ValueError(f"{label} must be non-empty and trimmed")
+    if value.casefold() in _FORBIDDEN_IDENTITY_VALUES or "*" in value or "?" in value:
+        raise ValueError(f"{label} must identify one exact value")
+    return value
+
 
 class ImmutableComparisonModel(BaseModel):
     """Strict immutable base for comparison artifacts."""
@@ -30,6 +56,11 @@ class DatasetIdentity(ImmutableComparisonModel):
     dataset_revision: str = Field(min_length=1)
     split: str = Field(min_length=1)
     dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("dataset_id", "dataset_revision", "split")
+    @classmethod
+    def identity_text_is_exact(cls, value: str) -> str:
+        return _require_exact_identity(value, label="dataset identity")
 
 
 class BenchmarkWorkloadIdentity(ImmutableComparisonModel):
@@ -91,6 +122,17 @@ class EvaluationSuiteIdentity(ImmutableComparisonModel):
     prompt_template_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     decode_config: dict[str, JsonValue]
     status: Literal["success", "partial", "unsupported", "failed"]
+
+    @field_validator(
+        "evaluator_name",
+        "evaluator_version",
+        "dataset_id",
+        "dataset_revision",
+        "split",
+    )
+    @classmethod
+    def identity_text_is_exact(cls, value: str) -> str:
+        return _require_exact_identity(value, label="evaluation-suite identity")
 
     @model_validator(mode="after")
     def validate_evidence(self) -> EvaluationSuiteIdentity:
@@ -155,6 +197,54 @@ class RoutingCaptureIdentity(ImmutableComparisonModel):
         return self
 
 
+class SoftwareToolchainIdentity(ImmutableComparisonModel):
+    """Exact runtime and build identity used to produce measurements."""
+
+    runtime_name: str = Field(min_length=1)
+    runtime_revision: str = Field(min_length=1)
+    runtime_binary_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    container_image_digest: str | None = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    packages: dict[str, str]
+    build_options: tuple[str, ...] = ()
+
+    @field_validator("runtime_name", "runtime_revision")
+    @classmethod
+    def runtime_identity_is_exact(cls, value: str) -> str:
+        return _require_exact_identity(value, label="runtime identity")
+
+    @field_validator("packages")
+    @classmethod
+    def packages_are_exact(cls, value: dict[str, str]) -> dict[str, str]:
+        """Reject package identities that cannot support an exact comparison."""
+
+        if not value:
+            raise ValueError("software toolchain requires at least one exact package version")
+        if any(
+            not name
+            or name.strip() != name
+            or not version
+            or version.strip() != version
+            or version.casefold() in _FORBIDDEN_IDENTITY_VALUES
+            for name, version in value.items()
+        ):
+            raise ValueError("software package names and versions must be non-empty")
+        return value
+
+    @field_validator("build_options")
+    @classmethod
+    def build_options_are_canonical(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        """Require stable build-option ordering for byte-identical evidence."""
+
+        if any(not option for option in value):
+            raise ValueError("software build options must be non-empty strings")
+        if tuple(sorted(set(value))) != value:
+            raise ValueError("software build options must be sorted and unique")
+        return value
+
+
 class MetricValue(ImmutableComparisonModel):
     """One normalized measurement with explicit availability semantics."""
 
@@ -192,11 +282,13 @@ class MetricValue(ImmutableComparisonModel):
 class NormalizedRunSummary(ImmutableComparisonModel):
     """Model-independent, report-ready summary of one immutable run."""
 
-    schema_version: Literal["1.0", "1.1"] = "1.0"
+    schema_version: Literal["1.0", "1.1", "1.2"] = "1.0"
     run_id: str = Field(min_length=1)
     artifact_path: str = Field(min_length=1)
     model_id: str = Field(min_length=1)
     model_revision: str | None
+    source_model_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    software_toolchain: SoftwareToolchainIdentity | None = None
     datasets: tuple[DatasetIdentity, ...]
     seed_set: tuple[int, ...]
     sample_ids: tuple[str, ...]
@@ -311,7 +403,9 @@ class NormalizedRunSummary(ImmutableComparisonModel):
                 raise ValueError("normalized summary requires non-empty stable sample IDs")
             return self
         if not self.evaluation_suites:
-            raise ValueError("summary schema 1.1 requires evaluator-scoped suite identities")
+            raise ValueError(
+                f"summary schema {self.schema_version} requires evaluator-scoped suite identities"
+            )
         measured = tuple(
             suite for suite in self.evaluation_suites if suite.status in {"success", "partial"}
         )
@@ -339,6 +433,53 @@ class NormalizedRunSummary(ImmutableComparisonModel):
                 raise ValueError(
                     f"metric {name!r} references evaluation suite evidence absent from summary"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def validate_versioned_scope(self) -> NormalizedRunSummary:
+        """Require exact source and software scope for evidence-ready summaries."""
+
+        if self.schema_version != "1.2":
+            return self
+        if self.source_model_sha256 is None:
+            raise ValueError("summary schema 1.2 requires an exact source-model SHA-256")
+        if self.software_toolchain is None:
+            raise ValueError("summary schema 1.2 requires exact software-toolchain provenance")
+        for label, value in (
+            ("run ID", self.run_id),
+            ("artifact path", self.artifact_path),
+            ("model ID", self.model_id),
+            ("model revision", self.model_revision),
+            ("benchmark protocol", self.benchmark_protocol_version),
+        ):
+            if value is None:
+                raise ValueError(f"summary schema 1.2 requires an exact {label}")
+            _require_exact_identity(value, label=label)
+
+        suite_seeds = tuple(sorted({suite.seed for suite in self.evaluation_suites}))
+        if self.seed_set != suite_seeds:
+            raise ValueError(
+                "schema 1.2 seed_set must equal the canonical evaluation-suite seed set"
+            )
+
+        suite_sample_ids: list[str] = []
+        seen_sample_ids: set[str] = set()
+        for suite in self.evaluation_suites:
+            for sample_id in suite.sample_ids:
+                if sample_id not in seen_sample_ids:
+                    seen_sample_ids.add(sample_id)
+                    suite_sample_ids.append(sample_id)
+        if self.sample_ids != tuple(suite_sample_ids):
+            raise ValueError(
+                "schema 1.2 sample_ids must equal the ordered evaluation-suite sample IDs"
+            )
+        if any(
+            suite.prompt_template_hash != self.prompt_template_hash
+            for suite in self.evaluation_suites
+        ):
+            raise ValueError("schema 1.2 prompt_template_hash must match every evaluation suite")
+        if any(suite.decode_config != self.decode_config for suite in self.evaluation_suites):
+            raise ValueError("schema 1.2 decode_config must match every evaluation suite")
         return self
 
     @model_validator(mode="after")
@@ -384,6 +525,8 @@ class ComparisonContract(ImmutableComparisonModel):
 
     require_same_model_id: bool = True
     require_same_model_revision: bool = True
+    require_same_source_model: bool = True
+    require_same_software_toolchain: bool = True
     require_same_datasets: bool = True
     require_same_seed_set: bool = True
     require_same_samples: bool = True
@@ -487,19 +630,19 @@ def _suite_anchor(suite: EvaluationSuiteIdentity) -> dict[str, JsonValue]:
 def _evaluation_seed_contract(summary: NormalizedRunSummary) -> JsonValue:
     if not summary.evaluation_suites:
         return cast(JsonValue, list(summary.seed_set))
-    return cast(
-        JsonValue,
-        [
-            {
-                **_suite_anchor(suite),
-                "dataset_id": suite.dataset_id,
-                "dataset_revision": suite.dataset_revision,
-                "split": suite.split,
-                "seed": suite.seed,
-            }
-            for suite in summary.evaluation_suites
-        ],
-    )
+    suites = [
+        {
+            **_suite_anchor(suite),
+            "dataset_id": suite.dataset_id,
+            "dataset_revision": suite.dataset_revision,
+            "split": suite.split,
+            "seed": suite.seed,
+        }
+        for suite in summary.evaluation_suites
+    ]
+    if summary.schema_version == "1.2":
+        return cast(JsonValue, {"aggregate": list(summary.seed_set), "suites": suites})
+    return cast(JsonValue, suites)
 
 
 def _evaluation_dataset_contract(summary: NormalizedRunSummary) -> JsonValue:
@@ -523,55 +666,58 @@ def _evaluation_dataset_contract(summary: NormalizedRunSummary) -> JsonValue:
 def _evaluation_sample_contract(summary: NormalizedRunSummary) -> JsonValue:
     if not summary.evaluation_suites:
         return cast(JsonValue, sorted(summary.sample_ids))
-    return cast(
-        JsonValue,
-        [
-            {
-                **_suite_anchor(suite),
-                "dataset_id": suite.dataset_id,
-                "dataset_revision": suite.dataset_revision,
-                "split": suite.split,
-                "sample_ids": list(suite.sample_ids),
-            }
-            for suite in summary.evaluation_suites
-        ],
-    )
+    suites = [
+        {
+            **_suite_anchor(suite),
+            "dataset_id": suite.dataset_id,
+            "dataset_revision": suite.dataset_revision,
+            "split": suite.split,
+            "sample_ids": list(suite.sample_ids),
+        }
+        for suite in summary.evaluation_suites
+    ]
+    if summary.schema_version == "1.2":
+        return cast(JsonValue, {"aggregate": list(summary.sample_ids), "suites": suites})
+    return cast(JsonValue, suites)
 
 
 def _evaluation_prompt_contract(summary: NormalizedRunSummary) -> JsonValue:
     if not summary.evaluation_suites:
         return summary.prompt_template_hash
-    return cast(
-        JsonValue,
-        [
-            {
-                **_suite_anchor(suite),
-                "dataset_id": suite.dataset_id,
-                "dataset_revision": suite.dataset_revision,
-                "split": suite.split,
-                "prompt_template_hash": suite.prompt_template_hash,
-            }
-            for suite in summary.evaluation_suites
-        ],
-    )
+    suites = [
+        {
+            **_suite_anchor(suite),
+            "dataset_id": suite.dataset_id,
+            "dataset_revision": suite.dataset_revision,
+            "split": suite.split,
+            "prompt_template_hash": suite.prompt_template_hash,
+        }
+        for suite in summary.evaluation_suites
+    ]
+    if summary.schema_version == "1.2":
+        return cast(
+            JsonValue,
+            {"aggregate": summary.prompt_template_hash, "suites": suites},
+        )
+    return cast(JsonValue, suites)
 
 
 def _evaluation_decode_contract(summary: NormalizedRunSummary) -> JsonValue:
     if not summary.evaluation_suites:
         return cast(JsonValue, summary.decode_config)
-    return cast(
-        JsonValue,
-        [
-            {
-                **_suite_anchor(suite),
-                "dataset_id": suite.dataset_id,
-                "dataset_revision": suite.dataset_revision,
-                "split": suite.split,
-                "decode_config": suite.decode_config,
-            }
-            for suite in summary.evaluation_suites
-        ],
-    )
+    suites = [
+        {
+            **_suite_anchor(suite),
+            "dataset_id": suite.dataset_id,
+            "dataset_revision": suite.dataset_revision,
+            "split": suite.split,
+            "decode_config": suite.decode_config,
+        }
+        for suite in summary.evaluation_suites
+    ]
+    if summary.schema_version == "1.2":
+        return cast(JsonValue, {"aggregate": summary.decode_config, "suites": suites})
+    return cast(JsonValue, suites)
 
 
 def compatibility_mismatches(
@@ -596,6 +742,30 @@ def compatibility_mismatches(
             baseline.model_revision,
             candidate.model_revision,
             "model revisions differ",
+        ),
+        (
+            active.require_same_source_model,
+            "source_model_sha256",
+            baseline.source_model_sha256,
+            candidate.source_model_sha256,
+            "source-model SHA-256 digests differ",
+        ),
+        (
+            active.require_same_software_toolchain,
+            "software_toolchain",
+            cast(
+                JsonValue,
+                baseline.software_toolchain.model_dump(mode="json")
+                if baseline.software_toolchain is not None
+                else None,
+            ),
+            cast(
+                JsonValue,
+                candidate.software_toolchain.model_dump(mode="json")
+                if candidate.software_toolchain is not None
+                else None,
+            ),
+            "software runtime, revision, binary, packages, or build options differ",
         ),
         (
             active.require_same_datasets,
@@ -740,6 +910,8 @@ _OVERRIDE_ALIASES = {
     "benchmark_protocol": "benchmark_protocol_version",
     "evaluation_datasets": "datasets",
     "hardware": "hardware_environment",
+    "software": "software_toolchain",
+    "source_model": "source_model_sha256",
     "prompt_template": "prompt_template_hash",
     "routing_mode": "routing_capture",
     "routing_samples": "routing_sample_ids",
@@ -750,6 +922,8 @@ _OVERRIDE_ALIASES = {
 _OVERRIDABLE_DIMENSIONS = {
     "model_id",
     "model_revision",
+    "source_model_sha256",
+    "software_toolchain",
     "datasets",
     "seed_set",
     "prompt_template_hash",
