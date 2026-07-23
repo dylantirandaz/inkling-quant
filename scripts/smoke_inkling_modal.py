@@ -200,6 +200,10 @@ SOURCE_BLOB_PINS: Final = (
         "tools/server/server-context.cpp",
         "7564ad4e9cfb8e77d610e90c7530121214a4c483",
     ),
+    (
+        "tools/server/server.cpp",
+        "20effbb14851b201118843bf14fa5bc51de1e304",
+    ),
 )
 SOURCE_CONTRACT_ASSERTIONS: Final = (
     ("CMakeLists.txt", "option(LLAMA_BUILD_UI"),
@@ -219,6 +223,12 @@ SOURCE_CONTRACT_ASSERTIONS: Final = (
     ("tools/server/server-context.cpp", '{ "build_info",                  meta->build_info },'),
     ("tools/server/server-context.cpp", '{"n_vocab",     meta->model_vocab_n_tokens},'),
     ("tools/server/server-task.cpp", 'res["completion_probabilities"] ='),
+)
+PATCHED_SOURCE_BLOB_PINS: Final = (
+    (
+        "tools/server/server.cpp",
+        "9be8c02497080fa57ad9460084c2337a1997f89b",
+    ),
 )
 SERVER_AUDIT_ENVIRONMENT: Final = {
     "IQL_SMOKE_BACKEND_AUDIT": "1",
@@ -334,6 +344,11 @@ smoke_image = smoke_image.run_commands(
     ),
     f"git -C {LLAMA_CPP_DIR} apply --check {REMOTE_PATCH}",
     f"git -C {LLAMA_CPP_DIR} apply {REMOTE_PATCH}",
+    *(
+        f'test "$(git -C {LLAMA_CPP_DIR} hash-object {shlex.quote(path)})" = '
+        f"{shlex.quote(expected)}"
+        for path, expected in PATCHED_SOURCE_BLOB_PINS
+    ),
     f"git -C {LLAMA_CPP_DIR} diff --check",
     "python -m pip install --no-cache-dir pydantic==2.13.4 PyYAML==6.0.3",
     f"test -f {CUDA_DRIVER_STUB}",
@@ -2217,6 +2232,8 @@ def _server_command(reference: InklingVerifiedExportReference) -> list[str]:
     projector = SUBJECT_MOUNT / reference.projector.path
     return [
         str(LLAMA_CPP_DIR / "build/bin/llama-server"),
+        "--log-verbosity",
+        str(DEFAULT_CONFIG.runtime.log_verbosity),
         "--model",
         str(first_shard),
         "--mmproj",
@@ -2249,10 +2266,16 @@ def _server_command(reference: InklingVerifiedExportReference) -> list[str]:
         "512",
         "--ubatch-size",
         "512",
-        "--log-verbosity",
-        str(DEFAULT_CONFIG.runtime.log_verbosity),
         "--no-webui",
     ]
+
+
+def _server_environment() -> dict[str, str]:
+    environment = {
+        name: value for name, value in os.environ.items() if not name.startswith("LLAMA_ARG_")
+    }
+    environment.update(SERVER_AUDIT_ENVIRONMENT)
+    return environment
 
 
 def _terminate_process(process: subprocess.Popen[bytes]) -> dict[str, Any]:
@@ -2607,7 +2630,7 @@ def smoke_test(
             stdin=subprocess.DEVNULL,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
-            env={**os.environ, **SERVER_AUDIT_ENVIRONMENT},
+            env=_server_environment(),
             shell=False,
         )
         monitor = _RuntimeMonitor(process.pid, [str(gpu["uuid"]) for gpu in hardware])

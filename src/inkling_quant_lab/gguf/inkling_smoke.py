@@ -41,8 +41,11 @@ PINNED_LLAMA_CPP_REPOSITORY: Final = "https://github.com/danielhanchen/llama.cpp
 PINNED_LLAMA_CPP_COMMIT: Final = "a015409e6c27b84f60d688823d4c0126a11571fd"
 INSTRUMENTATION_SCHEMA_VERSION: Final = "inkling-llama-smoke-instrumentation-v1"
 INSTRUMENTATION_PATCH_RELATIVE_PATH: Final = "patches/inkling-smoke-a015409.patch"
-INSTRUMENTATION_PATCH_SHA256: Final = (
+HISTORICAL_INSTRUMENTATION_PATCH_SHA256: Final = (
     "b276d12a4af96c803b71fee6f7be91c230b0fb30b6be04637f61f33d07b10ecf"
+)
+INSTRUMENTATION_PATCH_SHA256: Final = (
+    "301023aea3a19533710e122fbbd55378bf19c2562bd885fa85b58f9d4ea110cb"
 )
 
 SUBJECT_RUN_ID: Final = "inkling-q3km-86b4d430-a015409e-ffd466dd93-8083cf41e1"
@@ -356,7 +359,8 @@ class SmokeRuntimeConfig(StrictFrozenModel):
     instrumentation_schema_version: Literal["inkling-llama-smoke-instrumentation-v1"]
     instrumentation_patch_path: Literal["patches/inkling-smoke-a015409.patch"]
     instrumentation_patch_sha256: Literal[
-        "b276d12a4af96c803b71fee6f7be91c230b0fb30b6be04637f61f33d07b10ecf"
+        "b276d12a4af96c803b71fee6f7be91c230b0fb30b6be04637f61f33d07b10ecf",
+        "301023aea3a19533710e122fbbd55378bf19c2562bd885fa85b58f9d4ea110cb",
     ]
     image: SmokeCudaImageConfig
     build_targets: tuple[str, ...]
@@ -805,6 +809,14 @@ class BackendAuditEvidence(StrictFrozenModel):
             raise ValueError("backend audit contains duplicate backend identities")
         if set(row.graph_uid for row in self.identities) != set(graph_uids):
             raise ValueError("backend identities do not cover the exact graph set")
+        if any(row.device_type != "gpu" for row in self.identities):
+            raise ValueError("backend audit used a non-CUDA accelerator")
+        cuda0_identity = (0, "CUDA0", "CUDA0")
+        expected_cuda_identities = {
+            cuda0_identity,
+            (1, "CUDA1", "CUDA1"),
+        }
+        observed_dual_cuda_graph = False
 
         category_totals = {
             "gpu": 0,
@@ -817,6 +829,18 @@ class BackendAuditEvidence(StrictFrozenModel):
             graph_identities = tuple(
                 row for row in self.identities if row.graph_uid == graph.graph_uid
             )
+            observed_cuda_identities = {
+                (row.backend_index, row.backend_name, row.device_name) for row in graph_identities
+            }
+            if (
+                len(graph_identities) != len(observed_cuda_identities)
+                or not observed_cuda_identities.issubset(expected_cuda_identities)
+                or cuda0_identity not in observed_cuda_identities
+            ):
+                raise ValueError(
+                    "backend graph does not prove the exact CUDA index and device identities"
+                )
+            observed_dual_cuda_graph |= observed_cuda_identities == expected_cuda_identities
             if sum(row.compute for row in graph_identities) != graph.compute:
                 raise ValueError("backend identity counts do not equal graph compute count")
             observed = {name: 0 for name in category_totals}
@@ -854,6 +878,8 @@ class BackendAuditEvidence(StrictFrozenModel):
             raise ValueError("backend aggregate compute count differs from graph evidence")
         if self.gpu_operations + self.accelerator_operations != self.compute_operations:
             raise ValueError("backend audit observed a non-accelerated compute operation")
+        if not observed_dual_cuda_graph:
+            raise ValueError("backend audit does not prove one exact dual-CUDA graph")
         return self
 
 

@@ -10,12 +10,14 @@ from pydantic import ValidationError
 
 from inkling_quant_lab.exceptions import ConfigurationError
 from inkling_quant_lab.gguf.inkling_smoke import (
+    HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
     load_inkling_smoke_config,
     load_verified_export_reference,
 )
 from inkling_quant_lab.gguf.inkling_smoke_execution import (
     SMOKE_CONTROL_PLANE_REQUIRED_FILES,
     SMOKE_WORKSPACE_BUDGET_USD,
+    SmokeControlPlaneProvenance,
     SmokeFailureReceiptV2,
     SmokeFailureReceiptV3,
     SmokeFailureReceiptV4,
@@ -33,6 +35,7 @@ from inkling_quant_lab.gguf.inkling_smoke_execution import (
     resolve_current_process_cgroup_hierarchy_paths,
     resolve_current_process_cgroup_leaf_paths,
     smoke_control_plane_provenance,
+    smoke_control_plane_tree_sha256,
     smoke_deployment_tag,
     smoke_hardware_topology_sha256,
     smoke_package_manifest_sha256,
@@ -75,10 +78,38 @@ def _failure_receipt(
     schema_version: str = "inkling-smoke-terminal-v3",
     *,
     called_process_error: bool = False,
+    historical_context: bool | None = None,
 ) -> tuple[dict[str, Any], Any, Any, Any, str, str]:
     config = load_inkling_smoke_config(CONFIG_PATH)
     reference = load_verified_export_reference(REFERENCE_PATH)
     control_plane = smoke_control_plane_provenance(PROJECT_ROOT)
+    if historical_context is None:
+        historical_context = schema_version in {
+            "inkling-smoke-terminal-v2",
+            "inkling-smoke-terminal-v3",
+        }
+    if historical_context:
+        config_payload = config.model_dump(mode="json")
+        config_payload["runtime"]["instrumentation_patch_sha256"] = (
+            HISTORICAL_INSTRUMENTATION_PATCH_SHA256
+        )
+        config = type(config).model_validate(config_payload)
+        files = tuple(
+            item.model_copy(
+                update={
+                    "sha256": HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
+                    "size_bytes": 14_870,
+                }
+            )
+            if item.path == "patches/inkling-smoke-a015409.patch"
+            else item
+            for item in control_plane.files
+        )
+        control_plane = SmokeControlPlaneProvenance(
+            file_count=len(files),
+            files=files,
+            tree_sha256=smoke_control_plane_tree_sha256(files),
+        )
     run_id = smoke_run_id(config, control_plane.tree_sha256)
     launch_intent_sha256 = "1" * 64
     receipt: dict[str, Any] = {
@@ -464,6 +495,75 @@ def test_failure_receipt_validates_exact_launch_and_outcome_path(
     if isinstance(observed, SmokeFailureReceiptV3 | SmokeFailureReceiptV4):
         assert observed.invocation.attempt_claim_sha256 == "6" * 64
         assert observed.invocation.invocation_history_sha256 == "8" * 64
+
+
+@pytest.mark.parametrize(
+    "schema_version",
+    ("inkling-smoke-terminal-v2", "inkling-smoke-terminal-v3"),
+)
+def test_current_failure_receipt_rejects_a_rehashed_schema_downgrade(
+    schema_version: str,
+) -> None:
+    receipt, config, reference, control_plane, run_id, launch_intent_sha256 = _failure_receipt(
+        schema_version,
+        historical_context=False,
+    )
+
+    with pytest.raises(ValueError, match="requires terminal version 4"):
+        validate_smoke_failure_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+            launch_intent_sha256=launch_intent_sha256,
+        )
+
+
+def test_historical_failure_receipt_requires_the_historical_control_plane_patch() -> None:
+    receipt, config, reference, control_plane, run_id, launch_intent_sha256 = _failure_receipt()
+    current_control_plane = smoke_control_plane_provenance(PROJECT_ROOT)
+    changed_run_id = smoke_run_id(config, current_control_plane.tree_sha256)
+    receipt["run_id"] = changed_run_id
+    receipt["control_plane_sha256"] = current_control_plane.tree_sha256
+    receipt["invocation"]["run_id"] = changed_run_id
+    receipt["invocation"]["control_plane_sha256"] = current_control_plane.tree_sha256
+    receipt["invocation"]["attempt_registry_key"] = f"{changed_run_id}:smoke_test"
+    receipt["receipt_sha256"] = smoke_terminal_receipt_sha256(receipt)
+
+    with pytest.raises(ValueError, match="patch differs from the smoke config"):
+        validate_smoke_failure_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=current_control_plane,
+            run_id=changed_run_id,
+            launch_intent_sha256=launch_intent_sha256,
+        )
+
+    assert run_id != changed_run_id
+    assert control_plane.tree_sha256 != current_control_plane.tree_sha256
+
+
+def test_failure_receipt_requires_the_run_derived_from_config_and_control_plane() -> None:
+    receipt, config, reference, control_plane, _run_id, launch_intent_sha256 = _failure_receipt(
+        "inkling-smoke-terminal-v4"
+    )
+    changed_run_id = "different-run"
+    receipt["run_id"] = changed_run_id
+    receipt["invocation"]["run_id"] = changed_run_id
+    receipt["invocation"]["attempt_registry_key"] = f"{changed_run_id}:smoke_test"
+    receipt["receipt_sha256"] = smoke_terminal_receipt_sha256(receipt)
+
+    with pytest.raises(ValueError, match="run ID is not derived"):
+        validate_smoke_failure_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=changed_run_id,
+            launch_intent_sha256=launch_intent_sha256,
+        )
 
 
 def test_failure_receipt_v3_requires_the_persisted_invocation_binding() -> None:

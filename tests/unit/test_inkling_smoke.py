@@ -339,6 +339,7 @@ def test_reference_loader_rejects_noncanonical_json(tmp_path: Path) -> None:
 def test_checked_smoke_config_binds_runtime_hardware_probes_and_claims() -> None:
     config = load_inkling_smoke_config(CONFIG_PATH)
 
+    assert config.schema_version == "inkling-smoke-config-v1"
     assert config.verified_export_reference_sha256 == (EXPECTED_VERIFIED_EXPORT_REFERENCE_SHA256)
     assert config.runtime.image.image == PINNED_CUDA_IMAGE
     assert config.runtime.image.digest == PINNED_CUDA_IMAGE_DIGEST
@@ -652,7 +653,9 @@ def test_backend_audit_rejects_any_cpu_or_unassigned_operation() -> None:
             "phase=post_assignment_pre_split scope=non_view_compute "
             "compute=12 gpu=12 cpu=0 accel=0 other=0 unassigned=0",
             "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=2 backend_index=0 "
-            "backend_name=CUDA0 device_name=CUDA0 device_type=gpu compute=8",
+            "backend_name=CUDA0 device_name=CUDA0 device_type=gpu compute=4",
+            "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=2 backend_index=1 "
+            "backend_name=CUDA1 device_name=CUDA1 device_type=gpu compute=4",
             "IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=2 "
             "phase=post_assignment_pre_split scope=non_view_compute "
             "compute=8 gpu=8 cpu=0 accel=0 other=0 unassigned=0",
@@ -662,7 +665,7 @@ def test_backend_audit_rejects_any_cpu_or_unassigned_operation() -> None:
     assert evidence.observed_graphs == 2
     assert evidence.compute_operations == evidence.gpu_operations == 20
     assert evidence.accelerator_operations == 0
-    assert len(evidence.identities) == 3
+    assert len(evidence.identities) == 4
     assert evidence.no_cpu_model_graph_fallback is True
 
     bad = "\n".join(
@@ -679,6 +682,189 @@ def test_backend_audit_rejects_any_cpu_or_unassigned_operation() -> None:
     )
     with pytest.raises(ValueError, match="CPU"):
         parse_backend_audit_evidence(bad)
+
+
+def test_backend_audit_requires_compute_on_both_cuda_devices() -> None:
+    log = "\n".join(
+        (
+            "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=1 backend_index=0 "
+            "backend_name=CUDA0 device_name=CUDA0 device_type=gpu compute=12",
+            "IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=1 "
+            "phase=post_assignment_pre_split scope=non_view_compute "
+            "compute=12 gpu=12 cpu=0 accel=0 other=0 unassigned=0",
+        )
+    )
+
+    with pytest.raises(ValueError, match="one exact dual-CUDA graph"):
+        parse_backend_audit_evidence(log)
+
+
+def test_backend_audit_accepts_cuda0_projector_graph_with_dual_cuda_graph() -> None:
+    log = "\n".join(
+        (
+            "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=1 backend_index=0 "
+            "backend_name=CUDA0 device_name=CUDA0 device_type=gpu compute=7",
+            "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=1 backend_index=1 "
+            "backend_name=CUDA1 device_name=CUDA1 device_type=gpu compute=5",
+            "IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=1 "
+            "phase=post_assignment_pre_split scope=non_view_compute "
+            "compute=12 gpu=12 cpu=0 accel=0 other=0 unassigned=0",
+            "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=2 backend_index=0 "
+            "backend_name=CUDA0 device_name=CUDA0 device_type=gpu compute=8",
+            "IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=2 "
+            "phase=post_assignment_pre_split scope=non_view_compute "
+            "compute=8 gpu=8 cpu=0 accel=0 other=0 unassigned=0",
+        )
+    )
+
+    evidence = parse_backend_audit_evidence(log)
+
+    assert evidence.observed_graphs == 2
+    assert evidence.compute_operations == evidence.gpu_operations == 20
+    assert len(evidence.identities) == 3
+
+
+def _backend_audit_log_with_auxiliary(
+    *auxiliary_identity_rows: str,
+    auxiliary_compute: int = 8,
+) -> str:
+    return "\n".join(
+        (
+            "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=1 backend_index=0 "
+            "backend_name=CUDA0 device_name=CUDA0 device_type=gpu compute=7",
+            "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=1 backend_index=1 "
+            "backend_name=CUDA1 device_name=CUDA1 device_type=gpu compute=5",
+            "IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=1 "
+            "phase=post_assignment_pre_split scope=non_view_compute "
+            "compute=12 gpu=12 cpu=0 accel=0 other=0 unassigned=0",
+            *auxiliary_identity_rows,
+            "IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=2 "
+            "phase=post_assignment_pre_split scope=non_view_compute "
+            f"compute={auxiliary_compute} gpu={auxiliary_compute} "
+            "cpu=0 accel=0 other=0 unassigned=0",
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("auxiliary_identity_rows", "match"),
+    (
+        pytest.param(
+            (
+                "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=2 backend_index=0 "
+                "backend_name=CUDA0 device_name=CUDA0 device_type=gpu compute=7",
+                "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=2 backend_index=2 "
+                "backend_name=CUDA2 device_name=CUDA2 device_type=gpu compute=1",
+            ),
+            "exact CUDA index and device identities",
+            id="third-positive-identity",
+        ),
+        pytest.param(
+            (
+                "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=2 backend_index=0 "
+                "backend_name=CUDA0 device_name=CUDA0 device_type=gpu compute=4",
+                "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=2 backend_index=0 "
+                "backend_name=CUDA0 device_name=CUDA0 device_type=gpu compute=4",
+            ),
+            "duplicate backend identities",
+            id="exact-duplicate-graph-backend-index",
+        ),
+        pytest.param(
+            (
+                "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=2 backend_index=0 "
+                "backend_name=CUDA0-drift device_name=CUDA0 "
+                "device_type=gpu compute=8",
+            ),
+            "exact CUDA index and device identities",
+            id="backend-name-only-drift",
+        ),
+        pytest.param(
+            (
+                "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=2 backend_index=0 "
+                "backend_name=CUDA0 device_name=CUDA0 device_type=gpu compute=0",
+            ),
+            "greater than 0",
+            id="zero-compute",
+        ),
+        *(
+            pytest.param(
+                (
+                    "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=2 backend_index=0 "
+                    "backend_name=CUDA0 device_name=CUDA0 "
+                    f"device_type={device_type} compute=8",
+                ),
+                "non-CUDA accelerator",
+                id=f"device-type-{device_type}",
+            )
+            for device_type in ("igpu", "accel", "meta", "unassigned", "cpu")
+        ),
+    ),
+)
+def test_backend_audit_rejects_invalid_current_cuda_auxiliary_identity(
+    auxiliary_identity_rows: tuple[str, ...],
+    match: str,
+) -> None:
+    log = _backend_audit_log_with_auxiliary(*auxiliary_identity_rows)
+
+    with pytest.raises(ValueError, match=match):
+        parse_backend_audit_evidence(log)
+
+
+@pytest.mark.parametrize(
+    "identity_rows",
+    (
+        (
+            "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=1 backend_index=0 "
+            "backend_name=CUDA0 device_name=CUDA1 device_type=gpu compute=6",
+            "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=1 backend_index=1 "
+            "backend_name=CUDA1 device_name=CUDA0 device_type=gpu compute=6",
+        ),
+        (
+            "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=1 backend_index=0 "
+            "backend_name=CUDA0 device_name=CUDA0 device_type=gpu compute=6",
+            "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=1 backend_index=1 "
+            "backend_name=CUDA0 device_name=CUDA0 device_type=gpu compute=6",
+        ),
+    ),
+)
+def test_backend_audit_rejects_swapped_or_duplicate_cuda_identity_pairs(
+    identity_rows: tuple[str, str],
+) -> None:
+    log = "\n".join(
+        (
+            *identity_rows,
+            "IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=1 "
+            "phase=post_assignment_pre_split scope=non_view_compute "
+            "compute=12 gpu=12 cpu=0 accel=0 other=0 unassigned=0",
+        )
+    )
+
+    with pytest.raises(ValueError, match="exact CUDA index and device identities"):
+        parse_backend_audit_evidence(log)
+
+
+def test_backend_audit_rejects_backend_index_identity_drift_across_graphs() -> None:
+    log = "\n".join(
+        (
+            "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=1 backend_index=0 "
+            "backend_name=CUDA0 device_name=CUDA0 device_type=gpu compute=6",
+            "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=1 backend_index=1 "
+            "backend_name=CUDA1 device_name=CUDA1 device_type=gpu compute=6",
+            "IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=1 "
+            "phase=post_assignment_pre_split scope=non_view_compute "
+            "compute=12 gpu=12 cpu=0 accel=0 other=0 unassigned=0",
+            "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=2 backend_index=0 "
+            "backend_name=CUDA1 device_name=CUDA1 device_type=gpu compute=6",
+            "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=2 backend_index=1 "
+            "backend_name=CUDA0 device_name=CUDA0 device_type=gpu compute=6",
+            "IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=2 "
+            "phase=post_assignment_pre_split scope=non_view_compute "
+            "compute=12 gpu=12 cpu=0 accel=0 other=0 unassigned=0",
+        )
+    )
+
+    with pytest.raises(ValueError, match="exact CUDA index and device identities"):
+        parse_backend_audit_evidence(log)
 
 
 def test_artifact_load_parser_binds_all_49_shards_and_projector() -> None:

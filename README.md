@@ -39,6 +39,23 @@ The final verification checked the export structure, file set, sizes, and checks
 It did not measure the quality of the quantized Inkling model.
 The project does not yet have an accepted inference-smoke result for the final files.
 
+The latest controlled smoke attempt completed the text, image, and audio probes.
+The terminal evidence check then failed because one required CUDA device-count line was absent.
+The command enabled INFO logging after another option had already initialized CUDA.
+This result is an evidence-configuration failure.
+It is not a model failure, and it is not a smoke-test pass.
+
+The corrected source patch enables INFO logging before the parser handles environment or command
+arguments. The command still puts `--log-verbosity 4` before all other server options. The runner
+also removes inherited `LLAMA_ARG_*` overrides.
+
+A version 4 passing receipt must bind backend index 0 to backend and device name `CUDA0`. It must
+bind backend index 1 to backend and device name `CUDA1`. At least one audited graph must use
+both devices. An auxiliary projector graph may use `CUDA0` only. Every audited graph must have
+positive GPU compute and no CPU or other accelerator fallback. Historical version 3 receipts keep
+their original validation rules and hashes.
+The corrected remote run needs a new sealed identity and a new confirmation.
+
 The Git repository does not contain the model files.
 The files are too large for Git, and the project does not upload model weights by default.
 

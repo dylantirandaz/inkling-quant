@@ -9,6 +9,8 @@ import pytest
 from pydantic import ValidationError
 
 from inkling_quant_lab.gguf.inkling_smoke import (
+    HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
+    INSTRUMENTATION_SCHEMA_VERSION,
     load_inkling_smoke_config,
     load_verified_export_reference,
 )
@@ -16,6 +18,7 @@ from inkling_quant_lab.gguf.inkling_smoke_execution import (
     SmokeControlPlaneProvenance,
     SmokeNvidiaSmiTopologyDiagnostic,
     smoke_control_plane_provenance,
+    smoke_control_plane_tree_sha256,
     smoke_hardware_topology_sha256,
     smoke_package_manifest_sha256,
     smoke_run_id,
@@ -67,6 +70,37 @@ def _receipt_context() -> tuple[Any, Any, SmokeControlPlaneProvenance, str]:
         control_plane,
         smoke_run_id(config, control_plane.tree_sha256),
     )
+
+
+def _historical_receipt_context() -> tuple[
+    Any,
+    Any,
+    SmokeControlPlaneProvenance,
+    str,
+]:
+    current_config, reference, current_control_plane, _run_id = _receipt_context()
+    config_payload = current_config.model_dump(mode="json")
+    config_payload["runtime"]["instrumentation_patch_sha256"] = (
+        HISTORICAL_INSTRUMENTATION_PATCH_SHA256
+    )
+    config = type(current_config).model_validate(config_payload)
+    files = tuple(
+        item.model_copy(
+            update={
+                "sha256": HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
+                "size_bytes": 14_870,
+            }
+        )
+        if item.path == "patches/inkling-smoke-a015409.patch"
+        else item
+        for item in current_control_plane.files
+    )
+    control_plane = SmokeControlPlaneProvenance(
+        file_count=len(files),
+        files=files,
+        tree_sha256=smoke_control_plane_tree_sha256(files),
+    )
+    return config, reference, control_plane, smoke_run_id(config, control_plane.tree_sha256)
 
 
 def _gpu_topology(
@@ -123,7 +157,7 @@ def _gpu_topology(
 
 
 def _valid_receipt() -> tuple[dict[str, Any], Any, Any, SmokeControlPlaneProvenance, str]:
-    config, reference, control_plane, run_id = _receipt_context()
+    config, reference, control_plane, run_id = _historical_receipt_context()
     artifacts = [
         artifact.model_dump(mode="json")
         for artifact in (
@@ -523,7 +557,7 @@ def _valid_receipt() -> tuple[dict[str, Any], Any, Any, SmokeControlPlaneProvena
                     {
                         "graph_uid": 1,
                         "backend_index": 0,
-                        "backend_name": "CUDA0",
+                        "backend_name": "B300-0",
                         "device_name": "B300-0",
                         "device_type": "gpu",
                         "compute": 50,
@@ -531,7 +565,7 @@ def _valid_receipt() -> tuple[dict[str, Any], Any, Any, SmokeControlPlaneProvena
                     {
                         "graph_uid": 1,
                         "backend_index": 1,
-                        "backend_name": "CUDA1",
+                        "backend_name": "B300-1",
                         "device_name": "B300-1",
                         "device_type": "gpu",
                         "compute": 50,
@@ -583,8 +617,35 @@ def _valid_v4_receipt() -> tuple[
     SmokeControlPlaneProvenance,
     str,
 ]:
-    receipt, config, reference, control_plane, run_id = _valid_receipt()
+    receipt, _historical_config, reference, _historical_control_plane, _run_id = _valid_receipt()
+    config, current_reference, control_plane, run_id = _receipt_context()
+    assert current_reference == reference
     receipt["schema_version"] = "inkling-smoke-terminal-v4"
+    receipt["run_id"] = run_id
+    receipt["smoke_config_hash"] = config.config_hash()
+    receipt["control_plane_sha256"] = control_plane.tree_sha256
+    receipt["control_plane_file_count"] = control_plane.file_count
+    receipt["invocation"]["run_id"] = run_id
+    receipt["invocation"]["smoke_config_hash"] = config.config_hash()
+    receipt["invocation"]["control_plane_sha256"] = control_plane.tree_sha256
+    receipt["invocation"]["attempt_registry_key"] = f"{run_id}:smoke_test"
+    receipt["runtime"]["instrumentation_patch_sha256"] = config.runtime.instrumentation_patch_sha256
+    command = receipt["server"]["command"]
+    verbosity_index = command.index("--log-verbosity")
+    verbosity_arguments = command[verbosity_index : verbosity_index + 2]
+    del command[verbosity_index : verbosity_index + 2]
+    command[1:1] = verbosity_arguments
+    receipt["runtime"]["patched_source_paths"].append("tools/server/server.cpp")
+    receipt["runtime"]["patched_source_paths"].sort()
+    receipt["runtime"]["base_source_blob_ids"].append(
+        {
+            "path": "tools/server/server.cpp",
+            "git_blob_id": "20effbb14851b201118843bf14fa5bc51de1e304",
+        }
+    )
+    for ordinal, identity in enumerate(receipt["server"]["backend_audit"]["identities"]):
+        identity["backend_name"] = f"CUDA{ordinal}"
+        identity["device_name"] = f"CUDA{ordinal}"
     receipt["host"].pop("nvidia_smi_topo_m_sha256")
     receipt["host"]["topology_schema_version"] = "inkling-smoke-hardware-topology-v4"
     receipt["gpu_topology"] = _gpu_topology(receipt["hardware"])
@@ -640,6 +701,46 @@ def test_complete_terminal_receipt_validates() -> None:
     assert observed.host.ram_scope == "container_cgroup_memory_limit"
 
 
+def test_historical_v3_receipt_keeps_legacy_command_and_backend_labels_readable() -> None:
+    receipt, config, reference, control_plane, run_id = _valid_receipt()
+
+    observed = validate_smoke_terminal_receipt(
+        receipt,
+        config=config,
+        reference=reference,
+        control_plane=control_plane,
+        run_id=run_id,
+    )
+
+    assert observed.server.command[-3:] == ("--log-verbosity", "4", "--no-webui")
+    assert {row.backend_name for row in observed.server.backend_audit.identities} == {
+        "B300-0",
+        "B300-1",
+    }
+    assert "tools/server/server.cpp" not in observed.runtime.patched_source_paths
+
+
+def test_historical_v3_receipt_keeps_legacy_accelerator_identity_semantics() -> None:
+    receipt, config, reference, control_plane, run_id = _valid_receipt()
+    backend_audit = receipt["server"]["backend_audit"]
+    backend_audit["identities"][0]["device_type"] = "accel"
+    backend_audit["graphs"][0]["gpu"] = 50
+    backend_audit["graphs"][0]["accel"] = 50
+    backend_audit["gpu_operations"] = 50
+    backend_audit["accelerator_operations"] = 50
+    _reseal(receipt)
+
+    observed = validate_smoke_terminal_receipt(
+        receipt,
+        config=config,
+        reference=reference,
+        control_plane=control_plane,
+        run_id=run_id,
+    )
+
+    assert observed.server.backend_audit.accelerator_operations == 50
+
+
 def test_complete_v4_terminal_receipt_binds_cuda_peer_topology() -> None:
     receipt, config, reference, control_plane, run_id = _valid_v4_receipt()
 
@@ -653,6 +754,7 @@ def test_complete_v4_terminal_receipt_binds_cuda_peer_topology() -> None:
 
     assert observed.schema_version == "inkling-smoke-terminal-v4"
     assert observed.host.topology_schema_version == "inkling-smoke-hardware-topology-v4"
+    assert observed.runtime.instrumentation_schema_version == INSTRUMENTATION_SCHEMA_VERSION
     assert observed.host.nvidia_smi_topo_m_sha256 is None
     assert observed.gpu_topology is not None
     assert tuple(
@@ -955,6 +1057,343 @@ def test_terminal_receipt_rejects_log_verbosity_command_drift(
         )
 
 
+def test_terminal_receipt_rejects_late_log_verbosity_even_at_level_four() -> None:
+    receipt, config, reference, control_plane, run_id = _valid_v4_receipt()
+    command = receipt["server"]["command"]
+    assert isinstance(command, list)
+    assert command[1:3] == ["--log-verbosity", "4"]
+    del command[1:3]
+    command[-1:-1] = ["--log-verbosity", "4"]
+    _reseal(receipt)
+
+    with pytest.raises(ValueError, match="server command differs"):
+        validate_smoke_terminal_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+        )
+
+
+def test_terminal_receipt_rejects_compute_on_only_one_cuda_device() -> None:
+    receipt, config, reference, control_plane, run_id = _valid_v4_receipt()
+    backend_audit = receipt["server"]["backend_audit"]
+    backend_audit["identities"] = [backend_audit["identities"][0]]
+    backend_audit["identities"][0]["compute"] = 100
+    _reseal(receipt)
+
+    with pytest.raises(ValueError, match="schema is invalid"):
+        validate_smoke_terminal_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+        )
+
+
+def test_v4_terminal_receipt_accepts_cuda0_auxiliary_graph() -> None:
+    receipt, config, reference, control_plane, run_id = _valid_v4_receipt()
+    backend_audit = receipt["server"]["backend_audit"]
+    backend_audit["graphs"].append(
+        {
+            "graph_uid": 2,
+            "phase": "post_assignment_pre_split",
+            "scope": "non_view_compute",
+            "compute": 25,
+            "gpu": 25,
+            "cpu": 0,
+            "accel": 0,
+            "other": 0,
+            "unassigned": 0,
+        }
+    )
+    backend_audit["identities"].append(
+        {
+            "graph_uid": 2,
+            "backend_index": 0,
+            "backend_name": "CUDA0",
+            "device_name": "CUDA0",
+            "device_type": "gpu",
+            "compute": 25,
+        }
+    )
+    backend_audit["observed_graphs"] = 2
+    backend_audit["compute_operations"] = 125
+    backend_audit["gpu_operations"] = 125
+    _reseal(receipt)
+
+    observed = validate_smoke_terminal_receipt(
+        receipt,
+        config=config,
+        reference=reference,
+        control_plane=control_plane,
+        run_id=run_id,
+    )
+
+    assert observed.server.backend_audit.observed_graphs == 2
+    assert len(observed.server.backend_audit.identities) == 3
+
+
+def _add_v4_auxiliary_backend_graph(
+    receipt: dict[str, Any],
+    identity_rows: tuple[dict[str, Any], ...],
+) -> None:
+    backend_audit = receipt["server"]["backend_audit"]
+    backend_audit["graphs"].append(
+        {
+            "graph_uid": 2,
+            "phase": "post_assignment_pre_split",
+            "scope": "non_view_compute",
+            "compute": 8,
+            "gpu": 8,
+            "cpu": 0,
+            "accel": 0,
+            "other": 0,
+            "unassigned": 0,
+        }
+    )
+    backend_audit["identities"].extend(copy.deepcopy(identity_rows))
+    backend_audit["observed_graphs"] = 2
+    backend_audit["compute_operations"] = 108
+    backend_audit["gpu_operations"] = 108
+
+
+@pytest.mark.parametrize(
+    ("identity_rows", "cause_match"),
+    (
+        pytest.param(
+            (
+                {
+                    "graph_uid": 2,
+                    "backend_index": 0,
+                    "backend_name": "CUDA0",
+                    "device_name": "CUDA0",
+                    "device_type": "gpu",
+                    "compute": 7,
+                },
+                {
+                    "graph_uid": 2,
+                    "backend_index": 2,
+                    "backend_name": "CUDA2",
+                    "device_name": "CUDA2",
+                    "device_type": "gpu",
+                    "compute": 1,
+                },
+            ),
+            "exact CUDA index and device identities",
+            id="third-positive-identity",
+        ),
+        pytest.param(
+            (
+                {
+                    "graph_uid": 2,
+                    "backend_index": 0,
+                    "backend_name": "CUDA0",
+                    "device_name": "CUDA0",
+                    "device_type": "gpu",
+                    "compute": 4,
+                },
+                {
+                    "graph_uid": 2,
+                    "backend_index": 0,
+                    "backend_name": "CUDA0",
+                    "device_name": "CUDA0",
+                    "device_type": "gpu",
+                    "compute": 4,
+                },
+            ),
+            "backend device identities are duplicated",
+            id="exact-duplicate-graph-backend-index",
+        ),
+        pytest.param(
+            (
+                {
+                    "graph_uid": 2,
+                    "backend_index": 0,
+                    "backend_name": "CUDA0-drift",
+                    "device_name": "CUDA0",
+                    "device_type": "gpu",
+                    "compute": 8,
+                },
+            ),
+            "exact CUDA index and device identities",
+            id="backend-name-only-drift",
+        ),
+        pytest.param(
+            (
+                {
+                    "graph_uid": 2,
+                    "backend_index": 0,
+                    "backend_name": "CUDA0",
+                    "device_name": "CUDA0",
+                    "device_type": "gpu",
+                    "compute": 0,
+                },
+            ),
+            "greater than 0",
+            id="zero-compute",
+        ),
+        *(
+            pytest.param(
+                (
+                    {
+                        "graph_uid": 2,
+                        "backend_index": 0,
+                        "backend_name": "CUDA0",
+                        "device_name": "CUDA0",
+                        "device_type": device_type,
+                        "compute": 8,
+                    },
+                ),
+                (
+                    "current backend audit used a non-CUDA accelerator"
+                    if device_type == "igpu"
+                    else "backend identity categories differ from graph evidence"
+                ),
+                id=f"device-type-{device_type}",
+            )
+            for device_type in ("igpu", "accel", "meta", "unassigned", "cpu")
+        ),
+    ),
+)
+def test_v4_terminal_receipt_rejects_invalid_cuda_auxiliary_identity(
+    identity_rows: tuple[dict[str, Any], ...],
+    cause_match: str,
+) -> None:
+    receipt, config, reference, control_plane, run_id = _valid_v4_receipt()
+    _add_v4_auxiliary_backend_graph(receipt, identity_rows)
+    _reseal(receipt)
+
+    with pytest.raises(ValueError, match="receipt schema is invalid") as error:
+        validate_smoke_terminal_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+        )
+
+    assert cause_match in str(error.value.__cause__)
+
+
+def test_v4_terminal_receipt_rejects_cuda1_only_auxiliary_graph() -> None:
+    receipt, config, reference, control_plane, run_id = _valid_v4_receipt()
+    backend_audit = receipt["server"]["backend_audit"]
+    backend_audit["graphs"].append(
+        {
+            "graph_uid": 2,
+            "phase": "post_assignment_pre_split",
+            "scope": "non_view_compute",
+            "compute": 25,
+            "gpu": 25,
+            "cpu": 0,
+            "accel": 0,
+            "other": 0,
+            "unassigned": 0,
+        }
+    )
+    backend_audit["identities"].append(
+        {
+            "graph_uid": 2,
+            "backend_index": 1,
+            "backend_name": "CUDA1",
+            "device_name": "CUDA1",
+            "device_type": "gpu",
+            "compute": 25,
+        }
+    )
+    backend_audit["observed_graphs"] = 2
+    backend_audit["compute_operations"] = 125
+    backend_audit["gpu_operations"] = 125
+    _reseal(receipt)
+
+    with pytest.raises(ValueError, match="receipt schema is invalid") as error:
+        validate_smoke_terminal_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+        )
+
+    assert "exact CUDA index and device identities" in str(error.value.__cause__)
+
+
+@pytest.mark.parametrize("mode", ("swapped", "duplicated"))
+def test_v4_terminal_receipt_rejects_invalid_cuda_identity_pairs(mode: str) -> None:
+    receipt, config, reference, control_plane, run_id = _valid_v4_receipt()
+    identities = receipt["server"]["backend_audit"]["identities"]
+    if mode == "swapped":
+        identities[0]["device_name"] = "CUDA1"
+        identities[1]["device_name"] = "CUDA0"
+    else:
+        identities[1]["backend_name"] = "CUDA0"
+        identities[1]["device_name"] = "CUDA0"
+    _reseal(receipt)
+
+    with pytest.raises(ValueError, match="receipt schema is invalid") as error:
+        validate_smoke_terminal_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+        )
+
+    assert "exact CUDA index and device identities" in str(error.value.__cause__)
+
+
+def test_v4_terminal_receipt_rejects_backend_index_identity_drift() -> None:
+    receipt, config, reference, control_plane, run_id = _valid_v4_receipt()
+    backend_audit = receipt["server"]["backend_audit"]
+    second_graph = copy.deepcopy(backend_audit["graphs"][0])
+    second_graph["graph_uid"] = 2
+    backend_audit["graphs"].append(second_graph)
+    for identity in copy.deepcopy(backend_audit["identities"]):
+        identity["graph_uid"] = 2
+        identity["backend_index"] = 1 - identity["backend_index"]
+        backend_audit["identities"].append(identity)
+    backend_audit["observed_graphs"] = 2
+    backend_audit["compute_operations"] = 200
+    backend_audit["gpu_operations"] = 200
+    _reseal(receipt)
+
+    with pytest.raises(ValueError, match="receipt schema is invalid") as error:
+        validate_smoke_terminal_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+        )
+
+    assert "exact CUDA index and device identities" in str(error.value.__cause__)
+
+
+def test_v4_terminal_receipt_rejects_historical_source_patch_inventory() -> None:
+    receipt, config, reference, control_plane, run_id = _valid_v4_receipt()
+    receipt["runtime"]["patched_source_paths"].remove("tools/server/server.cpp")
+    receipt["runtime"]["base_source_blob_ids"] = [
+        row
+        for row in receipt["runtime"]["base_source_blob_ids"]
+        if row["path"] != "tools/server/server.cpp"
+    ]
+    _reseal(receipt)
+
+    with pytest.raises(ValueError, match="receipt schema is invalid") as error:
+        validate_smoke_terminal_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+        )
+
+    assert "base-source blob identities differ from their patch" in str(error.value.__cause__)
+
+
 def test_terminal_receipt_accepts_explicitly_unavailable_optional_pci_evidence() -> None:
     receipt, config, reference, control_plane, run_id = _valid_receipt()
     receipt["hardware"][0].update(
@@ -1162,7 +1601,7 @@ def test_terminal_receipt_rejects_non_exact_or_unlimited_hard_limits(
             "IQL_SMOKE_BACKEND_AUDIT", "0"
         ),
         lambda value: value["probes"][1].__setitem__("fixture_size_bytes", 87),
-        lambda value: value["server"]["command"].__setitem__(2, "/wrong/model.gguf"),
+        lambda value: value["server"]["command"].__setitem__(4, "/wrong/model.gguf"),
         lambda value: value.__setitem__("prompt_text_recorded", True),
     ],
     ids=(

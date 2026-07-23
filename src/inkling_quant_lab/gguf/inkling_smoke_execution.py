@@ -37,6 +37,8 @@ from inkling_quant_lab.gguf.inkling_smoke import (
     EXPECTED_PROJECTOR_BYTES,
     EXPECTED_Q3_SHARD_COUNT,
     EXPECTED_Q3_TOTAL_BYTES,
+    HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
+    INSTRUMENTATION_PATCH_SHA256,
     PINNED_LLAMA_CPP_COMMIT,
     PINNED_MODEL_REVISION,
     InklingSmokeConfig,
@@ -105,7 +107,7 @@ def validate_smoke_attempt_registry_created_at_utc(value: str) -> str:
     return value
 
 
-_SMOKE_PATCHED_SOURCE_BLOB_IDS = (
+_SMOKE_HISTORICAL_PATCHED_SOURCE_BLOB_IDS = (
     (
         "ggml/src/ggml-backend.cpp",
         "87615921c09be5ef8c4996faa70fb3f49c385031",
@@ -130,6 +132,16 @@ _SMOKE_PATCHED_SOURCE_BLOB_IDS = (
         "tools/server/server-context.cpp",
         "7564ad4e9cfb8e77d610e90c7530121214a4c483",
     ),
+)
+_SMOKE_PATCHED_SOURCE_BLOB_IDS = (
+    *_SMOKE_HISTORICAL_PATCHED_SOURCE_BLOB_IDS,
+    (
+        "tools/server/server.cpp",
+        "20effbb14851b201118843bf14fa5bc51de1e304",
+    ),
+)
+_SMOKE_HISTORICAL_PATCHED_SOURCE_PATHS = tuple(
+    sorted(path for path, _git_blob_id in _SMOKE_HISTORICAL_PATCHED_SOURCE_BLOB_IDS)
 )
 _SMOKE_PATCHED_SOURCE_PATHS = tuple(
     sorted(path for path, _git_blob_id in _SMOKE_PATCHED_SOURCE_BLOB_IDS)
@@ -695,7 +707,7 @@ class SmokeInvocationEvidence(_SmokeReceiptModel):
 
 
 class _SmokeFailureReceipt(_SmokeReceiptModel):
-    """Fields shared by historical v2 and current v3 failure receipts."""
+    """Fields shared by terminal failure receipts."""
 
     status: Literal["failed"]
     stage: Literal["smoke_test"]
@@ -738,7 +750,7 @@ class SmokeFailureReceiptV2(_SmokeFailureReceipt):
 
 
 class SmokeFailureReceiptV3(_SmokeFailureReceipt):
-    """Current immutable failure evidence using the v3 hash domain."""
+    """Historical immutable failure evidence using the v3 hash domain."""
 
     schema_version: Literal["inkling-smoke-terminal-v3"]
     invocation: SmokeInvocationEvidence
@@ -767,7 +779,7 @@ class SmokeFailureReceiptV3(_SmokeFailureReceipt):
 
 
 class SmokeFailureReceiptV4(_SmokeFailureReceipt):
-    """Current failure evidence with safe subprocess diagnostics."""
+    """Version 4 failure evidence with safe subprocess diagnostics."""
 
     schema_version: Literal["inkling-smoke-terminal-v4"]
     invocation: SmokeInvocationEvidence
@@ -1036,13 +1048,22 @@ class SmokeRuntimeEvidence(_SmokeReceiptModel):
         expected_paths = tuple(f"/opt/llama.cpp/build/bin/{name}" for name in expected_names)
         if tuple(binary.path for binary in self.binaries) != expected_paths:
             raise ValueError("runtime binary paths differ from the pinned build")
-        if self.patched_source_paths != _SMOKE_PATCHED_SOURCE_PATHS:
-            raise ValueError("runtime patched-source inventory differs from its contract")
         observed_blobs = tuple(
             (identity.path, identity.git_blob_id) for identity in self.base_source_blob_ids
         )
-        if observed_blobs != _SMOKE_PATCHED_SOURCE_BLOB_IDS:
-            raise ValueError("runtime base-source blob identities differ from their pins")
+        expected_blobs: tuple[tuple[str, str], ...]
+        if self.instrumentation_patch_sha256 == HISTORICAL_INSTRUMENTATION_PATCH_SHA256:
+            expected_blobs = _SMOKE_HISTORICAL_PATCHED_SOURCE_BLOB_IDS
+            expected_paths = _SMOKE_HISTORICAL_PATCHED_SOURCE_PATHS
+        elif self.instrumentation_patch_sha256 == INSTRUMENTATION_PATCH_SHA256:
+            expected_blobs = _SMOKE_PATCHED_SOURCE_BLOB_IDS
+            expected_paths = _SMOKE_PATCHED_SOURCE_PATHS
+        else:
+            raise ValueError("runtime instrumentation patch SHA-256 is unsupported")
+        if observed_blobs != expected_blobs:
+            raise ValueError("runtime base-source blob identities differ from their patch")
+        if self.patched_source_paths != expected_paths:
+            raise ValueError("runtime patched-source inventory differs from its patch")
         expected_package_manifest = smoke_package_manifest_sha256(
             python_implementation=self.python_implementation,
             python_version=self.python_version,
@@ -1980,11 +2001,32 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
         if len({gpu.cuda_driver_api_version for gpu in self.hardware}) != 1:
             raise ValueError("receipt GPUs must use one CUDA driver API version")
         if self.schema_version == "inkling-smoke-terminal-v3":
+            historical_source_blobs = tuple(
+                (identity.path, identity.git_blob_id)
+                for identity in self.runtime.base_source_blob_ids
+            )
+            if (
+                self.runtime.instrumentation_patch_sha256 != HISTORICAL_INSTRUMENTATION_PATCH_SHA256
+                or self.runtime.patched_source_paths != _SMOKE_HISTORICAL_PATCHED_SOURCE_PATHS
+                or historical_source_blobs != _SMOKE_HISTORICAL_PATCHED_SOURCE_BLOB_IDS
+            ):
+                raise ValueError("historical success receipt uses the current source patch")
             if self.gpu_topology is not None or "gpu_topology" in self.model_fields_set:
                 raise ValueError("historical success receipt contains current topology evidence")
             if self.host.topology_schema_version != "inkling-smoke-hardware-topology-v3":
                 raise ValueError("historical success receipt uses the wrong topology schema")
         else:
+            _require_current_cuda_backend_identities(self.server.backend_audit.identities)
+            current_source_blobs = tuple(
+                (identity.path, identity.git_blob_id)
+                for identity in self.runtime.base_source_blob_ids
+            )
+            if (
+                self.runtime.instrumentation_patch_sha256 != INSTRUMENTATION_PATCH_SHA256
+                or self.runtime.patched_source_paths != _SMOKE_PATCHED_SOURCE_PATHS
+                or current_source_blobs != _SMOKE_PATCHED_SOURCE_BLOB_IDS
+            ):
+                raise ValueError("current success receipt uses the historical source patch")
             if self.gpu_topology is None:
                 raise ValueError("current success receipt lacks CUDA peer topology evidence")
             if self.host.topology_schema_version != "inkling-smoke-hardware-topology-v4":
@@ -2268,14 +2310,42 @@ def strict_json_object(payload: str | bytes) -> dict[str, Any]:
     return value
 
 
+def _require_current_cuda_backend_identities(
+    identities: tuple[SmokeBackendIdentityEvidence, ...],
+) -> None:
+    if any(identity.device_type != "gpu" for identity in identities):
+        raise ValueError("current backend audit used a non-CUDA accelerator")
+    cuda0_identity = (0, "CUDA0", "CUDA0")
+    expected = {cuda0_identity, (1, "CUDA1", "CUDA1")}
+    observed_dual_cuda_graph = False
+    for graph_uid in {row.graph_uid for row in identities}:
+        graph_rows = tuple(row for row in identities if row.graph_uid == graph_uid)
+        observed = {(row.backend_index, row.backend_name, row.device_name) for row in graph_rows}
+        if (
+            len(graph_rows) != len(observed)
+            or not observed.issubset(expected)
+            or cuda0_identity not in observed
+        ):
+            raise ValueError(
+                "current backend graph lacks the exact CUDA index and device identities"
+            )
+        observed_dual_cuda_graph |= observed == expected
+    if not observed_dual_cuda_graph:
+        raise ValueError("current backend audit lacks one exact dual-CUDA graph")
+
+
 def _expected_server_command(
     config: InklingSmokeConfig,
     reference: InklingVerifiedExportReference,
+    *,
+    schema_version: Literal[
+        "inkling-smoke-terminal-v3",
+        "inkling-smoke-terminal-v4",
+    ],
 ) -> tuple[str, ...]:
     first_shard = f"/subject/{reference.q3_shards[0].path}"
     projector = f"/subject/{reference.projector.path}"
-    return (
-        "/opt/llama.cpp/build/bin/llama-server",
+    common_arguments = (
         "--model",
         first_shard,
         "--mmproj",
@@ -2308,8 +2378,15 @@ def _expected_server_command(
         "512",
         "--ubatch-size",
         "512",
-        "--log-verbosity",
-        str(config.runtime.log_verbosity),
+    )
+    verbosity_arguments = ("--log-verbosity", str(config.runtime.log_verbosity))
+    return (
+        "/opt/llama.cpp/build/bin/llama-server",
+        *(
+            (*verbosity_arguments, *common_arguments)
+            if schema_version == "inkling-smoke-terminal-v4"
+            else (*common_arguments, *verbosity_arguments)
+        ),
         "--no-webui",
     )
 
@@ -2342,6 +2419,39 @@ def _validate_smoke_failure_outcome_path(
         filename,
     ):
         raise ValueError("smoke failure outcome path differs from the exact run location")
+
+
+def _validate_smoke_failure_launch_schema(
+    *,
+    schema_version: str,
+    config: InklingSmokeConfig,
+    control_plane: SmokeControlPlaneProvenance,
+    run_id: str,
+) -> None:
+    expected_run_id = smoke_run_id(config, control_plane.tree_sha256)
+    if run_id != expected_run_id:
+        raise ValueError("terminal smoke failure run ID is not derived from its launch inputs")
+
+    patch_entries = tuple(
+        item
+        for item in control_plane.files
+        if item.path == config.runtime.instrumentation_patch_path
+    )
+    if len(patch_entries) != 1:
+        raise ValueError("smoke failure control plane lacks one instrumentation patch")
+    patch_sha256 = patch_entries[0].sha256
+    if patch_sha256 != config.runtime.instrumentation_patch_sha256:
+        raise ValueError("smoke failure control-plane patch differs from the smoke config")
+
+    if (
+        schema_version
+        in {
+            "inkling-smoke-terminal-v2",
+            "inkling-smoke-terminal-v3",
+        }
+        and patch_sha256 != HISTORICAL_INSTRUMENTATION_PATCH_SHA256
+    ):
+        raise ValueError("current smoke launch requires terminal version 4 failure evidence")
 
 
 def validate_smoke_failure_receipt(
@@ -2392,6 +2502,12 @@ def validate_smoke_failure_receipt(
 
     if config.verified_export_reference_sha256 != reference.reference_sha256:
         raise ValueError("smoke failure validation inputs use different export references")
+    _validate_smoke_failure_launch_schema(
+        schema_version=receipt.schema_version,
+        config=config,
+        control_plane=control_plane,
+        run_id=run_id,
+    )
     observed_bindings = (
         receipt.stage,
         receipt.run_id,
@@ -2532,7 +2648,11 @@ def validate_smoke_terminal_receipt(
     if receipt.runtime.instrumentation_patch_sha256 != patch_entries[0].sha256:
         raise ValueError("terminal smoke instrumentation patch differs from its control plane")
 
-    if receipt.server.command != _expected_server_command(config, reference):
+    if receipt.server.command != _expected_server_command(
+        config,
+        reference,
+        schema_version=receipt.schema_version,
+    ):
         raise ValueError("terminal smoke server command differs from the exact config")
     if receipt.server.loader_offload.cuda_device_count != config.resources.gpu_count:
         raise ValueError("terminal smoke loader observed the wrong CUDA device count")

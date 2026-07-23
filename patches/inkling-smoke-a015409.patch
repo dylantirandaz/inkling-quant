@@ -368,3 +368,12 @@ index 7564ad4..1cb4051 100644
              std::vector<llama_token_data> cur = get_token_probabilities(ctx_tgt, idx, n_probs_request);
              const size_t max_probs = cur.size();
              const size_t n_probs = std::min(max_probs, n_probs_request);
+diff --git a/tools/server/server.cpp b/tools/server/server.cpp
+index 20effbb..9be8c02 100644
+--- a/tools/server/server.cpp
++++ b/tools/server/server.cpp
+@@ -88,2 +88,4 @@
+ int llama_server(int argc, char ** argv) {
++    common_log_set_verbosity_thold(LOG_LEVEL_TRACE);
++
+     std::setlocale(LC_NUMERIC, "C");

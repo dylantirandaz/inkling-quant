@@ -755,6 +755,7 @@ def test_smoke_runner_build_and_mount_contract_is_closed() -> None:
     assert "SERVER_REQUIRED_FLAGS" in source
     assert "SOURCE_BLOB_PINS" in source
     assert "SOURCE_CONTRACT_ASSERTIONS" in source
+    assert "PATCHED_SOURCE_BLOB_PINS" in source
     assert LLAMA_SERVER_AUDIT_LOG_VERBOSITY == 4
     assert '("common/log.h", "#define LOG_LEVEL_TRACE  4")' in source
     assert '("common/log.cpp", "case GGML_LOG_LEVEL_INFO:  return LOG_LEVEL_TRACE;")' in source
@@ -768,6 +769,7 @@ def test_smoke_runner_build_and_mount_contract_is_closed() -> None:
     assert "build/tools/ui/dist.tar.gz" in source
     assert ".add_local_file(PATCH_PATH, str(REMOTE_PATCH), copy=True)" in source
     assert "git -C {LLAMA_CPP_DIR} apply --check {REMOTE_PATCH}" in source
+    assert "9be8c02497080fa57ad9460084c2337a1997f89b" in source
     assert ".iql-smoke-patch.sha256" in source
     assert ".iql-patched-diff.sha256" in source
     assert ".iql-llama-server-help.txt" in source
@@ -785,13 +787,32 @@ def test_smoke_runner_build_and_mount_contract_is_closed() -> None:
 
 
 def test_smoke_runner_binds_trace_verbosity_for_required_info_evidence() -> None:
+    module = _module(RUNNER_PATH)
     source = RUNNER_PATH.read_text(encoding="utf-8")
     command_start = source.index("def _server_command(")
     command_end = source.index("\n\ndef _terminate_process(", command_start)
     command_source = source[command_start:command_end]
+    command_function = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_server_command"
+    )
+    command_return = next(node for node in command_function.body if isinstance(node, ast.Return))
+    assert isinstance(command_return.value, ast.List)
+    command_elements = command_return.value.elts
 
     assert '"--log-verbosity"' in command_source
     assert "str(DEFAULT_CONFIG.runtime.log_verbosity)" in command_source
+    assert ast.literal_eval(command_elements[1]) == "--log-verbosity"
+    assert ast.unparse(command_elements[2]) == "str(DEFAULT_CONFIG.runtime.log_verbosity)"
+    patch = (PROJECT_ROOT / "patches/inkling-smoke-a015409.patch").read_text(encoding="utf-8")
+    assert "diff --git a/tools/server/server.cpp b/tools/server/server.cpp" in patch
+    assert (
+        " int llama_server(int argc, char ** argv) {\n"
+        "+    common_log_set_verbosity_thold(LOG_LEVEL_TRACE);\n"
+        "+\n"
+        '     std::setlocale(LC_NUMERIC, "C");'
+    ) in patch
     assert '"3"' not in command_source
     assert "_rename_noreplace(temporary, path)" in source
     assert "os.lstat(destination)" in source
@@ -833,6 +854,31 @@ def test_smoke_runner_binds_trace_verbosity_for_required_info_evidence() -> None
     assert 'Path("/sys/fs/cgroup/cpu.max")' not in source
     assert 'Path("/sys/fs/cgroup/memory.max")' not in source
     assert 'Path("/sys/fs/cgroup/memory/memory.limit_in_bytes")' not in source
+
+
+def test_server_environment_drops_llama_argument_overrides() -> None:
+    namespace = _isolated_runner_functions("_server_environment")
+    namespace["os"] = SimpleNamespace(
+        environ={
+            "PATH": "/usr/bin",
+            "LLAMA_ARG_N_GPU_LAYERS": "0",
+            "LLAMA_ARG_LOG_VERBOSITY": "0",
+        }
+    )
+    namespace["SERVER_AUDIT_ENVIRONMENT"] = {
+        "IQL_SMOKE_BACKEND_AUDIT": "1",
+        "IQL_SMOKE_RAW_LOGIT_AUDIT": "1",
+    }
+    server_environment = namespace["_server_environment"]
+    assert callable(server_environment)
+
+    observed = server_environment()
+
+    assert observed == {
+        "PATH": "/usr/bin",
+        "IQL_SMOKE_BACKEND_AUDIT": "1",
+        "IQL_SMOKE_RAW_LOGIT_AUDIT": "1",
+    }
 
 
 def test_atomic_bytes_types_post_rename_readback_error_as_unknown(
