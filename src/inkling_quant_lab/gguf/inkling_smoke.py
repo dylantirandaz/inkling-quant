@@ -39,13 +39,19 @@ PINNED_MODEL_REVISION: Final = "86b4d430ab871652a707666b89203a866888c5e5"
 PINNED_ARCHITECTURE: Final = "InklingForConditionalGeneration"
 PINNED_LLAMA_CPP_REPOSITORY: Final = "https://github.com/danielhanchen/llama.cpp.git"
 PINNED_LLAMA_CPP_COMMIT: Final = "a015409e6c27b84f60d688823d4c0126a11571fd"
-INSTRUMENTATION_SCHEMA_VERSION: Final = "inkling-llama-smoke-instrumentation-v1"
+PINNED_VOCAB_SIZE: Final = 201_024
+PINNED_UNPADDED_VOCAB_SIZE: Final = 200_058
+PINNED_PADDED_VOCAB_SIZE: Final = PINNED_VOCAB_SIZE - PINNED_UNPADDED_VOCAB_SIZE
+INSTRUMENTATION_SCHEMA_VERSION: Final = "inkling-llama-smoke-instrumentation-v2"
 INSTRUMENTATION_PATCH_RELATIVE_PATH: Final = "patches/inkling-smoke-a015409.patch"
 HISTORICAL_INSTRUMENTATION_PATCH_SHA256: Final = (
     "b276d12a4af96c803b71fee6f7be91c230b0fb30b6be04637f61f33d07b10ecf"
 )
-INSTRUMENTATION_PATCH_SHA256: Final = (
+LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256: Final = (
     "301023aea3a19533710e122fbbd55378bf19c2562bd885fa85b58f9d4ea110cb"
+)
+INSTRUMENTATION_PATCH_SHA256: Final = (
+    "0f824d7a77b0e98816e6d62f982b010caada15f8a93a20343d5cc0d129bcca20"
 )
 
 SUBJECT_RUN_ID: Final = "inkling-q3km-86b4d430-a015409e-ffd466dd93-8083cf41e1"
@@ -114,11 +120,21 @@ _NO_GPU_WARNING: Final = "warning: no usable GPU found, --gpu-layers option will
 _CUDA_DEVICE_COUNT_RE: Final = re.compile(r"ggml_cuda_init: found ([0-9]+) CUDA devices\b")
 _OFFLOAD_RE: Final = re.compile(r"load_tensors: offloaded ([0-9]+)/([0-9]+) layers to GPU")
 _OUTPUT_OFFLOAD_TEXT: Final = "load_tensors: offloading output layer to GPU"
-_RAW_LOGIT_AUDIT_MARKER: Final = "IQL_SMOKE_RAW_LOGITS_V1"
+_HISTORICAL_RAW_LOGIT_AUDIT_MARKER: Final = "IQL_SMOKE_RAW_LOGITS_V1"
+_HISTORICAL_RAW_LOGIT_AUDIT_RE: Final = re.compile(
+    rf"{_HISTORICAL_RAW_LOGIT_AUDIT_MARKER} task_id=(-?[0-9]+) slot_id=(-?[0-9]+) "
+    r"completion_index=(-?[0-9]+) batch_index=(-?[0-9]+) count=([0-9]+) "
+    r"finite=([0-9]+) nan=([0-9]+) pos_inf=([0-9]+) neg_inf=([0-9]+)"
+)
+_RAW_LOGIT_AUDIT_MARKER: Final = "IQL_SMOKE_RAW_LOGITS_V2"
 _RAW_LOGIT_AUDIT_RE: Final = re.compile(
     rf"{_RAW_LOGIT_AUDIT_MARKER} task_id=(-?[0-9]+) slot_id=(-?[0-9]+) "
     r"completion_index=(-?[0-9]+) batch_index=(-?[0-9]+) count=([0-9]+) "
-    r"finite=([0-9]+) nan=([0-9]+) pos_inf=([0-9]+) neg_inf=([0-9]+)"
+    r"unpadded_count=([0-9]+) padded_count=([0-9]+) "
+    r"unpadded_finite=([0-9]+) unpadded_nan=([0-9]+) "
+    r"unpadded_pos_inf=([0-9]+) unpadded_neg_inf=([0-9]+) "
+    r"padded_finite=([0-9]+) padded_nan=([0-9]+) "
+    r"padded_pos_inf=([0-9]+) padded_neg_inf=([0-9]+)"
 )
 _BACKEND_GRAPH_MARKER: Final = "IQL_SMOKE_BACKEND_GRAPH_V1"
 _BACKEND_GRAPH_RE: Final = re.compile(
@@ -356,11 +372,15 @@ class SmokeRuntimeConfig(StrictFrozenModel):
 
     repository: Literal["https://github.com/danielhanchen/llama.cpp.git"]
     commit: Literal["a015409e6c27b84f60d688823d4c0126a11571fd"]
-    instrumentation_schema_version: Literal["inkling-llama-smoke-instrumentation-v1"]
+    instrumentation_schema_version: Literal[
+        "inkling-llama-smoke-instrumentation-v1",
+        "inkling-llama-smoke-instrumentation-v2",
+    ]
     instrumentation_patch_path: Literal["patches/inkling-smoke-a015409.patch"]
     instrumentation_patch_sha256: Literal[
         "b276d12a4af96c803b71fee6f7be91c230b0fb30b6be04637f61f33d07b10ecf",
         "301023aea3a19533710e122fbbd55378bf19c2562bd885fa85b58f9d4ea110cb",
+        "0f824d7a77b0e98816e6d62f982b010caada15f8a93a20343d5cc0d129bcca20",
     ]
     image: SmokeCudaImageConfig
     build_targets: tuple[str, ...]
@@ -381,6 +401,18 @@ class SmokeRuntimeConfig(StrictFrozenModel):
             raise ValueError("smoke build targets must equal the checked executable set")
         if self.cmake_definitions != _EXPECTED_CMAKE_DEFINITIONS:
             raise ValueError("smoke CMake definitions must target B300 compute capability 10.3")
+        legacy_patch_hashes = {
+            HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
+            LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
+        }
+        if self.instrumentation_patch_sha256 in legacy_patch_hashes:
+            if self.instrumentation_schema_version != "inkling-llama-smoke-instrumentation-v1":
+                raise ValueError("legacy instrumentation patches require schema version 1")
+        elif (
+            self.instrumentation_patch_sha256 != INSTRUMENTATION_PATCH_SHA256
+            or self.instrumentation_schema_version != INSTRUMENTATION_SCHEMA_VERSION
+        ):
+            raise ValueError("current instrumentation patch requires schema version 2")
         return self
 
 
@@ -482,15 +514,32 @@ class SmokeClaimLimits(StrictFrozenModel):
     compatibility_scope: Literal["single_exact_matrix_cell"]
 
 
+class SmokeOutputVocabularyConfig(StrictFrozenModel):
+    """Exact Inkling output vocabulary and padded-logit policy."""
+
+    schema_version: Literal["inkling-output-vocabulary-v1"]
+    vocab_size: Literal[201024]
+    unpadded_vocab_size: Literal[200058]
+    gguf_metadata_key: Literal["inkling.unpadded_vocab_size"]
+    padded_suffix_policy: Literal["negative_infinity"]
+
+    @property
+    def padded_vocab_size(self) -> int:
+        """Return the number of masked output rows."""
+
+        return self.vocab_size - self.unpadded_vocab_size
+
+
 class InklingSmokeConfig(StrictFrozenModel):
     """Checked pure-data plan for the first real Inkling inference smoke test."""
 
-    schema_version: Literal["inkling-smoke-config-v1"]
+    schema_version: Literal["inkling-smoke-config-v1", "inkling-smoke-config-v2"]
     verified_export_reference_path: Literal[
         "configs/experiments/inkling_q3_k_m_verified_export.json"
     ]
     verified_export_reference_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     runtime: SmokeRuntimeConfig
+    output_vocabulary: SmokeOutputVocabularyConfig | None = None
     resources: SmokeResourcesConfig
     storage: SmokeStorageConfig
     probes: tuple[SmokeProbeConfig, ...]
@@ -501,6 +550,18 @@ class InklingSmokeConfig(StrictFrozenModel):
     def exact_contract(self) -> InklingSmokeConfig:
         if self.verified_export_reference_sha256 != EXPECTED_VERIFIED_EXPORT_REFERENCE_SHA256:
             raise ValueError("smoke config does not bind the checked verified-export reference")
+        if self.schema_version == "inkling-smoke-config-v1":
+            if self.output_vocabulary is not None:
+                raise ValueError("smoke config version 1 must not define output vocabulary")
+            if self.runtime.instrumentation_schema_version != (
+                "inkling-llama-smoke-instrumentation-v1"
+            ):
+                raise ValueError("smoke config version 1 requires instrumentation version 1")
+        else:
+            if self.output_vocabulary is None:
+                raise ValueError("smoke config version 2 requires output vocabulary")
+            if self.runtime.instrumentation_schema_version != INSTRUMENTATION_SCHEMA_VERSION:
+                raise ValueError("smoke config version 2 requires instrumentation version 2")
         expected_probe_identity = (
             ("text_greedy_v1", "text"),
             ("image_greedy_v1", "image"),
@@ -518,7 +579,10 @@ class InklingSmokeConfig(StrictFrozenModel):
         return self
 
     def canonical_dict(self) -> dict[str, Any]:
-        return self.model_dump(mode="json")
+        value = self.model_dump(mode="json")
+        if self.schema_version == "inkling-smoke-config-v1":
+            value.pop("output_vocabulary", None)
+        return value
 
     def canonical_json(self) -> str:
         return _canonical_json(self.canonical_dict())
@@ -647,10 +711,18 @@ def parse_server_completion(
     *,
     vocab_size: int,
     expected_n_probs: int,
+    unpadded_vocab_size: int | None = None,
 ) -> ServerCompletionEvidence:
     """Validate a non-streaming llama-server completion and discard all text."""
 
-    if vocab_size <= 0 or expected_n_probs <= 0 or expected_n_probs > vocab_size:
+    active_vocab_size = vocab_size if unpadded_vocab_size is None else unpadded_vocab_size
+    if (
+        vocab_size <= 0
+        or active_vocab_size <= 0
+        or active_vocab_size > vocab_size
+        or expected_n_probs <= 0
+        or expected_n_probs > active_vocab_size
+    ):
         raise ValueError("vocabulary size and n_probs must be positive and consistent")
     if not isinstance(payload.get("content"), str):
         raise ValueError("completion content must be text")
@@ -658,8 +730,8 @@ def parse_server_completion(
     if not isinstance(tokens, Sequence) or isinstance(tokens, str | bytes) or not tokens:
         raise ValueError("completion tokens must be a non-empty list")
     token_ids = tuple(_exact_int(token, label="completion token") for token in tokens)
-    if any(not 0 <= token < vocab_size for token in token_ids):
-        raise ValueError("completion token is outside the vocabulary")
+    if any(not 0 <= token < active_vocab_size for token in token_ids):
+        raise ValueError("completion token is outside the unpadded vocabulary")
     tokens_predicted = _exact_int(
         payload.get("tokens_predicted"), label="completion tokens_predicted"
     )
@@ -675,7 +747,7 @@ def parse_server_completion(
         token_id, logprob, top_ids = _completion_probability_item(
             value,
             label=f"completion_probabilities[{index}]",
-            vocab_size=vocab_size,
+            vocab_size=active_vocab_size,
         )
         if token_id != token_ids[index]:
             raise ValueError("completion probability token ID does not match returned token")
@@ -692,8 +764,8 @@ def parse_server_completion(
     )
 
 
-class RawLogitAuditRow(StrictFrozenModel):
-    """One pre-softmax output vector emitted by the pinned runtime patch."""
+class HistoricalRawLogitAuditRow(StrictFrozenModel):
+    """One full-finiteness vector emitted by instrumentation version 1."""
 
     task_id: int = Field(ge=0)
     slot_id: int = Field(ge=0)
@@ -706,22 +778,104 @@ class RawLogitAuditRow(StrictFrozenModel):
     neg_inf: Literal[0]
 
     @model_validator(mode="after")
-    def complete_and_finite(self) -> RawLogitAuditRow:
+    def complete_and_finite(self) -> HistoricalRawLogitAuditRow:
         if self.finite != self.count:
             raise ValueError("raw logit vector contains a non-finite value")
         return self
 
 
-class RawLogitAuditEvidence(StrictFrozenModel):
-    """Proof that every generated-token vector was scanned before softmax."""
+class HistoricalRawLogitAuditEvidence(StrictFrozenModel):
+    """Historical proof that every value in each output vector was finite."""
 
     schema_version: Literal["inkling-raw-logit-audit-v1"] = "inkling-raw-logit-audit-v1"
     expected_generated_token_vectors: int = Field(gt=0)
     observed_generated_token_vectors: int = Field(gt=0)
     vocab_size: int = Field(gt=0)
-    rows: tuple[RawLogitAuditRow, ...]
+    rows: tuple[HistoricalRawLogitAuditRow, ...]
     all_rows_complete: Literal[True] = True
     all_values_finite: Literal[True] = True
+
+    @model_validator(mode="after")
+    def exact_vector_set(self) -> HistoricalRawLogitAuditEvidence:
+        if not (
+            self.expected_generated_token_vectors
+            == self.observed_generated_token_vectors
+            == len(self.rows)
+        ):
+            raise ValueError("raw logit vector count differs from generated-token evidence")
+        if any(row.count != self.vocab_size for row in self.rows):
+            raise ValueError("raw logit vector does not cover the full vocabulary")
+        identities = tuple(
+            (row.task_id, row.slot_id, row.completion_index, row.batch_index) for row in self.rows
+        )
+        if len(identities) != len(set(identities)):
+            raise ValueError("raw logit audit contains duplicate vector identities")
+        return self
+
+
+class RawLogitAuditRow(StrictFrozenModel):
+    """One output vector split at Inkling's unpadded vocabulary boundary."""
+
+    task_id: int = Field(ge=0)
+    slot_id: int = Field(ge=0)
+    completion_index: int = Field(gt=0)
+    batch_index: int = Field(ge=0)
+    count: int = Field(gt=0)
+    unpadded_count: int = Field(gt=0)
+    padded_count: int = Field(gt=0)
+    unpadded_finite: int = Field(ge=0)
+    unpadded_nan: int = Field(ge=0)
+    unpadded_pos_inf: int = Field(ge=0)
+    unpadded_neg_inf: int = Field(ge=0)
+    padded_finite: int = Field(ge=0)
+    padded_nan: int = Field(ge=0)
+    padded_pos_inf: int = Field(ge=0)
+    padded_neg_inf: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def exact_regions(self) -> RawLogitAuditRow:
+        if self.count != self.unpadded_count + self.padded_count:
+            raise ValueError("raw logit region cardinality differs from the full vocabulary")
+        if (
+            self.unpadded_finite + self.unpadded_nan + self.unpadded_pos_inf + self.unpadded_neg_inf
+            != self.unpadded_count
+        ):
+            raise ValueError("unpadded raw-logit counters have invalid cardinality")
+        if (
+            self.padded_finite + self.padded_nan + self.padded_pos_inf + self.padded_neg_inf
+            != self.padded_count
+        ):
+            raise ValueError("padded raw-logit counters have invalid cardinality")
+        if (
+            self.unpadded_finite != self.unpadded_count
+            or self.unpadded_nan != 0
+            or self.unpadded_pos_inf != 0
+            or self.unpadded_neg_inf != 0
+        ):
+            raise ValueError("unpadded raw-logit vector contains a non-finite value")
+        if (
+            self.padded_finite != 0
+            or self.padded_nan != 0
+            or self.padded_pos_inf != 0
+            or self.padded_neg_inf != self.padded_count
+        ):
+            raise ValueError("padded raw-logit vector is not exact negative infinity")
+        return self
+
+
+class RawLogitAuditEvidence(StrictFrozenModel):
+    """Proof of finite active logits and the exact padded suffix mask."""
+
+    schema_version: Literal["inkling-raw-logit-audit-v2"] = "inkling-raw-logit-audit-v2"
+    expected_generated_token_vectors: int = Field(gt=0)
+    observed_generated_token_vectors: int = Field(gt=0)
+    vocab_size: int = Field(gt=0)
+    unpadded_vocab_size: int = Field(gt=0)
+    padded_vocab_size: int = Field(gt=0)
+    rows: tuple[RawLogitAuditRow, ...]
+    all_rows_complete: Literal[True] = True
+    all_unpadded_values_finite: Literal[True] = True
+    all_padded_values_negative_infinity: Literal[True] = True
 
     @model_validator(mode="after")
     def exact_vector_set(self) -> RawLogitAuditEvidence:
@@ -731,8 +885,15 @@ class RawLogitAuditEvidence(StrictFrozenModel):
             == len(self.rows)
         ):
             raise ValueError("raw logit vector count differs from generated-token evidence")
-        if any(row.count != self.vocab_size for row in self.rows):
-            raise ValueError("raw logit vector does not cover the full vocabulary")
+        if self.unpadded_vocab_size + self.padded_vocab_size != self.vocab_size:
+            raise ValueError("raw logit vocabulary partition has invalid cardinality")
+        for row in self.rows:
+            if row.count != self.vocab_size:
+                raise ValueError("raw logit vector does not cover the full vocabulary")
+            if row.unpadded_count != self.unpadded_vocab_size:
+                raise ValueError("raw logit unpadded vocabulary boundary differs from the contract")
+            if row.padded_count != self.padded_vocab_size:
+                raise ValueError("raw logit padded vocabulary size differs from the contract")
         identities = tuple(
             (row.task_id, row.slot_id, row.completion_index, row.batch_index) for row in self.rows
         )
@@ -958,16 +1119,60 @@ def parse_raw_logit_audit_evidence(
     *,
     expected_generated_token_vectors: int,
     vocab_size: int,
-) -> RawLogitAuditEvidence:
-    """Parse all pre-softmax audit markers and require exact complete coverage."""
+    unpadded_vocab_size: int | None = None,
+) -> HistoricalRawLogitAuditEvidence | RawLogitAuditEvidence:
+    """Parse one versioned pre-softmax audit and require exact coverage."""
 
     if expected_generated_token_vectors <= 0 or vocab_size <= 0:
         raise ValueError("raw logit expectations must be positive")
+    if unpadded_vocab_size is None:
+        if _RAW_LOGIT_AUDIT_MARKER in log_text:
+            raise ValueError("raw logit version 2 requires an unpadded vocabulary boundary")
+        matches = tuple(_HISTORICAL_RAW_LOGIT_AUDIT_RE.findall(log_text))
+        if log_text.count(_HISTORICAL_RAW_LOGIT_AUDIT_MARKER) != len(matches):
+            raise ValueError("raw logit audit contains a malformed marker")
+        if any(any(int(value) != 0 for value in match[6:9]) for match in matches):
+            raise ValueError("raw logit vector contains a non-finite value")
+        historical_rows = tuple(
+            HistoricalRawLogitAuditRow(
+                task_id=int(task_id),
+                slot_id=int(slot_id),
+                completion_index=int(completion_index),
+                batch_index=int(batch_index),
+                count=int(count),
+                finite=int(finite),
+                nan=int(nan),
+                pos_inf=int(pos_inf),
+                neg_inf=int(neg_inf),
+            )
+            for (
+                task_id,
+                slot_id,
+                completion_index,
+                batch_index,
+                count,
+                finite,
+                nan,
+                pos_inf,
+                neg_inf,
+            ) in matches
+        )
+        return HistoricalRawLogitAuditEvidence(
+            expected_generated_token_vectors=expected_generated_token_vectors,
+            observed_generated_token_vectors=len(historical_rows),
+            vocab_size=vocab_size,
+            rows=historical_rows,
+        )
+
+    if not 0 < unpadded_vocab_size < vocab_size:
+        raise ValueError("unpadded vocabulary boundary must be inside the full vocabulary")
+    if _HISTORICAL_RAW_LOGIT_AUDIT_MARKER in log_text:
+        raise ValueError("raw logit version 2 rejects historical aggregate markers")
     matches = tuple(_RAW_LOGIT_AUDIT_RE.findall(log_text))
     if log_text.count(_RAW_LOGIT_AUDIT_MARKER) != len(matches):
         raise ValueError("raw logit audit contains a malformed marker")
-    if any(any(int(value) != 0 for value in match[6:9]) for match in matches):
-        raise ValueError("raw logit vector contains a non-finite value")
+    if any(int(match[5]) != unpadded_vocab_size for match in matches):
+        raise ValueError("raw logit unpadded vocabulary boundary differs from the contract")
     rows = tuple(
         RawLogitAuditRow(
             task_id=int(task_id),
@@ -975,10 +1180,16 @@ def parse_raw_logit_audit_evidence(
             completion_index=int(completion_index),
             batch_index=int(batch_index),
             count=int(count),
-            finite=int(finite),
-            nan=int(nan),
-            pos_inf=int(pos_inf),
-            neg_inf=int(neg_inf),
+            unpadded_count=int(unpadded_count),
+            padded_count=int(padded_count),
+            unpadded_finite=int(unpadded_finite),
+            unpadded_nan=int(unpadded_nan),
+            unpadded_pos_inf=int(unpadded_pos_inf),
+            unpadded_neg_inf=int(unpadded_neg_inf),
+            padded_finite=int(padded_finite),
+            padded_nan=int(padded_nan),
+            padded_pos_inf=int(padded_pos_inf),
+            padded_neg_inf=int(padded_neg_inf),
         )
         for (
             task_id,
@@ -986,16 +1197,25 @@ def parse_raw_logit_audit_evidence(
             completion_index,
             batch_index,
             count,
-            finite,
-            nan,
-            pos_inf,
-            neg_inf,
+            unpadded_count,
+            padded_count,
+            unpadded_finite,
+            unpadded_nan,
+            unpadded_pos_inf,
+            unpadded_neg_inf,
+            padded_finite,
+            padded_nan,
+            padded_pos_inf,
+            padded_neg_inf,
         ) in matches
     )
+    padded_vocab_size = vocab_size - unpadded_vocab_size
     return RawLogitAuditEvidence(
         expected_generated_token_vectors=expected_generated_token_vectors,
         observed_generated_token_vectors=len(rows),
         vocab_size=vocab_size,
+        unpadded_vocab_size=unpadded_vocab_size,
+        padded_vocab_size=padded_vocab_size,
         rows=rows,
     )
 
@@ -1880,10 +2100,14 @@ __all__ = [
     "INSTRUMENTATION_PATCH_RELATIVE_PATH",
     "INSTRUMENTATION_PATCH_SHA256",
     "INSTRUMENTATION_SCHEMA_VERSION",
+    "LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256",
     "LLAMA_SERVER_AUDIT_LOG_VERBOSITY",
     "PINNED_CUDA_IMAGE",
     "PINNED_CUDA_IMAGE_DIGEST",
     "PINNED_CUDA_PLATFORM",
+    "PINNED_PADDED_VOCAB_SIZE",
+    "PINNED_UNPADDED_VOCAB_SIZE",
+    "PINNED_VOCAB_SIZE",
     "SMOKE_CONFIG_RELATIVE_PATH",
     "SUBJECT_CONFIG_HASH",
     "SUBJECT_CONTROL_PLANE_SHA256",
@@ -1910,6 +2134,7 @@ __all__ = [
     "RawLogitAuditEvidence",
     "RawLogitAuditRow",
     "ServerCompletionEvidence",
+    "SmokeOutputVocabularyConfig",
     "TextShardLoadEvidence",
     "TextTensorLoadEvidence",
     "VerifiedExportArtifact",

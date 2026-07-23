@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from inkling_quant_lab.exceptions import ConfigurationError
 from inkling_quant_lab.gguf.inkling_smoke import (
     HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
+    LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
     load_inkling_smoke_config,
     load_verified_export_reference,
 )
@@ -21,6 +22,7 @@ from inkling_quant_lab.gguf.inkling_smoke_execution import (
     SmokeFailureReceiptV2,
     SmokeFailureReceiptV3,
     SmokeFailureReceiptV4,
+    SmokeFailureReceiptV5,
     SmokeHostEvidence,
     SmokeLaunchAcknowledgement,
     SmokeLaunchDeploymentIdentity,
@@ -83,22 +85,33 @@ def _failure_receipt(
     config = load_inkling_smoke_config(CONFIG_PATH)
     reference = load_verified_export_reference(REFERENCE_PATH)
     control_plane = smoke_control_plane_provenance(PROJECT_ROOT)
-    if historical_context is None:
-        historical_context = schema_version in {
+    version_one_patch: tuple[str, int] | None = None
+    if historical_context is True or (
+        historical_context is None
+        and schema_version
+        in {
             "inkling-smoke-terminal-v2",
             "inkling-smoke-terminal-v3",
         }
-    if historical_context:
+    ):
+        version_one_patch = (HISTORICAL_INSTRUMENTATION_PATCH_SHA256, 14_870)
+    elif historical_context is None and schema_version == "inkling-smoke-terminal-v4":
+        version_one_patch = (LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256, 15_179)
+    if version_one_patch is not None:
+        patch_sha256, patch_size_bytes = version_one_patch
         config_payload = config.model_dump(mode="json")
-        config_payload["runtime"]["instrumentation_patch_sha256"] = (
-            HISTORICAL_INSTRUMENTATION_PATCH_SHA256
+        config_payload["schema_version"] = "inkling-smoke-config-v1"
+        config_payload.pop("output_vocabulary")
+        config_payload["runtime"]["instrumentation_schema_version"] = (
+            "inkling-llama-smoke-instrumentation-v1"
         )
+        config_payload["runtime"]["instrumentation_patch_sha256"] = patch_sha256
         config = type(config).model_validate(config_payload)
         files = tuple(
             item.model_copy(
                 update={
-                    "sha256": HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
-                    "size_bytes": 14_870,
+                    "sha256": patch_sha256,
+                    "size_bytes": patch_size_bytes,
                 }
             )
             if item.path == "patches/inkling-smoke-a015409.patch"
@@ -145,6 +158,7 @@ def _failure_receipt(
     if schema_version in {
         "inkling-smoke-terminal-v3",
         "inkling-smoke-terminal-v4",
+        "inkling-smoke-terminal-v5",
     }:
         receipt["invocation"] = {
             "schema_version": "inkling-smoke-invocation-v3",
@@ -174,7 +188,10 @@ def _failure_receipt(
             ),
             "invocation_history_sha256": "8" * 64,
         }
-    if schema_version == "inkling-smoke-terminal-v4":
+    if schema_version in {
+        "inkling-smoke-terminal-v4",
+        "inkling-smoke-terminal-v5",
+    }:
         receipt["safe_subprocess_failure"] = (
             {
                 "schema_version": "inkling-smoke-subprocess-failure-v1",
@@ -415,7 +432,7 @@ def test_terminal_receipt_self_hash_excludes_only_the_hash_field() -> None:
     assert smoke_terminal_receipt_sha256(receipt) != digest
 
 
-def test_terminal_receipt_v4_uses_a_distinct_hash_domain_from_v3() -> None:
+def test_terminal_receipt_versions_use_distinct_stable_hash_domains() -> None:
     payload: dict[str, object] = {
         "schema_version": "inkling-smoke-terminal-v3",
         "status": "passed",
@@ -425,10 +442,13 @@ def test_terminal_receipt_v4_uses_a_distinct_hash_domain_from_v3() -> None:
     v3_digest = smoke_terminal_receipt_sha256(payload)
     payload["schema_version"] = "inkling-smoke-terminal-v4"
     v4_digest = smoke_terminal_receipt_sha256(payload)
+    payload["schema_version"] = "inkling-smoke-terminal-v5"
+    v5_digest = smoke_terminal_receipt_sha256(payload)
 
     assert v3_digest == "38ade5351814c2cb255bcafb9ed16392aeae7383ed9c1f71d625a94055fc23ce"
     assert v4_digest == "8d97e8de00339d6797a9d0bd6fd747944ac0720eb9552757b90a14c074d47b41"
-    assert v4_digest != v3_digest
+    assert v5_digest == "25f128c08a89f38da78355ffdfe3ec1334217f1cd3e894a43c55b6e8c8e4dbde"
+    assert len({v3_digest, v4_digest, v5_digest}) == 3
 
 
 def test_terminal_receipt_hash_preserves_legacy_v2_failure_verification() -> None:
@@ -465,12 +485,16 @@ def test_exact_historical_v2_failure_receipt_remains_valid() -> None:
         ("inkling-smoke-terminal-v2", SmokeFailureReceiptV2),
         ("inkling-smoke-terminal-v3", SmokeFailureReceiptV3),
         ("inkling-smoke-terminal-v4", SmokeFailureReceiptV4),
+        ("inkling-smoke-terminal-v5", SmokeFailureReceiptV5),
     ),
 )
 def test_failure_receipt_validates_exact_launch_and_outcome_path(
     schema_version: str,
     expected_type: (
-        type[SmokeFailureReceiptV2] | type[SmokeFailureReceiptV3] | type[SmokeFailureReceiptV4]
+        type[SmokeFailureReceiptV2]
+        | type[SmokeFailureReceiptV3]
+        | type[SmokeFailureReceiptV4]
+        | type[SmokeFailureReceiptV5]
     ),
 ) -> None:
     receipt, config, reference, control_plane, run_id, launch_intent_sha256 = _failure_receipt(
@@ -492,7 +516,10 @@ def test_failure_receipt_validates_exact_launch_and_outcome_path(
 
     assert isinstance(observed, expected_type)
     assert observed.receipt_sha256 == receipt["receipt_sha256"]
-    if isinstance(observed, SmokeFailureReceiptV3 | SmokeFailureReceiptV4):
+    if isinstance(
+        observed,
+        SmokeFailureReceiptV3 | SmokeFailureReceiptV4 | SmokeFailureReceiptV5,
+    ):
         assert observed.invocation.attempt_claim_sha256 == "6" * 64
         assert observed.invocation.invocation_history_sha256 == "8" * 64
 
@@ -509,7 +536,7 @@ def test_current_failure_receipt_rejects_a_rehashed_schema_downgrade(
         historical_context=False,
     )
 
-    with pytest.raises(ValueError, match="requires terminal version 4"):
+    with pytest.raises(ValueError, match="schema differs from its instrumentation patch"):
         validate_smoke_failure_receipt(
             receipt,
             config=config,
@@ -614,6 +641,33 @@ def test_failure_receipt_v4_accepts_only_hashed_allowlisted_subprocess_evidence(
     assert "stderr" not in subprocess_evidence
     assert "argv" not in subprocess_evidence
     assert "environment" not in subprocess_evidence
+
+
+def test_failure_receipt_v5_accepts_only_hashed_allowlisted_subprocess_evidence() -> None:
+    (
+        receipt,
+        config,
+        reference,
+        control_plane,
+        run_id,
+        launch_intent_sha256,
+    ) = _failure_receipt(
+        "inkling-smoke-terminal-v5",
+        called_process_error=True,
+    )
+
+    observed = validate_smoke_failure_receipt(
+        receipt,
+        config=config,
+        reference=reference,
+        control_plane=control_plane,
+        run_id=run_id,
+        launch_intent_sha256=launch_intent_sha256,
+    )
+
+    assert isinstance(observed, SmokeFailureReceiptV5)
+    assert observed.safe_subprocess_failure is not None
+    assert observed.safe_subprocess_failure.command_id == "nvidia_smi_identity_v1"
 
 
 @pytest.mark.parametrize(

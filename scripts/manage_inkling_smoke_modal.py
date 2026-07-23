@@ -1138,6 +1138,7 @@ def _validated_remote_failure_receipts(
             if receipt.schema_version in {
                 "inkling-smoke-terminal-v3",
                 "inkling-smoke-terminal-v4",
+                "inkling-smoke-terminal-v5",
             }:
                 invocation = getattr(receipt, "invocation", None)
                 if invocation is None:
@@ -1167,7 +1168,10 @@ def _validated_remote_failure_receipts(
             "launch_intent_sha256": receipt.launch_intent_sha256,
             "authorization_path": authorization_path,
         }
-        if receipt.schema_version == "inkling-smoke-terminal-v4":
+        if receipt.schema_version in {
+            "inkling-smoke-terminal-v4",
+            "inkling-smoke-terminal-v5",
+        }:
             safe_subprocess_failure = _safe_subprocess_failure_record(receipt)
             if safe_subprocess_failure is not None:
                 record["safe_subprocess_failure"] = safe_subprocess_failure

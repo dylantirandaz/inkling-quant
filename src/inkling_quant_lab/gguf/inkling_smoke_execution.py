@@ -39,6 +39,8 @@ from inkling_quant_lab.gguf.inkling_smoke import (
     EXPECTED_Q3_TOTAL_BYTES,
     HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
     INSTRUMENTATION_PATCH_SHA256,
+    INSTRUMENTATION_SCHEMA_VERSION,
+    LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
     PINNED_LLAMA_CPP_COMMIT,
     PINNED_MODEL_REVISION,
     InklingSmokeConfig,
@@ -48,7 +50,8 @@ from inkling_quant_lab.gguf.inkling_smoke import (
 SMOKE_CONTROL_PLANE_HASH_DOMAIN = b"inkling-smoke-control-plane-v1\0"
 _SMOKE_RECEIPT_HASH_DOMAIN_V2 = b"inkling-smoke-terminal-receipt-v2\0"
 _SMOKE_RECEIPT_HASH_DOMAIN_V3 = b"inkling-smoke-terminal-receipt-v3\0"
-SMOKE_RECEIPT_HASH_DOMAIN = b"inkling-smoke-terminal-receipt-v4\0"
+_SMOKE_RECEIPT_HASH_DOMAIN_V4 = b"inkling-smoke-terminal-receipt-v4\0"
+SMOKE_RECEIPT_HASH_DOMAIN = b"inkling-smoke-terminal-receipt-v5\0"
 SMOKE_PACKAGE_MANIFEST_HASH_DOMAIN = b"inkling-smoke-package-manifest-v2\0"
 _SMOKE_HARDWARE_TOPOLOGY_HASH_DOMAIN_V2 = b"inkling-smoke-hardware-topology-v2\0"
 _SMOKE_HARDWARE_TOPOLOGY_HASH_DOMAIN_V3 = b"inkling-smoke-hardware-topology-v3\0"
@@ -779,7 +782,7 @@ class SmokeFailureReceiptV3(_SmokeFailureReceipt):
 
 
 class SmokeFailureReceiptV4(_SmokeFailureReceipt):
-    """Version 4 failure evidence with safe subprocess diagnostics."""
+    """Historical version 4 failure evidence with safe subprocess diagnostics."""
 
     schema_version: Literal["inkling-smoke-terminal-v4"]
     invocation: SmokeInvocationEvidence
@@ -811,8 +814,41 @@ class SmokeFailureReceiptV4(_SmokeFailureReceipt):
         return self
 
 
+class SmokeFailureReceiptV5(_SmokeFailureReceipt):
+    """Version 5 failure evidence with corrected logit instrumentation."""
+
+    schema_version: Literal["inkling-smoke-terminal-v5"]
+    invocation: SmokeInvocationEvidence
+    safe_subprocess_failure: SmokeSubprocessFailureEvidence | None
+
+    @model_validator(mode="after")
+    def invocation_and_failure_are_consistent(self) -> SmokeFailureReceiptV5:
+        if (
+            self.invocation.run_id,
+            self.invocation.call_id,
+            self.invocation.input_id,
+            self.invocation.task_id,
+            self.invocation.launch_intent_sha256,
+            self.invocation.smoke_config_hash,
+            self.invocation.control_plane_sha256,
+        ) != (
+            self.run_id,
+            self.call_id,
+            self.input_id,
+            self.task_id,
+            self.launch_intent_sha256,
+            self.smoke_config_hash,
+            self.control_plane_sha256,
+        ):
+            raise ValueError("failure invocation differs from the top-level receipt identity")
+        is_called_process_error = self.exception_type == "subprocess.CalledProcessError"
+        if is_called_process_error != (self.safe_subprocess_failure is not None):
+            raise ValueError("subprocess failure evidence differs from the exception type")
+        return self
+
+
 SmokeFailureReceipt: TypeAlias = (
-    SmokeFailureReceiptV2 | SmokeFailureReceiptV3 | SmokeFailureReceiptV4
+    SmokeFailureReceiptV2 | SmokeFailureReceiptV3 | SmokeFailureReceiptV4 | SmokeFailureReceiptV5
 )
 
 
@@ -975,7 +1011,10 @@ class SmokeRuntimeEvidence(_SmokeReceiptModel):
     package_manifest_sha256: StrictStr = Field(pattern=r"^[0-9a-f]{64}$")
     nvcc_version: StrictStr = Field(pattern=r"^V[0-9]+\.[0-9]+\.[0-9]+$")
     nvcc_version_sha256: StrictStr = Field(pattern=r"^[0-9a-f]{64}$")
-    instrumentation_schema_version: Literal["inkling-llama-smoke-instrumentation-v1"]
+    instrumentation_schema_version: Literal[
+        "inkling-llama-smoke-instrumentation-v1",
+        "inkling-llama-smoke-instrumentation-v2",
+    ]
     instrumentation_patch_path: Literal["/root/inkling-smoke-a015409.patch"]
     instrumentation_patch_sha256: StrictStr = Field(pattern=r"^[0-9a-f]{64}$")
     patched_source_paths: tuple[StrictStr, ...]
@@ -1055,11 +1094,19 @@ class SmokeRuntimeEvidence(_SmokeReceiptModel):
         if self.instrumentation_patch_sha256 == HISTORICAL_INSTRUMENTATION_PATCH_SHA256:
             expected_blobs = _SMOKE_HISTORICAL_PATCHED_SOURCE_BLOB_IDS
             expected_paths = _SMOKE_HISTORICAL_PATCHED_SOURCE_PATHS
+            expected_instrumentation_schema = "inkling-llama-smoke-instrumentation-v1"
+        elif self.instrumentation_patch_sha256 == LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256:
+            expected_blobs = _SMOKE_PATCHED_SOURCE_BLOB_IDS
+            expected_paths = _SMOKE_PATCHED_SOURCE_PATHS
+            expected_instrumentation_schema = "inkling-llama-smoke-instrumentation-v1"
         elif self.instrumentation_patch_sha256 == INSTRUMENTATION_PATCH_SHA256:
             expected_blobs = _SMOKE_PATCHED_SOURCE_BLOB_IDS
             expected_paths = _SMOKE_PATCHED_SOURCE_PATHS
+            expected_instrumentation_schema = INSTRUMENTATION_SCHEMA_VERSION
         else:
             raise ValueError("runtime instrumentation patch SHA-256 is unsupported")
+        if self.instrumentation_schema_version != expected_instrumentation_schema:
+            raise ValueError("runtime instrumentation schema differs from its source patch")
         if observed_blobs != expected_blobs:
             raise ValueError("runtime base-source blob identities differ from their patch")
         if self.patched_source_paths != expected_paths:
@@ -1573,7 +1620,7 @@ class SmokeRawLogitRowEvidence(_SmokeReceiptModel):
 
 
 class SmokeRawLogitAudit(_SmokeReceiptModel):
-    """Complete pre-softmax finiteness audit for all generated vectors."""
+    """Historical full-vocabulary finiteness audit for generated vectors."""
 
     schema_version: Literal["inkling-raw-logit-audit-v1"]
     expected_generated_token_vectors: StrictInt = Field(gt=0)
@@ -1600,6 +1647,80 @@ class SmokeRawLogitAudit(_SmokeReceiptModel):
         if len(identities) != len(set(identities)):
             raise ValueError("raw-logit audit contains duplicate vector identities")
         return self
+
+
+class SmokeRawLogitRowEvidenceV2(_SmokeReceiptModel):
+    """One logit vector split at the pinned unpadded vocabulary boundary."""
+
+    task_id: StrictInt = Field(ge=0)
+    slot_id: StrictInt = Field(ge=0)
+    completion_index: StrictInt = Field(gt=0)
+    batch_index: StrictInt = Field(ge=0)
+    count: StrictInt = Field(gt=0)
+    unpadded_count: StrictInt = Field(gt=0)
+    padded_count: StrictInt = Field(gt=0)
+    unpadded_finite: StrictInt = Field(gt=0)
+    unpadded_nan: StrictInt = Field(ge=0, le=0)
+    unpadded_pos_inf: StrictInt = Field(ge=0, le=0)
+    unpadded_neg_inf: StrictInt = Field(ge=0, le=0)
+    padded_finite: StrictInt = Field(ge=0, le=0)
+    padded_nan: StrictInt = Field(ge=0, le=0)
+    padded_pos_inf: StrictInt = Field(ge=0, le=0)
+    padded_neg_inf: StrictInt = Field(gt=0)
+
+    @model_validator(mode="after")
+    def regions_have_exact_value_classes(self) -> SmokeRawLogitRowEvidenceV2:
+        if self.unpadded_count + self.padded_count != self.count:
+            raise ValueError("raw-logit row regions do not cover the vocabulary")
+        if self.unpadded_finite != self.unpadded_count:
+            raise ValueError("raw-logit unpadded region is not exactly finite")
+        if self.padded_neg_inf != self.padded_count:
+            raise ValueError("raw-logit padded suffix is not exactly negative infinity")
+        return self
+
+
+class SmokeRawLogitAuditV2(_SmokeReceiptModel):
+    """Complete audit of finite active logits and the masked padded suffix."""
+
+    schema_version: Literal["inkling-raw-logit-audit-v2"]
+    expected_generated_token_vectors: StrictInt = Field(gt=0)
+    observed_generated_token_vectors: StrictInt = Field(gt=0)
+    vocab_size: StrictInt = Field(gt=0)
+    unpadded_vocab_size: StrictInt = Field(gt=0)
+    padded_vocab_size: StrictInt = Field(gt=0)
+    rows: tuple[SmokeRawLogitRowEvidenceV2, ...]
+    all_rows_complete: RequiredTrue
+    all_unpadded_values_finite: RequiredTrue
+    all_padded_values_negative_infinity: RequiredTrue
+
+    @model_validator(mode="after")
+    def audit_is_complete(self) -> SmokeRawLogitAuditV2:
+        if self.unpadded_vocab_size >= self.vocab_size:
+            raise ValueError("raw-logit audit has no padded vocabulary suffix")
+        if self.padded_vocab_size != self.vocab_size - self.unpadded_vocab_size:
+            raise ValueError("raw-logit padded vocabulary cardinality is inconsistent")
+        if not (
+            self.expected_generated_token_vectors
+            == self.observed_generated_token_vectors
+            == len(self.rows)
+        ):
+            raise ValueError("raw-logit vector cardinality is incomplete")
+        for row in self.rows:
+            if (
+                row.count != self.vocab_size
+                or row.unpadded_count != self.unpadded_vocab_size
+                or row.padded_count != self.padded_vocab_size
+            ):
+                raise ValueError("raw-logit row vocabulary boundary differs from its audit")
+        identities = tuple(
+            (row.task_id, row.slot_id, row.completion_index, row.batch_index) for row in self.rows
+        )
+        if len(identities) != len(set(identities)):
+            raise ValueError("raw-logit audit contains duplicate vector identities")
+        return self
+
+
+SmokeRawLogitAuditEvidence: TypeAlias = SmokeRawLogitAudit | SmokeRawLogitAuditV2
 
 
 class SmokeBackendGraphEvidence(_SmokeReceiptModel):
@@ -1728,7 +1849,7 @@ class SmokeServerEvidence(_SmokeReceiptModel):
     post_rehash_load_to_health_seconds: float = Field(gt=0, le=3_600)
     loader_offload: SmokeLoaderOffloadEvidence
     artifact_load: SmokeArtifactLoadEvidence
-    raw_logit_audit: SmokeRawLogitAudit
+    raw_logit_audit: SmokeRawLogitAuditEvidence
     backend_audit: SmokeBackendAudit
     properties: SmokeServerProperties
     server_log_sha256: StrictStr = Field(pattern=r"^[0-9a-f]{64}$")
@@ -1931,6 +2052,7 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
     schema_version: Literal[
         "inkling-smoke-terminal-v3",
         "inkling-smoke-terminal-v4",
+        "inkling-smoke-terminal-v5",
     ]
     status: Literal["passed"]
     stage: Literal["smoke_test"]
@@ -1982,10 +2104,18 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
         predicted = sum(trial.tokens_predicted for probe in self.probes for trial in probe.trials)
         if self.server.raw_logit_audit.expected_generated_token_vectors != predicted:
             raise ValueError("raw-logit audit does not cover every generated token")
+        if self.schema_version == "inkling-smoke-terminal-v5":
+            if not isinstance(self.server.raw_logit_audit, SmokeRawLogitAuditV2):
+                raise ValueError("terminal receipt v5 requires raw-logit audit v2")
+            token_id_limit = self.server.raw_logit_audit.unpadded_vocab_size
+        else:
+            if not isinstance(self.server.raw_logit_audit, SmokeRawLogitAudit):
+                raise ValueError("historical terminal receipt requires raw-logit audit v1")
+            token_id_limit = vocabulary
         for probe in self.probes:
             for trial in probe.trials:
-                if any(not 0 <= token_id < vocabulary for token_id in trial.token_ids):
-                    raise ValueError("probe returned a token outside the vocabulary")
+                if any(not 0 <= token_id < token_id_limit for token_id in trial.token_ids):
+                    raise ValueError("probe returned a token outside the usable vocabulary")
         indices = tuple(gpu.cuda_ordinal for gpu in self.hardware)
         if indices != (0, 1):
             raise ValueError("receipt hardware must contain CUDA ordinals zero and one")
@@ -2015,6 +2145,19 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
                 raise ValueError("historical success receipt contains current topology evidence")
             if self.host.topology_schema_version != "inkling-smoke-hardware-topology-v3":
                 raise ValueError("historical success receipt uses the wrong topology schema")
+        elif self.schema_version == "inkling-smoke-terminal-v4":
+            _require_current_cuda_backend_identities(self.server.backend_audit.identities)
+            current_source_blobs = tuple(
+                (identity.path, identity.git_blob_id)
+                for identity in self.runtime.base_source_blob_ids
+            )
+            if (
+                self.runtime.instrumentation_patch_sha256
+                != LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256
+                or self.runtime.patched_source_paths != _SMOKE_PATCHED_SOURCE_PATHS
+                or current_source_blobs != _SMOKE_PATCHED_SOURCE_BLOB_IDS
+            ):
+                raise ValueError("version 4 success receipt uses the wrong source patch")
         else:
             _require_current_cuda_backend_identities(self.server.backend_audit.identities)
             current_source_blobs = tuple(
@@ -2026,7 +2169,11 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
                 or self.runtime.patched_source_paths != _SMOKE_PATCHED_SOURCE_PATHS
                 or current_source_blobs != _SMOKE_PATCHED_SOURCE_BLOB_IDS
             ):
-                raise ValueError("current success receipt uses the historical source patch")
+                raise ValueError("version 5 success receipt uses the wrong source patch")
+        if self.schema_version in {
+            "inkling-smoke-terminal-v4",
+            "inkling-smoke-terminal-v5",
+        }:
             if self.gpu_topology is None:
                 raise ValueError("current success receipt lacks CUDA peer topology evidence")
             if self.host.topology_schema_version != "inkling-smoke-hardware-topology-v4":
@@ -2341,6 +2488,7 @@ def _expected_server_command(
     schema_version: Literal[
         "inkling-smoke-terminal-v3",
         "inkling-smoke-terminal-v4",
+        "inkling-smoke-terminal-v5",
     ],
 ) -> tuple[str, ...]:
     first_shard = f"/subject/{reference.q3_shards[0].path}"
@@ -2384,7 +2532,11 @@ def _expected_server_command(
         "/opt/llama.cpp/build/bin/llama-server",
         *(
             (*verbosity_arguments, *common_arguments)
-            if schema_version == "inkling-smoke-terminal-v4"
+            if schema_version
+            in {
+                "inkling-smoke-terminal-v4",
+                "inkling-smoke-terminal-v5",
+            }
             else (*common_arguments, *verbosity_arguments)
         ),
         "--no-webui",
@@ -2443,15 +2595,17 @@ def _validate_smoke_failure_launch_schema(
     if patch_sha256 != config.runtime.instrumentation_patch_sha256:
         raise ValueError("smoke failure control-plane patch differs from the smoke config")
 
-    if (
-        schema_version
-        in {
-            "inkling-smoke-terminal-v2",
-            "inkling-smoke-terminal-v3",
-        }
-        and patch_sha256 != HISTORICAL_INSTRUMENTATION_PATCH_SHA256
-    ):
-        raise ValueError("current smoke launch requires terminal version 4 failure evidence")
+    expected_patch_by_schema = {
+        "inkling-smoke-terminal-v2": HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
+        "inkling-smoke-terminal-v3": HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
+        "inkling-smoke-terminal-v4": LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
+        "inkling-smoke-terminal-v5": INSTRUMENTATION_PATCH_SHA256,
+    }
+    expected_patch = expected_patch_by_schema.get(schema_version)
+    if expected_patch is None:
+        raise ValueError("terminal smoke failure schema version is unsupported")
+    if patch_sha256 != expected_patch:
+        raise ValueError("terminal smoke failure schema differs from its instrumentation patch")
 
 
 def validate_smoke_failure_receipt(
@@ -2495,6 +2649,8 @@ def validate_smoke_failure_receipt(
             receipt = SmokeFailureReceiptV3.model_validate(raw)
         elif schema_version == "inkling-smoke-terminal-v4":
             receipt = SmokeFailureReceiptV4.model_validate(raw)
+        elif schema_version == "inkling-smoke-terminal-v5":
+            receipt = SmokeFailureReceiptV5.model_validate(raw)
         else:
             raise ValueError("unsupported terminal smoke failure receipt schema version")
     except ValidationError as error:
@@ -2586,6 +2742,24 @@ def validate_smoke_terminal_receipt(
     )
     if exact_identity != expected_identity:
         raise ValueError("terminal smoke receipt differs from the exact run identity")
+    if receipt.schema_version == "inkling-smoke-terminal-v5":
+        output_vocabulary = config.output_vocabulary
+        raw_logit_audit = receipt.server.raw_logit_audit
+        if output_vocabulary is None or not isinstance(
+            raw_logit_audit,
+            SmokeRawLogitAuditV2,
+        ):
+            raise ValueError("terminal smoke v5 lacks its configured output vocabulary")
+        if (
+            raw_logit_audit.vocab_size,
+            raw_logit_audit.unpadded_vocab_size,
+            raw_logit_audit.padded_vocab_size,
+        ) != (
+            output_vocabulary.vocab_size,
+            output_vocabulary.unpadded_vocab_size,
+            output_vocabulary.padded_vocab_size,
+        ):
+            raise ValueError("terminal smoke raw-logit vocabulary differs from the exact config")
     invocation_identity = (
         receipt.invocation.run_id,
         receipt.invocation.launch_intent_sha256,
@@ -2712,6 +2886,8 @@ def smoke_terminal_receipt_sha256(value: Mapping[str, Any]) -> str:
     elif schema_version == "inkling-smoke-terminal-v3":
         domain = _SMOKE_RECEIPT_HASH_DOMAIN_V3
     elif schema_version == "inkling-smoke-terminal-v4":
+        domain = _SMOKE_RECEIPT_HASH_DOMAIN_V4
+    elif schema_version == "inkling-smoke-terminal-v5":
         domain = SMOKE_RECEIPT_HASH_DOMAIN
     else:
         raise ValueError("unsupported terminal smoke receipt schema version")
@@ -2732,12 +2908,15 @@ __all__ = [
     "SmokeFailureReceiptV2",
     "SmokeFailureReceiptV3",
     "SmokeFailureReceiptV4",
+    "SmokeFailureReceiptV5",
     "SmokeGpuTopologyEvidence",
     "SmokeHostEvidence",
     "SmokeInvocationEvidence",
     "SmokeLaunchAcknowledgement",
     "SmokeLaunchDeploymentIdentity",
     "SmokeNvidiaSmiTopologyDiagnostic",
+    "SmokeRawLogitAudit",
+    "SmokeRawLogitAuditV2",
     "SmokeSafeFailureSignals",
     "SmokeSubprocessFailureEvidence",
     "SmokeTerminalReceipt",

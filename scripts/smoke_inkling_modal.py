@@ -226,6 +226,10 @@ SOURCE_CONTRACT_ASSERTIONS: Final = (
 )
 PATCHED_SOURCE_BLOB_PINS: Final = (
     (
+        "tools/server/server-context.cpp",
+        "58b90ccbecd60cb0784810224d79e70e4152b521",
+    ),
+    (
         "tools/server/server.cpp",
         "9be8c02497080fa57ad9460084c2337a1997f89b",
     ),
@@ -2175,6 +2179,7 @@ def _run_probe(
     probe: SmokeProbeConfig,
     *,
     vocab_size: int,
+    unpadded_vocab_size: int,
     media_marker: str,
 ) -> dict[str, Any]:
     fixture = _fixture_bytes(probe)
@@ -2195,6 +2200,7 @@ def _run_probe(
             payload,
             vocab_size=vocab_size,
             expected_n_probs=probe.n_probs,
+            unpadded_vocab_size=unpadded_vocab_size,
         )
         trials.append(
             {
@@ -2436,7 +2442,7 @@ def _record_failure(
     )
     server_log_sha256, safe_failure_signals = _failure_server_log_evidence()
     receipt: dict[str, Any] = {
-        "schema_version": "inkling-smoke-terminal-v4",
+        "schema_version": "inkling-smoke-terminal-v5",
         "status": "failed",
         "stage": SMOKE_STAGE,
         "run_id": run_root.name,
@@ -2638,9 +2644,21 @@ def smoke_test(
         load_seconds = _wait_until_ready(process, timeout=3_600)
         phase = "validate_server_properties"
         properties, vocab_size, media_marker = _model_properties()
+        output_vocabulary = config.output_vocabulary
+        if output_vocabulary is None:
+            raise RuntimeError("Smoke configuration lacks the output vocabulary contract")
+        if vocab_size != output_vocabulary.vocab_size:
+            raise RuntimeError(
+                "llama-server vocabulary size differs from the output vocabulary contract"
+            )
         phase = "run_deterministic_probes"
         probes = [
-            _run_probe(probe, vocab_size=vocab_size, media_marker=media_marker)
+            _run_probe(
+                probe,
+                vocab_size=vocab_size,
+                unpadded_vocab_size=output_vocabulary.unpadded_vocab_size,
+                media_marker=media_marker,
+            )
             for probe in config.probes
         ]
         phase = "stop_server"
@@ -2662,12 +2680,13 @@ def smoke_test(
             log_text,
             expected_generated_token_vectors=expected_generated_token_vectors,
             vocab_size=vocab_size,
+            unpadded_vocab_size=output_vocabulary.unpadded_vocab_size,
         )
         backend_audit = parse_backend_audit_evidence(log_text)
         artifact_load = parse_artifact_load_evidence(log_text)
         phase = "publish_success"
         receipt: dict[str, Any] = {
-            "schema_version": "inkling-smoke-terminal-v4",
+            "schema_version": "inkling-smoke-terminal-v5",
             "status": "passed",
             "stage": SMOKE_STAGE,
             "run_id": run_id,

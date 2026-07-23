@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import ctypes
+import hashlib
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -68,6 +69,9 @@ GPU_UUID_1 = "GPU-ffffffff-1111-2222-3333-444444444444"
 GPU_UUID_OTHER = "GPU-01234567-89ab-cdef-0123-456789abcdef"
 GPU_UUID_0_UPPER_HEX = "GPU-AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
 GPU_UUID_1_UPPER_HEX = "GPU-FFFFFFFF-1111-2222-3333-444444444444"
+INKLING_VOCAB_SIZE = 201_024
+INKLING_UNPADDED_VOCAB_SIZE = 200_058
+INKLING_PADDED_VOCAB_SIZE = INKLING_VOCAB_SIZE - INKLING_UNPADDED_VOCAB_SIZE
 
 
 class _FakeCudaFunction:
@@ -339,7 +343,7 @@ def test_reference_loader_rejects_noncanonical_json(tmp_path: Path) -> None:
 def test_checked_smoke_config_binds_runtime_hardware_probes_and_claims() -> None:
     config = load_inkling_smoke_config(CONFIG_PATH)
 
-    assert config.schema_version == "inkling-smoke-config-v1"
+    assert config.schema_version == "inkling-smoke-config-v2"
     assert config.verified_export_reference_sha256 == (EXPECTED_VERIFIED_EXPORT_REFERENCE_SHA256)
     assert config.runtime.image.image == PINNED_CUDA_IMAGE
     assert config.runtime.image.digest == PINNED_CUDA_IMAGE_DIGEST
@@ -347,6 +351,10 @@ def test_checked_smoke_config_binds_runtime_hardware_probes_and_claims() -> None
     assert config.runtime.instrumentation_schema_version == INSTRUMENTATION_SCHEMA_VERSION
     assert config.runtime.instrumentation_patch_path == INSTRUMENTATION_PATCH_RELATIVE_PATH
     assert config.runtime.instrumentation_patch_sha256 == INSTRUMENTATION_PATCH_SHA256
+    assert config.output_vocabulary is not None
+    assert config.output_vocabulary.vocab_size == INKLING_VOCAB_SIZE
+    assert config.output_vocabulary.unpadded_vocab_size == INKLING_UNPADDED_VOCAB_SIZE
+    assert config.output_vocabulary.padded_vocab_size == INKLING_PADDED_VOCAB_SIZE
     assert config.runtime.log_verbosity == LLAMA_SERVER_AUDIT_LOG_VERBOSITY == 4
     assert f"CMAKE_CUDA_ARCHITECTURES={B300_CMAKE_ARCHITECTURE}" in (
         config.runtime.cmake_definitions
@@ -371,6 +379,12 @@ def test_checked_smoke_config_binds_runtime_hardware_probes_and_claims() -> None
     assert config.claims.quality_measured is False
     assert config.claims.benchmark_measured is False
     assert len(config.config_hash()) == 64
+
+
+def test_checked_smoke_patch_bytes_match_the_pinned_digest() -> None:
+    patch_path = PROJECT_ROOT / INSTRUMENTATION_PATCH_RELATIVE_PATH
+
+    assert hashlib.sha256(patch_path.read_bytes()).hexdigest() == (INSTRUMENTATION_PATCH_SHA256)
 
 
 def test_cuda_driver_linkage_parser_requires_one_non_stub_absolute_path() -> None:
@@ -496,6 +510,32 @@ def test_server_completion_parser_returns_only_redacted_finite_evidence() -> Non
     assert "content" not in evidence.model_dump()
 
 
+def test_server_completion_parser_enforces_unpadded_vocabulary_boundary() -> None:
+    payload = _completion_payload()
+    payload["tokens"][0] = INKLING_UNPADDED_VOCAB_SIZE - 1
+    first_probability = payload["completion_probabilities"][0]
+    first_probability["id"] = INKLING_UNPADDED_VOCAB_SIZE - 1
+    first_probability["top_logprobs"][0]["id"] = INKLING_UNPADDED_VOCAB_SIZE - 1
+
+    evidence = parse_server_completion(
+        payload,
+        vocab_size=INKLING_VOCAB_SIZE,
+        unpadded_vocab_size=INKLING_UNPADDED_VOCAB_SIZE,
+        expected_n_probs=5,
+    )
+
+    assert evidence.token_ids[0] == INKLING_UNPADDED_VOCAB_SIZE - 1
+
+    payload["tokens"][0] = INKLING_UNPADDED_VOCAB_SIZE
+    with pytest.raises(ValueError, match="outside the unpadded vocabulary"):
+        parse_server_completion(
+            payload,
+            vocab_size=INKLING_VOCAB_SIZE,
+            unpadded_vocab_size=INKLING_UNPADDED_VOCAB_SIZE,
+            expected_n_probs=5,
+        )
+
+
 @pytest.mark.parametrize(
     ("mutator", "match"),
     (
@@ -587,7 +627,147 @@ def test_loader_parser_rejects_cpu_or_partial_offload(log: str, match: str) -> N
         parse_loader_offload_evidence(log)
 
 
-def test_raw_logit_audit_requires_every_generated_vector_to_be_finite() -> None:
+def _raw_logit_v2_marker(
+    *,
+    task_id: int = 0,
+    slot_id: int = 0,
+    completion_index: int = 1,
+    batch_index: int = 0,
+    count: int = INKLING_VOCAB_SIZE,
+    unpadded_count: int = INKLING_UNPADDED_VOCAB_SIZE,
+    padded_count: int = INKLING_PADDED_VOCAB_SIZE,
+    unpadded_finite: int = INKLING_UNPADDED_VOCAB_SIZE,
+    unpadded_nan: int = 0,
+    unpadded_pos_inf: int = 0,
+    unpadded_neg_inf: int = 0,
+    padded_finite: int = 0,
+    padded_nan: int = 0,
+    padded_pos_inf: int = 0,
+    padded_neg_inf: int = INKLING_PADDED_VOCAB_SIZE,
+) -> str:
+    return (
+        f"IQL_SMOKE_RAW_LOGITS_V2 task_id={task_id} slot_id={slot_id} "
+        f"completion_index={completion_index} batch_index={batch_index} count={count} "
+        f"unpadded_count={unpadded_count} padded_count={padded_count} "
+        f"unpadded_finite={unpadded_finite} unpadded_nan={unpadded_nan} "
+        f"unpadded_pos_inf={unpadded_pos_inf} unpadded_neg_inf={unpadded_neg_inf} "
+        f"padded_finite={padded_finite} padded_nan={padded_nan} "
+        f"padded_pos_inf={padded_pos_inf} padded_neg_inf={padded_neg_inf}"
+    )
+
+
+def test_raw_logit_v2_audit_accepts_finite_unpadded_and_negative_infinity_padding() -> None:
+    log = "\n".join(
+        _raw_logit_v2_marker(task_id=index, completion_index=index + 1) for index in range(4)
+    )
+
+    evidence = parse_raw_logit_audit_evidence(
+        log,
+        expected_generated_token_vectors=4,
+        vocab_size=INKLING_VOCAB_SIZE,
+        unpadded_vocab_size=INKLING_UNPADDED_VOCAB_SIZE,
+    )
+
+    assert evidence.schema_version == "inkling-raw-logit-audit-v2"
+    assert evidence.observed_generated_token_vectors == 4
+    assert evidence.vocab_size == INKLING_VOCAB_SIZE
+    assert evidence.unpadded_vocab_size == INKLING_UNPADDED_VOCAB_SIZE
+    assert evidence.padded_vocab_size == INKLING_PADDED_VOCAB_SIZE
+    assert evidence.all_rows_complete is True
+    assert evidence.all_unpadded_values_finite is True
+    assert evidence.all_padded_values_negative_infinity is True
+
+
+@pytest.mark.parametrize(
+    ("marker", "match"),
+    (
+        (
+            _raw_logit_v2_marker(unpadded_count=200_057, padded_count=967),
+            "unpadded.*boundary",
+        ),
+        (
+            _raw_logit_v2_marker(count=201_023),
+            "cardinality|vocabulary",
+        ),
+        (
+            _raw_logit_v2_marker(padded_count=965, padded_neg_inf=965),
+            "cardinality|vocabulary",
+        ),
+    ),
+)
+def test_raw_logit_v2_audit_rejects_wrong_boundary_or_cardinality(
+    marker: str,
+    match: str,
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        parse_raw_logit_audit_evidence(
+            marker,
+            expected_generated_token_vectors=1,
+            vocab_size=INKLING_VOCAB_SIZE,
+            unpadded_vocab_size=INKLING_UNPADDED_VOCAB_SIZE,
+        )
+
+
+def test_raw_logit_v2_audit_rejects_nonfinite_unpadded_value() -> None:
+    marker = _raw_logit_v2_marker(
+        unpadded_finite=INKLING_UNPADDED_VOCAB_SIZE - 1,
+        unpadded_nan=1,
+    )
+
+    with pytest.raises(ValueError, match=r"unpadded.*non-finite"):
+        parse_raw_logit_audit_evidence(
+            marker,
+            expected_generated_token_vectors=1,
+            vocab_size=INKLING_VOCAB_SIZE,
+            unpadded_vocab_size=INKLING_UNPADDED_VOCAB_SIZE,
+        )
+
+
+def test_raw_logit_v2_audit_rejects_padded_value_that_is_not_negative_infinity() -> None:
+    marker = _raw_logit_v2_marker(
+        padded_finite=1,
+        padded_neg_inf=INKLING_PADDED_VOCAB_SIZE - 1,
+    )
+
+    with pytest.raises(ValueError, match=r"padded.*negative infinity"):
+        parse_raw_logit_audit_evidence(
+            marker,
+            expected_generated_token_vectors=1,
+            vocab_size=INKLING_VOCAB_SIZE,
+            unpadded_vocab_size=INKLING_UNPADDED_VOCAB_SIZE,
+        )
+
+
+@pytest.mark.parametrize(
+    ("log", "expected", "match"),
+    (
+        (
+            "\n".join((_raw_logit_v2_marker(), _raw_logit_v2_marker())),
+            2,
+            "duplicate",
+        ),
+        (
+            _raw_logit_v2_marker(),
+            2,
+            "vector count",
+        ),
+    ),
+)
+def test_raw_logit_v2_audit_rejects_duplicate_or_missing_vectors(
+    log: str,
+    expected: int,
+    match: str,
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        parse_raw_logit_audit_evidence(
+            log,
+            expected_generated_token_vectors=expected,
+            vocab_size=INKLING_VOCAB_SIZE,
+            unpadded_vocab_size=INKLING_UNPADDED_VOCAB_SIZE,
+        )
+
+
+def test_historical_raw_logit_v1_audit_requires_every_vector_to_be_finite() -> None:
     log = "\n".join(
         f"IQL_SMOKE_RAW_LOGITS_V1 task_id={index} slot_id=0 "
         f"completion_index={index + 1} batch_index=0 count=1000 finite=1000 "
@@ -601,6 +781,7 @@ def test_raw_logit_audit_requires_every_generated_vector_to_be_finite() -> None:
         vocab_size=1000,
     )
 
+    assert evidence.schema_version == "inkling-raw-logit-audit-v1"
     assert evidence.observed_generated_token_vectors == 4
     assert evidence.all_rows_complete is True
     assert evidence.all_values_finite is True
@@ -629,7 +810,7 @@ def test_raw_logit_audit_requires_every_generated_vector_to_be_finite() -> None:
         ),
     ),
 )
-def test_raw_logit_audit_rejects_incomplete_or_nonfinite_rows(
+def test_historical_raw_logit_v1_audit_rejects_incomplete_or_nonfinite_rows(
     log: str,
     expected: int,
     match: str,

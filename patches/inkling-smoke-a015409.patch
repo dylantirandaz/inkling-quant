@@ -307,18 +307,21 @@ index 3e81e44..85f25f2 100644
  
      void init_vision() {
 diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
-index 7564ad4..1cb4051 100644
+index 7564ad4..58b90cc 100644
 --- a/tools/server/server-context.cpp
 +++ b/tools/server/server-context.cpp
-@@ -18,6 +18,7 @@
+@@ -18,7 +18,10 @@
  #include "mtmd-helper.h"
  
  #include <algorithm>
++#include <charconv>
 +#include <cmath>
  #include <cstddef>
  #include <cinttypes>
  #include <exception>
-@@ -1961,6 +1962,49 @@ private:
++#include <string_view>
+ #include <memory>
+@@ -1961,6 +1964,117 @@ private:
                  });
              }
          } else {
@@ -326,43 +329,111 @@ index 7564ad4..1cb4051 100644
 +            const uint32_t n_logits = llama_get_sampled_logits_count_ith(ctx_tgt, idx);
 +            const int32_t n_vocab = llama_vocab_n_tokens(vocab);
 +
-+            size_t finite_count = 0;
-+            size_t nan_count = 0;
-+            size_t positive_infinity_count = 0;
-+            size_t negative_infinity_count = 0;
-+
-+            if (logits != nullptr) {
-+                for (uint32_t i = 0; i < n_logits; ++i) {
-+                    const float value = logits[i];
-+                    if (std::isfinite(value)) {
-+                        ++finite_count;
-+                    } else if (std::isnan(value)) {
-+                        ++nan_count;
-+                    } else if (value > 0.0f) {
-+                        ++positive_infinity_count;
-+                    } else {
-+                        ++negative_infinity_count;
-+                    }
-+                }
++            char architecture_buffer[32] = {};
++            const int32_t architecture_length = llama_model_meta_val_str(
++                    model_tgt,
++                    "general.architecture",
++                    architecture_buffer,
++                    sizeof(architecture_buffer));
++            if (architecture_length != 7 ||
++                    std::string_view(architecture_buffer, static_cast<size_t>(architecture_length)) != "inkling") {
++                throw std::runtime_error("IQL smoke raw-logit audit requires Inkling GGUF metadata");
 +            }
 +
-+            SRV_INF(
-+                    "IQL_SMOKE_RAW_LOGITS_V1 task_id=%d slot_id=%d completion_index=%d batch_index=%d count=%u finite=%zu nan=%zu pos_inf=%zu neg_inf=%zu\n",
-+                    slot.task ? slot.task->id : -1,
-+                    slot.id,
-+                    slot.n_decoded,
-+                    idx,
-+                    n_logits,
-+                    finite_count,
-+                    nan_count,
-+                    positive_infinity_count,
-+                    negative_infinity_count);
++            char unpadded_vocab_buffer[32] = {};
++            const int32_t unpadded_vocab_length = llama_model_meta_val_str(
++                    model_tgt,
++                    "inkling.unpadded_vocab_size",
++                    unpadded_vocab_buffer,
++                    sizeof(unpadded_vocab_buffer));
++            if (unpadded_vocab_length <= 0 ||
++                    static_cast<size_t>(unpadded_vocab_length) >= sizeof(unpadded_vocab_buffer)) {
++                throw std::runtime_error("IQL smoke raw-logit audit lacks bounded unpadded vocabulary metadata");
++            }
++
++            int32_t n_unpadded_vocab = 0;
++            const char * unpadded_begin = unpadded_vocab_buffer;
++            const char * unpadded_end = unpadded_begin + unpadded_vocab_length;
++            const auto parse_result = std::from_chars(
++                    unpadded_begin,
++                    unpadded_end,
++                    n_unpadded_vocab);
++            if (parse_result.ec != std::errc{} ||
++                    parse_result.ptr != unpadded_end ||
++                    n_unpadded_vocab <= 0 ||
++                    n_unpadded_vocab > n_vocab) {
++                throw std::runtime_error("IQL smoke raw-logit audit received invalid unpadded vocabulary metadata");
++            }
 +
 +            if (logits == nullptr) {
 +                throw std::runtime_error("IQL smoke raw-logit audit received a null logits pointer");
 +            }
 +            if (n_logits != static_cast<uint32_t>(n_vocab)) {
 +                throw std::runtime_error("IQL smoke raw-logit audit received an incomplete logits vector");
++            }
++
++            size_t unpadded_finite_count = 0;
++            size_t unpadded_nan_count = 0;
++            size_t unpadded_positive_infinity_count = 0;
++            size_t unpadded_negative_infinity_count = 0;
++            size_t padded_finite_count = 0;
++            size_t padded_nan_count = 0;
++            size_t padded_positive_infinity_count = 0;
++            size_t padded_negative_infinity_count = 0;
++
++            for (uint32_t i = 0; i < n_logits; ++i) {
++                const float value = logits[i];
++                const bool is_unpadded = i < static_cast<uint32_t>(n_unpadded_vocab);
++                size_t * finite_count = is_unpadded ? &unpadded_finite_count : &padded_finite_count;
++                size_t * nan_count = is_unpadded ? &unpadded_nan_count : &padded_nan_count;
++                size_t * positive_infinity_count = is_unpadded
++                        ? &unpadded_positive_infinity_count
++                        : &padded_positive_infinity_count;
++                size_t * negative_infinity_count = is_unpadded
++                        ? &unpadded_negative_infinity_count
++                        : &padded_negative_infinity_count;
++
++                if (std::isfinite(value)) {
++                    ++*finite_count;
++                } else if (std::isnan(value)) {
++                    ++*nan_count;
++                } else if (value > 0.0f) {
++                    ++*positive_infinity_count;
++                } else {
++                    ++*negative_infinity_count;
++                }
++            }
++
++            const size_t padded_count = static_cast<size_t>(n_vocab - n_unpadded_vocab);
++            SRV_INF(
++                    "IQL_SMOKE_RAW_LOGITS_V2 task_id=%d slot_id=%d completion_index=%d batch_index=%d count=%u unpadded_count=%d padded_count=%zu unpadded_finite=%zu unpadded_nan=%zu unpadded_pos_inf=%zu unpadded_neg_inf=%zu padded_finite=%zu padded_nan=%zu padded_pos_inf=%zu padded_neg_inf=%zu\n",
++                    slot.task ? slot.task->id : -1,
++                    slot.id,
++                    slot.n_decoded,
++                    idx,
++                    n_logits,
++                    n_unpadded_vocab,
++                    padded_count,
++                    unpadded_finite_count,
++                    unpadded_nan_count,
++                    unpadded_positive_infinity_count,
++                    unpadded_negative_infinity_count,
++                    padded_finite_count,
++                    padded_nan_count,
++                    padded_positive_infinity_count,
++                    padded_negative_infinity_count);
++
++            if (unpadded_finite_count != static_cast<size_t>(n_unpadded_vocab) ||
++                    unpadded_nan_count != 0 ||
++                    unpadded_positive_infinity_count != 0 ||
++                    unpadded_negative_infinity_count != 0) {
++                throw std::runtime_error("IQL smoke raw-logit audit found a non-finite unpadded logit");
++            }
++            if (padded_finite_count != 0 ||
++                    padded_nan_count != 0 ||
++                    padded_positive_infinity_count != 0 ||
++                    padded_negative_infinity_count != padded_count) {
++                throw std::runtime_error("IQL smoke raw-logit audit found an invalid padded logit");
 +            }
 +
              std::vector<llama_token_data> cur = get_token_probabilities(ctx_tgt, idx, n_probs_request);

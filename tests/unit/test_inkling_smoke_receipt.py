@@ -11,12 +11,14 @@ from pydantic import ValidationError
 from inkling_quant_lab.gguf.inkling_smoke import (
     HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
     INSTRUMENTATION_SCHEMA_VERSION,
+    LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
     load_inkling_smoke_config,
     load_verified_export_reference,
 )
 from inkling_quant_lab.gguf.inkling_smoke_execution import (
     SmokeControlPlaneProvenance,
     SmokeNvidiaSmiTopologyDiagnostic,
+    SmokeRawLogitAuditV2,
     smoke_control_plane_provenance,
     smoke_control_plane_tree_sha256,
     smoke_hardware_topology_sha256,
@@ -72,7 +74,10 @@ def _receipt_context() -> tuple[Any, Any, SmokeControlPlaneProvenance, str]:
     )
 
 
-def _historical_receipt_context() -> tuple[
+def _version_one_receipt_context(
+    patch_sha256: str,
+    patch_size_bytes: int,
+) -> tuple[
     Any,
     Any,
     SmokeControlPlaneProvenance,
@@ -80,15 +85,18 @@ def _historical_receipt_context() -> tuple[
 ]:
     current_config, reference, current_control_plane, _run_id = _receipt_context()
     config_payload = current_config.model_dump(mode="json")
-    config_payload["runtime"]["instrumentation_patch_sha256"] = (
-        HISTORICAL_INSTRUMENTATION_PATCH_SHA256
+    config_payload["schema_version"] = "inkling-smoke-config-v1"
+    config_payload.pop("output_vocabulary")
+    config_payload["runtime"]["instrumentation_schema_version"] = (
+        "inkling-llama-smoke-instrumentation-v1"
     )
+    config_payload["runtime"]["instrumentation_patch_sha256"] = patch_sha256
     config = type(current_config).model_validate(config_payload)
     files = tuple(
         item.model_copy(
             update={
-                "sha256": HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
-                "size_bytes": 14_870,
+                "sha256": patch_sha256,
+                "size_bytes": patch_size_bytes,
             }
         )
         if item.path == "patches/inkling-smoke-a015409.patch"
@@ -101,6 +109,30 @@ def _historical_receipt_context() -> tuple[
         tree_sha256=smoke_control_plane_tree_sha256(files),
     )
     return config, reference, control_plane, smoke_run_id(config, control_plane.tree_sha256)
+
+
+def _historical_receipt_context() -> tuple[
+    Any,
+    Any,
+    SmokeControlPlaneProvenance,
+    str,
+]:
+    return _version_one_receipt_context(
+        HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
+        14_870,
+    )
+
+
+def _legacy_current_receipt_context() -> tuple[
+    Any,
+    Any,
+    SmokeControlPlaneProvenance,
+    str,
+]:
+    return _version_one_receipt_context(
+        LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
+        15_179,
+    )
 
 
 def _gpu_topology(
@@ -618,7 +650,7 @@ def _valid_v4_receipt() -> tuple[
     str,
 ]:
     receipt, _historical_config, reference, _historical_control_plane, _run_id = _valid_receipt()
-    config, current_reference, control_plane, run_id = _receipt_context()
+    config, current_reference, control_plane, run_id = _legacy_current_receipt_context()
     assert current_reference == reference
     receipt["schema_version"] = "inkling-smoke-terminal-v4"
     receipt["run_id"] = run_id
@@ -654,6 +686,68 @@ def _valid_v4_receipt() -> tuple[
         receipt["hardware"],
         receipt["gpu_topology"],
     )
+    receipt["receipt_sha256"] = smoke_terminal_receipt_sha256(receipt)
+    return receipt, config, reference, control_plane, run_id
+
+
+def _valid_v5_receipt() -> tuple[
+    dict[str, Any],
+    Any,
+    Any,
+    SmokeControlPlaneProvenance,
+    str,
+]:
+    receipt, _legacy_config, reference, _legacy_control_plane, _run_id = _valid_v4_receipt()
+    config, current_reference, control_plane, run_id = _receipt_context()
+    assert current_reference == reference
+    assert config.output_vocabulary is not None
+    output_vocabulary = config.output_vocabulary
+    receipt["schema_version"] = "inkling-smoke-terminal-v5"
+    receipt["run_id"] = run_id
+    receipt["smoke_config_hash"] = config.config_hash()
+    receipt["control_plane_sha256"] = control_plane.tree_sha256
+    receipt["control_plane_file_count"] = control_plane.file_count
+    receipt["invocation"]["run_id"] = run_id
+    receipt["invocation"]["smoke_config_hash"] = config.config_hash()
+    receipt["invocation"]["control_plane_sha256"] = control_plane.tree_sha256
+    receipt["invocation"]["attempt_registry_key"] = f"{run_id}:smoke_test"
+    receipt["runtime"]["instrumentation_schema_version"] = (
+        config.runtime.instrumentation_schema_version
+    )
+    receipt["runtime"]["instrumentation_patch_sha256"] = config.runtime.instrumentation_patch_sha256
+    raw_rows = [
+        {
+            "task_id": index // 2,
+            "slot_id": 0,
+            "completion_index": index + 1,
+            "batch_index": 0,
+            "count": output_vocabulary.vocab_size,
+            "unpadded_count": output_vocabulary.unpadded_vocab_size,
+            "padded_count": output_vocabulary.padded_vocab_size,
+            "unpadded_finite": output_vocabulary.unpadded_vocab_size,
+            "unpadded_nan": 0,
+            "unpadded_pos_inf": 0,
+            "unpadded_neg_inf": 0,
+            "padded_finite": 0,
+            "padded_nan": 0,
+            "padded_pos_inf": 0,
+            "padded_neg_inf": output_vocabulary.padded_vocab_size,
+        }
+        for index in range(12)
+    ]
+    receipt["server"]["raw_logit_audit"] = {
+        "schema_version": "inkling-raw-logit-audit-v2",
+        "expected_generated_token_vectors": len(raw_rows),
+        "observed_generated_token_vectors": len(raw_rows),
+        "vocab_size": output_vocabulary.vocab_size,
+        "unpadded_vocab_size": output_vocabulary.unpadded_vocab_size,
+        "padded_vocab_size": output_vocabulary.padded_vocab_size,
+        "rows": raw_rows,
+        "all_rows_complete": True,
+        "all_unpadded_values_finite": True,
+        "all_padded_values_negative_infinity": True,
+    }
+    receipt["server"]["properties"]["vocab_size"] = output_vocabulary.vocab_size
     receipt["receipt_sha256"] = smoke_terminal_receipt_sha256(receipt)
     return receipt, config, reference, control_plane, run_id
 
@@ -754,7 +848,9 @@ def test_complete_v4_terminal_receipt_binds_cuda_peer_topology() -> None:
 
     assert observed.schema_version == "inkling-smoke-terminal-v4"
     assert observed.host.topology_schema_version == "inkling-smoke-hardware-topology-v4"
-    assert observed.runtime.instrumentation_schema_version == INSTRUMENTATION_SCHEMA_VERSION
+    assert observed.runtime.instrumentation_schema_version == (
+        "inkling-llama-smoke-instrumentation-v1"
+    )
     assert observed.host.nvidia_smi_topo_m_sha256 is None
     assert observed.gpu_topology is not None
     assert tuple(
@@ -768,6 +864,147 @@ def test_complete_v4_terminal_receipt_binds_cuda_peer_topology() -> None:
         observed.hardware,
         observed.gpu_topology,
     )
+
+
+def test_complete_v5_terminal_receipt_binds_padded_vocabulary_evidence() -> None:
+    receipt, config, reference, control_plane, run_id = _valid_v5_receipt()
+
+    observed = validate_smoke_terminal_receipt(
+        receipt,
+        config=config,
+        reference=reference,
+        control_plane=control_plane,
+        run_id=run_id,
+    )
+
+    assert observed.schema_version == "inkling-smoke-terminal-v5"
+    assert observed.runtime.instrumentation_schema_version == INSTRUMENTATION_SCHEMA_VERSION
+    raw_logit_audit = observed.server.raw_logit_audit
+    assert isinstance(raw_logit_audit, SmokeRawLogitAuditV2)
+    assert raw_logit_audit.vocab_size == 201_024
+    assert raw_logit_audit.unpadded_vocab_size == 200_058
+    assert raw_logit_audit.padded_vocab_size == 966
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        lambda value: value["server"]["raw_logit_audit"]["rows"][0].__setitem__(
+            "padded_finite",
+            1,
+        ),
+        lambda value: value["server"]["raw_logit_audit"]["rows"][0].__setitem__(
+            "padded_neg_inf",
+            965,
+        ),
+        lambda value: value["server"]["raw_logit_audit"]["rows"][1].update(
+            {
+                field: value["server"]["raw_logit_audit"]["rows"][0][field]
+                for field in (
+                    "task_id",
+                    "slot_id",
+                    "completion_index",
+                    "batch_index",
+                )
+            }
+        ),
+        lambda value: value["server"]["raw_logit_audit"]["rows"].pop(),
+    ),
+    ids=(
+        "finite-padded-value",
+        "missing-padded-negative-infinity",
+        "duplicate-vector-identity",
+        "missing-vector",
+    ),
+)
+def test_v5_terminal_receipt_rejects_invalid_partitioned_logit_evidence(
+    mutate: Callable[[dict[str, Any]], object],
+) -> None:
+    receipt, config, reference, control_plane, run_id = _valid_v5_receipt()
+    mutate(receipt)
+    _reseal(receipt)
+
+    with pytest.raises(ValueError, match="schema is invalid"):
+        validate_smoke_terminal_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+        )
+
+
+def test_v5_terminal_receipt_rejects_a_config_incompatible_vocabulary_boundary() -> None:
+    receipt, config, reference, control_plane, run_id = _valid_v5_receipt()
+    audit = receipt["server"]["raw_logit_audit"]
+    audit["unpadded_vocab_size"] = 200_057
+    audit["padded_vocab_size"] = 967
+    for row in audit["rows"]:
+        row["unpadded_count"] = 200_057
+        row["unpadded_finite"] = 200_057
+        row["padded_count"] = 967
+        row["padded_neg_inf"] = 967
+    _reseal(receipt)
+
+    with pytest.raises(ValueError, match="vocabulary differs from the exact config"):
+        validate_smoke_terminal_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+        )
+
+
+def test_v5_terminal_receipt_rejects_a_token_from_the_padded_suffix() -> None:
+    receipt, config, reference, control_plane, run_id = _valid_v5_receipt()
+    receipt["probes"][0]["trials"][0]["token_ids"][0] = 200_058
+    _reseal(receipt)
+
+    with pytest.raises(ValueError, match="schema is invalid"):
+        validate_smoke_terminal_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+        )
+
+
+def test_terminal_receipt_versions_reject_the_other_raw_logit_schema() -> None:
+    v5, v5_config, reference, v5_control_plane, v5_run_id = _valid_v5_receipt()
+    v3, _v3_config, _reference, _v3_control_plane, _v3_run_id = _valid_receipt()
+    v1_audit = copy.deepcopy(v3["server"]["raw_logit_audit"])
+    v1_audit["vocab_size"] = 201_024
+    for row in v1_audit["rows"]:
+        row["count"] = 201_024
+        row["finite"] = 201_024
+    v5["server"]["raw_logit_audit"] = v1_audit
+    _reseal(v5)
+
+    with pytest.raises(ValueError, match="schema is invalid"):
+        validate_smoke_terminal_receipt(
+            v5,
+            config=v5_config,
+            reference=reference,
+            control_plane=v5_control_plane,
+            run_id=v5_run_id,
+        )
+
+    v4, v4_config, _reference, v4_control_plane, v4_run_id = _valid_v4_receipt()
+    valid_v2_audit = _valid_v5_receipt()[0]["server"]["raw_logit_audit"]
+    v4["server"]["raw_logit_audit"] = valid_v2_audit
+    v4["server"]["properties"]["vocab_size"] = 201_024
+    _reseal(v4)
+
+    with pytest.raises(ValueError, match="schema is invalid"):
+        validate_smoke_terminal_receipt(
+            v4,
+            config=v4_config,
+            reference=reference,
+            control_plane=v4_control_plane,
+            run_id=v4_run_id,
+        )
 
 
 def test_nvidia_smi_topology_diagnostic_accepts_rc255_only_as_command_failed() -> None:

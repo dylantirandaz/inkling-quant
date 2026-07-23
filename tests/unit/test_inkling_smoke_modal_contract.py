@@ -769,6 +769,7 @@ def test_smoke_runner_build_and_mount_contract_is_closed() -> None:
     assert "build/tools/ui/dist.tar.gz" in source
     assert ".add_local_file(PATCH_PATH, str(REMOTE_PATCH), copy=True)" in source
     assert "git -C {LLAMA_CPP_DIR} apply --check {REMOTE_PATCH}" in source
+    assert "58b90ccbecd60cb0784810224d79e70e4152b521" in source
     assert "9be8c02497080fa57ad9460084c2337a1997f89b" in source
     assert ".iql-smoke-patch.sha256" in source
     assert ".iql-patched-diff.sha256" in source
@@ -1525,13 +1526,13 @@ def test_safe_subprocess_failure_rejects_untrusted_failure_shapes(
         safe_failure(error)
 
 
-def test_record_failure_uses_terminal_v4_safe_subprocess_evidence() -> None:
+def test_record_failure_uses_terminal_v5_safe_subprocess_evidence() -> None:
     source = RUNNER_PATH.read_text(encoding="utf-8")
     start = source.index("def _record_failure(")
     end = source.index("\n\n@app.function(", start)
     function_source = source[start:end]
 
-    assert '"schema_version": "inkling-smoke-terminal-v4"' in function_source
+    assert '"schema_version": "inkling-smoke-terminal-v5"' in function_source
     assert '"safe_subprocess_failure": _safe_subprocess_failure(error)' in function_source
     assert '"subprocess_failure":' not in function_source
 
@@ -2588,6 +2589,7 @@ def test_terminal_validation_rejects_noncanonical_record_terminators(
         ("inkling-smoke-terminal-v2", False, False),
         ("inkling-smoke-terminal-v3", True, False),
         ("inkling-smoke-terminal-v4", True, True),
+        ("inkling-smoke-terminal-v5", True, True),
     ),
 )
 def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostics(
@@ -2638,9 +2640,13 @@ def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostic
     if schema_version in {
         "inkling-smoke-terminal-v3",
         "inkling-smoke-terminal-v4",
+        "inkling-smoke-terminal-v5",
     }:
         receipt_fields["invocation"] = invocation
-    if schema_version == "inkling-smoke-terminal-v4":
+    if schema_version in {
+        "inkling-smoke-terminal-v4",
+        "inkling-smoke-terminal-v5",
+    }:
         receipt_fields["safe_subprocess_failure"] = safe_diagnostic
     receipt = SimpleNamespace(**receipt_fields)
     acceptance_validations: list[object] = []
@@ -2973,6 +2979,7 @@ def test_manager_fails_closed_on_attempt_claim_and_terminal_receipts() -> None:
     assert "validate_smoke_failure_receipt(" in failure_source
     assert '"inkling-smoke-terminal-v3"' in failure_source
     assert '"inkling-smoke-terminal-v4"' in failure_source
+    assert '"inkling-smoke-terminal-v5"' in failure_source
     assert "_safe_subprocess_failure_record(" in failure_source
     assert '"failure_records": failures' in remote_source
     assert "_validate_remote_post_spawn_acceptance(" in failure_source
