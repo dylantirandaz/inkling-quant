@@ -158,6 +158,7 @@ _CPU_NODE_RE: Final = re.compile(
 MAX_BACKEND_FAILURE_RECORDS: Final = 64
 MAX_BACKEND_FAILURE_LINE_BYTES: Final = 4_096
 MAX_BACKEND_FAILURE_OP_BYTES: Final = 64
+_MAX_BACKEND_FAILURE_GRAPH_IDENTITIES: Final = 8_192
 BACKEND_FAILURE_MARKER_TOKENS: Final[tuple[bytes, bytes]] = (
     _BACKEND_GRAPH_MARKER.encode("ascii"),
     _CPU_NODE_MARKER.encode("ascii"),
@@ -1118,6 +1119,7 @@ class BackendFailureDiagnostic(StrictFrozenModel):
     schema_version: Literal["inkling-smoke-backend-failure-v1"] = "inkling-smoke-backend-failure-v1"
     cpu_model_graph_fallback_observed: StrictBool
     graph_marker_count: StrictInt = Field(ge=0)
+    affected_graph_marker_count: StrictInt = Field(ge=0)
     cpu_node_marker_count: StrictInt = Field(ge=0)
     affected_graphs: tuple[BackendFailureGraphDiagnostic, ...] = Field(
         max_length=MAX_BACKEND_FAILURE_RECORDS
@@ -1139,16 +1141,22 @@ class BackendFailureDiagnostic(StrictFrozenModel):
             raise ValueError("backend failure diagnostic contains duplicate CPU-node identities")
         if any(row.graph_uid not in set(graph_uids) for row in self.cpu_node_samples):
             raise ValueError("backend failure CPU-node sample lacks an affected graph")
+        if self.affected_graph_marker_count > self.graph_marker_count:
+            raise ValueError("affected backend graph count exceeds the total graph count")
         if self.graph_marker_count < len(self.affected_graphs):
             raise ValueError("backend failure graph count is smaller than its retained records")
+        if self.affected_graph_marker_count < len(self.affected_graphs):
+            raise ValueError("affected backend graph count is smaller than its retained records")
         if self.cpu_node_marker_count < len(self.cpu_node_samples):
             raise ValueError("backend failure CPU-node count is smaller than its retained samples")
         expected_truncation = (
-            self.graph_marker_count > MAX_BACKEND_FAILURE_RECORDS
+            self.affected_graph_marker_count > MAX_BACKEND_FAILURE_RECORDS
             or self.cpu_node_marker_count > MAX_BACKEND_FAILURE_RECORDS
         )
         if self.records_truncated != expected_truncation:
-            raise ValueError("backend diagnostic records_truncated differs from marker counts")
+            raise ValueError(
+                "backend diagnostic records_truncated differs from retained-record counts"
+            )
         if self.records_truncated and (
             self.cpu_model_graph_fallback_observed or self.affected_graphs or self.cpu_node_samples
         ):
@@ -1162,11 +1170,12 @@ class BackendFailureDiagnostic(StrictFrozenModel):
 
 
 class BackendFailureDiagnosticAccumulator:
-    """Scan complete lines while retaining at most 64 graph and node records."""
+    """Scan all lines while retaining at most 64 affected graphs and CPU nodes."""
 
     def __init__(self) -> None:
         self._malformed = False
         self._graph_marker_count = 0
+        self._affected_graph_marker_count = 0
         self._cpu_node_marker_count = 0
         self._seen_graph_uids: set[int] = set()
         self._affected_graphs: list[BackendFailureGraphDiagnostic] = []
@@ -1256,13 +1265,15 @@ class BackendFailureDiagnosticAccumulator:
             unassigned = int(unassigned_raw)
             if graph_uid <= 0 or compute <= 0 or compute != gpu + cpu + accel + other + unassigned:
                 raise ValueError("backend failure graph counters are invalid")
-            if graph_uid in self._seen_graph_uids or any(
-                row.graph_uid == graph_uid for row in self._affected_graphs
-            ):
+            if cpu > 0:
+                self._affected_graph_marker_count += 1
+            if graph_uid in self._seen_graph_uids:
                 self.mark_malformed()
                 return
-            if len(self._seen_graph_uids) < MAX_BACKEND_FAILURE_RECORDS:
-                self._seen_graph_uids.add(graph_uid)
+            if len(self._seen_graph_uids) >= _MAX_BACKEND_FAILURE_GRAPH_IDENTITIES:
+                self.mark_malformed()
+                return
+            self._seen_graph_uids.add(graph_uid)
             if cpu == 0:
                 return
             graph = BackendFailureGraphDiagnostic(
@@ -1321,7 +1332,7 @@ class BackendFailureDiagnosticAccumulator:
         retained_cpu_graph_ids = set(retained_cpu_counts)
 
         records_truncated = (
-            self._graph_marker_count > MAX_BACKEND_FAILURE_RECORDS
+            self._affected_graph_marker_count > MAX_BACKEND_FAILURE_RECORDS
             or self._cpu_node_marker_count > MAX_BACKEND_FAILURE_RECORDS
         )
         if records_truncated:
@@ -1342,6 +1353,7 @@ class BackendFailureDiagnosticAccumulator:
         diagnostic = BackendFailureDiagnostic(
             cpu_model_graph_fallback_observed=positive,
             graph_marker_count=self._graph_marker_count,
+            affected_graph_marker_count=self._affected_graph_marker_count,
             cpu_node_marker_count=self._cpu_node_marker_count,
             affected_graphs=affected_graphs,
             cpu_node_samples=cpu_node_samples,

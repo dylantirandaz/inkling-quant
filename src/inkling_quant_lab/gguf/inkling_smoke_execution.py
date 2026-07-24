@@ -664,6 +664,7 @@ class SmokeServerLogFailureEvidence(_SmokeReceiptModel):
                 or any(self.safe_failure_signals.model_dump(mode="json").values())
                 or self.backend_diagnostic.cpu_model_graph_fallback_observed
                 or self.backend_diagnostic.graph_marker_count != 0
+                or self.backend_diagnostic.affected_graph_marker_count != 0
                 or self.backend_diagnostic.cpu_node_marker_count != 0
                 or self.backend_diagnostic.affected_graphs
                 or self.backend_diagnostic.cpu_node_samples
@@ -684,6 +685,12 @@ class SmokeServerLogFailureEvidence(_SmokeReceiptModel):
             affected_graph_ids = {
                 graph.graph_uid for graph in self.backend_diagnostic.affected_graphs
             }
+            if self.backend_diagnostic.affected_graph_marker_count != len(
+                self.backend_diagnostic.affected_graphs
+            ):
+                raise ValueError(
+                    "complete backend scan affected graph count differs from retained records"
+                )
             if self.backend_diagnostic.cpu_node_marker_count != len(
                 self.backend_diagnostic.cpu_node_samples
             ):

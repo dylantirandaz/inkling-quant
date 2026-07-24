@@ -89,6 +89,7 @@ def _backend_failure_diagnostic(*, cpu_fallback: bool) -> dict[str, Any]:
             "schema_version": "inkling-smoke-backend-failure-v1",
             "cpu_model_graph_fallback_observed": False,
             "graph_marker_count": 0,
+            "affected_graph_marker_count": 0,
             "cpu_node_marker_count": 0,
             "affected_graphs": [],
             "cpu_node_samples": [],
@@ -100,6 +101,7 @@ def _backend_failure_diagnostic(*, cpu_fallback: bool) -> dict[str, Any]:
         "schema_version": "inkling-smoke-backend-failure-v1",
         "cpu_model_graph_fallback_observed": True,
         "graph_marker_count": 1,
+        "affected_graph_marker_count": 1,
         "cpu_node_marker_count": 1,
         "affected_graphs": [
             {
@@ -143,6 +145,7 @@ def _backend_diagnostic_with_partial_graph_coverage() -> dict[str, Any]:
     second_graph = dict(diagnostic["affected_graphs"][0])
     second_graph["graph_uid"] = 8
     diagnostic["graph_marker_count"] = 2
+    diagnostic["affected_graph_marker_count"] = 2
     diagnostic["affected_graphs"].append(second_graph)
     return diagnostic
 
@@ -818,6 +821,41 @@ def test_failure_receipt_v6_accepts_complete_positive_cpu_placement_evidence() -
     assert observed.server_log_evidence.backend_diagnostic.cpu_node_marker_count == 1
 
 
+def test_failure_receipt_v6_accepts_cpu_evidence_after_many_benign_graphs() -> None:
+    (
+        receipt,
+        config,
+        reference,
+        control_plane,
+        run_id,
+        launch_intent_sha256,
+    ) = _failure_receipt(
+        "inkling-smoke-terminal-v6",
+        backend_cpu_placement_error=True,
+    )
+    receipt["server_log_evidence"]["backend_diagnostic"]["graph_marker_count"] = (
+        MAX_BACKEND_FAILURE_RECORDS + 1
+    )
+    receipt["receipt_sha256"] = smoke_terminal_receipt_sha256(receipt)
+
+    observed = validate_smoke_failure_receipt(
+        receipt,
+        config=config,
+        reference=reference,
+        control_plane=control_plane,
+        run_id=run_id,
+        launch_intent_sha256=launch_intent_sha256,
+    )
+
+    assert isinstance(observed, SmokeFailureReceiptV6)
+    diagnostic = observed.server_log_evidence.backend_diagnostic
+    assert diagnostic.graph_marker_count == MAX_BACKEND_FAILURE_RECORDS + 1
+    assert diagnostic.affected_graph_marker_count == 1
+    assert diagnostic.cpu_node_marker_count == 1
+    assert diagnostic.records_truncated is False
+    assert diagnostic.cpu_model_graph_fallback_observed is True
+
+
 def test_failure_receipt_v6_matches_subprocess_evidence_to_the_exception_type() -> None:
     (
         receipt,
@@ -1032,6 +1070,7 @@ def test_server_log_failure_evidence_rejects_complete_truncated_scan() -> None:
     backend_diagnostic.update(
         {
             "graph_marker_count": MAX_BACKEND_FAILURE_RECORDS + 1,
+            "affected_graph_marker_count": MAX_BACKEND_FAILURE_RECORDS + 1,
             "cpu_node_marker_count": MAX_BACKEND_FAILURE_RECORDS + 1,
             "records_truncated": True,
         }
@@ -1060,7 +1099,7 @@ def test_server_log_failure_evidence_rejects_complete_truncated_scan() -> None:
 
 def test_server_log_failure_evidence_rejects_unmarked_truncation() -> None:
     backend_diagnostic = _backend_failure_diagnostic(cpu_fallback=False)
-    backend_diagnostic["graph_marker_count"] = MAX_BACKEND_FAILURE_RECORDS + 1
+    backend_diagnostic["cpu_node_marker_count"] = MAX_BACKEND_FAILURE_RECORDS + 1
 
     with pytest.raises(ValidationError, match="truncated"):
         SmokeServerLogFailureEvidence.model_validate(
@@ -1092,11 +1131,17 @@ def test_server_log_failure_evidence_rejects_unmarked_truncation() -> None:
         },
         _backend_diagnostic_with_graph_without_cpu_marker(),
         _backend_diagnostic_with_partial_graph_coverage(),
+        {
+            **_backend_failure_diagnostic(cpu_fallback=True),
+            "graph_marker_count": 2,
+            "affected_graph_marker_count": 2,
+        },
     ),
     ids=(
         "cpu-marker-without-graph",
         "positive-cpu-graph-without-marker",
         "partial-graph-sample-coverage",
+        "affected-count-differs-from-retained-graphs",
     ),
 )
 def test_server_log_failure_evidence_rejects_inconsistent_complete_backend_scan(
@@ -1139,6 +1184,10 @@ def test_server_log_failure_evidence_rejects_inconsistent_complete_backend_scan(
             _backend_failure_diagnostic(cpu_fallback=True),
         ),
         lambda value: value["backend_diagnostic"].__setitem__("graph_marker_count", 1),
+        lambda value: value["backend_diagnostic"].__setitem__(
+            "affected_graph_marker_count",
+            1,
+        ),
         lambda value: value["backend_diagnostic"].__setitem__("records_truncated", True),
     ),
     ids=(
@@ -1149,6 +1198,7 @@ def test_server_log_failure_evidence_rejects_inconsistent_complete_backend_scan(
         "safe-signal",
         "positive-backend-diagnostic",
         "nonzero-backend-count",
+        "nonzero-affected-backend-count",
         "truncated-backend-records",
     ),
 )

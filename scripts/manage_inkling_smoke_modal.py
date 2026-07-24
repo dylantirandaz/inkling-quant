@@ -1095,6 +1095,7 @@ def _safe_server_log_failure_record(receipt: Any) -> dict[str, Any]:
             "schema_version": backend.schema_version,
             "cpu_model_graph_fallback_observed": backend.cpu_model_graph_fallback_observed,
             "graph_marker_count": backend.graph_marker_count,
+            "affected_graph_marker_count": backend.affected_graph_marker_count,
             "cpu_node_marker_count": backend.cpu_node_marker_count,
             "affected_graphs": [
                 {

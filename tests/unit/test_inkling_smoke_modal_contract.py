@@ -20,6 +20,7 @@ from typing import Any
 
 import pytest
 
+import inkling_quant_lab.gguf.inkling_smoke as inkling_smoke
 from inkling_quant_lab.gguf.inkling_smoke import (
     BACKEND_FAILURE_MARKER_TOKENS,
     LLAMA_SERVER_AUDIT_LOG_VERBOSITY,
@@ -1541,6 +1542,7 @@ def test_failure_server_log_hashes_oversized_content_and_cross_chunk_signals(
         "schema_version": "inkling-smoke-backend-failure-v1",
         "cpu_model_graph_fallback_observed": True,
         "graph_marker_count": 1,
+        "affected_graph_marker_count": 1,
         "cpu_node_marker_count": 1,
         "affected_graphs": [
             {
@@ -1641,8 +1643,9 @@ def test_failure_server_log_counts_markers_after_an_overlong_line_limit(
     assert observed["sha256"] == hashlib.sha256(payload).hexdigest()
     assert observed["scan_integrity"] == "malformed"
     assert diagnostic["graph_marker_count"] == observed_records
+    assert diagnostic["affected_graph_marker_count"] == 0
     assert diagnostic["cpu_node_marker_count"] == 0
-    assert diagnostic["records_truncated"] is True
+    assert diagnostic["records_truncated"] is False
     assert diagnostic["cpu_model_graph_fallback_observed"] is False
     assert diagnostic["affected_graphs"] == []
     assert diagnostic["cpu_node_samples"] == []
@@ -1701,6 +1704,7 @@ def test_failure_server_log_counts_each_marker_in_an_overlong_line(
     assert observed["sha256"] == hashlib.sha256(payload).hexdigest()
     assert observed["scan_integrity"] == "malformed"
     assert diagnostic["graph_marker_count"] == expected_graph_count
+    assert diagnostic["affected_graph_marker_count"] == 0
     assert diagnostic["cpu_node_marker_count"] == expected_cpu_node_count
     assert diagnostic["records_truncated"] is False
 
@@ -1778,12 +1782,101 @@ def test_failure_server_log_makes_truncated_marker_records_inconclusive(
     assert observed["sha256"] == hashlib.sha256(payload).hexdigest()
     assert observed["scan_integrity"] == "malformed"
     assert diagnostic["graph_marker_count"] == observed_records
+    assert diagnostic["affected_graph_marker_count"] == observed_records
     assert diagnostic["cpu_node_marker_count"] == observed_records
     assert diagnostic["records_truncated"] is True
     assert diagnostic["cpu_model_graph_fallback_observed"] is False
     assert diagnostic["affected_graphs"] == []
     assert diagnostic["cpu_node_samples"] == []
     assert "private_node" not in json.dumps(observed, sort_keys=True)
+
+
+def test_failure_server_log_keeps_cpu_evidence_after_many_benign_graphs(
+    tmp_path: Path,
+) -> None:
+    namespace = _isolated_runner_functions("_failure_server_log_evidence")
+    server_log = tmp_path / "llama-server.log"
+    benign_graphs = MAX_BACKEND_FAILURE_RECORDS + 1
+    affected_graph_uid = benign_graphs + 1
+    payload = b"".join(
+        (
+            f"IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid={graph_uid} "
+            "phase=post_assignment_pre_split scope=non_view_compute "
+            "compute=2 gpu=2 cpu=0 accel=0 other=0 unassigned=0\n"
+        ).encode("ascii")
+        for graph_uid in range(1, benign_graphs + 1)
+    ) + (
+        f"IQL_SMOKE_CPU_NODE_V1 graph_uid={affected_graph_uid} "
+        f"ordinal={affected_graph_uid} op=MUL_MAT name=private_node\n"
+        f"IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid={affected_graph_uid} "
+        "phase=post_assignment_pre_split scope=non_view_compute "
+        "compute=2 gpu=1 cpu=1 accel=0 other=0 unassigned=0\n"
+    ).encode("ascii")
+    server_log.write_bytes(payload)
+    namespace.update(
+        {
+            "SERVER_LOG": server_log,
+            "hashlib": hashlib,
+        }
+    )
+    evidence = namespace["_failure_server_log_evidence"]
+    assert callable(evidence)
+
+    observed = evidence()
+
+    diagnostic = observed["backend_diagnostic"]
+    assert observed["present"] is True
+    assert observed["size_bytes"] == len(payload)
+    assert observed["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert observed["scan_integrity"] == "complete"
+    assert diagnostic["graph_marker_count"] == benign_graphs + 1
+    assert diagnostic["affected_graph_marker_count"] == 1
+    assert diagnostic["cpu_node_marker_count"] == 1
+    assert diagnostic["records_truncated"] is False
+    assert diagnostic["cpu_model_graph_fallback_observed"] is True
+    assert [row["graph_uid"] for row in diagnostic["affected_graphs"]] == [affected_graph_uid]
+    assert [row["graph_uid"] for row in diagnostic["cpu_node_samples"]] == [affected_graph_uid]
+    assert "private_node" not in json.dumps(observed, sort_keys=True)
+
+
+def test_failure_server_log_hashes_full_log_after_graph_identity_limit(
+    tmp_path: Path,
+) -> None:
+    namespace = _isolated_runner_functions("_failure_server_log_evidence")
+    server_log = tmp_path / "llama-server.log"
+    observed_graphs = inkling_smoke._MAX_BACKEND_FAILURE_GRAPH_IDENTITIES + 1
+    payload = b"".join(
+        (
+            f"IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid={graph_uid} "
+            "phase=post_assignment_pre_split scope=non_view_compute "
+            "compute=2 gpu=2 cpu=0 accel=0 other=0 unassigned=0\n"
+        ).encode("ascii")
+        for graph_uid in range(1, observed_graphs + 1)
+    )
+    server_log.write_bytes(payload)
+    namespace.update(
+        {
+            "SERVER_LOG": server_log,
+            "hashlib": hashlib,
+        }
+    )
+    evidence = namespace["_failure_server_log_evidence"]
+    assert callable(evidence)
+
+    observed = evidence()
+
+    diagnostic = observed["backend_diagnostic"]
+    assert observed["present"] is True
+    assert observed["size_bytes"] == len(payload)
+    assert observed["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert observed["scan_integrity"] == "malformed"
+    assert diagnostic["graph_marker_count"] == observed_graphs
+    assert diagnostic["affected_graph_marker_count"] == 0
+    assert diagnostic["cpu_node_marker_count"] == 0
+    assert diagnostic["records_truncated"] is False
+    assert diagnostic["cpu_model_graph_fallback_observed"] is False
+    assert diagnostic["affected_graphs"] == []
+    assert diagnostic["cpu_node_samples"] == []
 
 
 def test_gpu_topology_identity_preserves_the_exact_ordered_peer_links() -> None:
@@ -3141,6 +3234,7 @@ def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostic
         schema_version="inkling-smoke-backend-failure-v1",
         cpu_model_graph_fallback_observed=True,
         graph_marker_count=1,
+        affected_graph_marker_count=1,
         cpu_node_marker_count=1,
         affected_graphs=(
             SimpleNamespace(
@@ -3295,6 +3389,7 @@ def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostic
                 "schema_version": "inkling-smoke-backend-failure-v1",
                 "cpu_model_graph_fallback_observed": True,
                 "graph_marker_count": 1,
+                "affected_graph_marker_count": 1,
                 "cpu_node_marker_count": 1,
                 "affected_graphs": [
                     {

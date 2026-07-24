@@ -39,29 +39,36 @@ The final verification checked the export structure, file set, sizes, and checks
 It did not measure the quality of the quantized Inkling model.
 The project does not yet have an accepted inference-smoke result for the final files.
 
-The latest controlled smoke attempt used terminal evidence version 5.
-It loaded all 49 model files and the projector on two B300 GPUs.
-It reached server readiness and finished the declared text, image, and audio probe calls.
-The strict backend audit then found a model graph operation on a CPU.
-The run failed in the `stop_server` phase, as required by the no-CPU rule.
-
-The immutable failure receipt has SHA-256
-`b0ec38d43d96f448a9e258f4ad4e32d55a59de37e85e2ea1d443f9db8715da7a`.
-The server log has SHA-256
-`d848365973900761e90db79f86f5a081919fb3bd48e5f355f8d4677affe78773`.
-The safe model-load, GPU, memory, projector, and architecture failure signals were all false.
-This result is a backend-placement failure.
+The latest controlled smoke attempt used commit
+`b051abdd1701ca16fc473c4b7944151aa02ae7b2` and control-plane SHA-256
+`d5d20a27fa598a18843e4572414daa4195463a35982cc22246326a4a80966e55`.
+Modal accepted one launch. Its call ID is `fc-01KYA88KH05C6B5WY7DBBRRD8S`, and its task ID is
+`ta-01KYA88MD533YKP6AF0QZG075R`.
+The backend audit raised `BackendCpuPlacementError`.
+The attempt is consumed.
 It is not a smoke-test pass.
 
-The version 5 receipt did not record the CPU operation.
-The raw server log was temporary and is gone.
-The exact CPU operation cannot be recovered from the retained evidence.
+The attempt did not commit a valid terminal version 6 receipt.
+Code review found a scanner path that can treat more than 64 total graph markers as retained-record
+truncation.
+The retained data does not prove which scanner condition blocked this receipt.
+This path is the best available explanation.
+The receipt does not give the exact marker counts or the CPU operation.
+Therefore, the project does not report either value as a measurement.
 
-The next failure receipt uses version 6.
-It records bounded graph counters, the CPU operation type, and a hash of the node name.
-It reads and hashes the full server log.
+The correction uses separate counts for all graph markers, affected graph markers, and CPU-node
+markers.
+It keeps at most 64 affected graph records and 64 CPU-node samples.
+It sets the truncation flag only when the affected-graph count or the CPU-node count is more than
+64.
+A complete scan requires the affected-graph count to equal the number of retained affected graph
+records.
+It requires the CPU-node count to equal the number of retained CPU-node samples.
+It also requires each CPU sample to match an affected graph.
+The scanner checks exact duplicate graph identifiers with a separate limit of 8,192 identifiers.
+If this limit is exceeded, the scan is malformed and inconclusive.
+The scanner still reads, hashes, and counts the full log.
 It does not retain the raw log, prompts, output text, marker lines, or node names.
-A malformed or inconsistent marker makes the result inconclusive.
 Passing receipts remain version 5.
 Historical receipt bytes and validation rules do not change.
 
@@ -73,7 +80,8 @@ At least one audited graph must use both devices.
 An auxiliary projector graph can use `CUDA0` only.
 Every audited graph must have positive GPU work and no CPU or other accelerator fallback.
 Historical receipts keep their original validation rules and hashes.
-A diagnostic remote run needs a new sealed identity and a new confirmation.
+The next remote attempt needs a new commit, control-plane hash, sealed identity, and exact
+confirmation.
 
 The Git repository does not contain the model files.
 The files are too large for Git, and the project does not upload model weights by default.
