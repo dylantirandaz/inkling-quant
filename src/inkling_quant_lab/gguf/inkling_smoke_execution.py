@@ -43,6 +43,8 @@ from inkling_quant_lab.gguf.inkling_smoke import (
     LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
     PINNED_LLAMA_CPP_COMMIT,
     PINNED_MODEL_REVISION,
+    BackendCpuPlacementError,
+    BackendFailureDiagnostic,
     InklingSmokeConfig,
     InklingVerifiedExportReference,
 )
@@ -52,6 +54,7 @@ _SMOKE_RECEIPT_HASH_DOMAIN_V2 = b"inkling-smoke-terminal-receipt-v2\0"
 _SMOKE_RECEIPT_HASH_DOMAIN_V3 = b"inkling-smoke-terminal-receipt-v3\0"
 _SMOKE_RECEIPT_HASH_DOMAIN_V4 = b"inkling-smoke-terminal-receipt-v4\0"
 SMOKE_RECEIPT_HASH_DOMAIN = b"inkling-smoke-terminal-receipt-v5\0"
+_SMOKE_RECEIPT_HASH_DOMAIN_V6 = b"inkling-smoke-terminal-receipt-v6\0"
 SMOKE_PACKAGE_MANIFEST_HASH_DOMAIN = b"inkling-smoke-package-manifest-v2\0"
 _SMOKE_HARDWARE_TOPOLOGY_HASH_DOMAIN_V2 = b"inkling-smoke-hardware-topology-v2\0"
 _SMOKE_HARDWARE_TOPOLOGY_HASH_DOMAIN_V3 = b"inkling-smoke-hardware-topology-v3\0"
@@ -638,6 +641,41 @@ class SmokeSafeFailureSignals(_SmokeReceiptModel):
     unsupported_architecture_observed: StrictBool
 
 
+class SmokeServerLogFailureEvidence(_SmokeReceiptModel):
+    """Bounded, non-sensitive evidence derived from one failure-path server log."""
+
+    schema_version: Literal["inkling-smoke-server-log-failure-v1"]
+    present: StrictBool
+    size_bytes: StrictInt = Field(ge=0)
+    sha256: StrictStr = Field(pattern=r"^[0-9a-f]{64}$")
+    raw_log_recorded: RequiredFalse
+    scan_integrity: Literal["complete", "malformed", "missing"]
+    safe_failure_signals: SmokeSafeFailureSignals
+    backend_diagnostic: BackendFailureDiagnostic
+
+    @model_validator(mode="after")
+    def log_identity_and_scan_are_consistent(self) -> SmokeServerLogFailureEvidence:
+        empty_sha256 = hashlib.sha256(b"").hexdigest()
+        if self.scan_integrity == "missing":
+            if (
+                self.present
+                or self.size_bytes != 0
+                or self.sha256 != empty_sha256
+                or any(self.safe_failure_signals.model_dump(mode="json").values())
+                or self.backend_diagnostic.cpu_model_graph_fallback_observed
+            ):
+                raise ValueError("missing server log evidence contains observed log facts")
+            return self
+        if not self.present:
+            raise ValueError("present server log evidence cannot use an absent log")
+        if (
+            self.backend_diagnostic.cpu_model_graph_fallback_observed
+            and self.scan_integrity != "complete"
+        ):
+            raise ValueError("backend fallback evidence requires one complete server-log scan")
+        return self
+
+
 class SmokeSubprocessFailureEvidence(_SmokeReceiptModel):
     """Safe identity of one failed allowlisted preflight subprocess."""
 
@@ -847,8 +885,63 @@ class SmokeFailureReceiptV5(_SmokeFailureReceipt):
         return self
 
 
+_BACKEND_CPU_PLACEMENT_EXCEPTION_TYPE = (
+    f"{BackendCpuPlacementError.__module__}.{BackendCpuPlacementError.__qualname__}"
+)
+
+
+class SmokeFailureReceiptV6(_SmokeFailureReceipt):
+    """Version 6 failure evidence with bounded server-log diagnostics."""
+
+    schema_version: Literal["inkling-smoke-terminal-v6"]
+    invocation: SmokeInvocationEvidence
+    safe_subprocess_failure: SmokeSubprocessFailureEvidence | None
+    server_log_evidence: SmokeServerLogFailureEvidence
+
+    @model_validator(mode="after")
+    def invocation_and_failure_are_consistent(self) -> SmokeFailureReceiptV6:
+        if (
+            self.invocation.run_id,
+            self.invocation.call_id,
+            self.invocation.input_id,
+            self.invocation.task_id,
+            self.invocation.launch_intent_sha256,
+            self.invocation.smoke_config_hash,
+            self.invocation.control_plane_sha256,
+        ) != (
+            self.run_id,
+            self.call_id,
+            self.input_id,
+            self.task_id,
+            self.launch_intent_sha256,
+            self.smoke_config_hash,
+            self.control_plane_sha256,
+        ):
+            raise ValueError("failure invocation differs from the top-level receipt identity")
+        is_called_process_error = self.exception_type == "subprocess.CalledProcessError"
+        if is_called_process_error != (self.safe_subprocess_failure is not None):
+            raise ValueError("subprocess failure evidence differs from the exception type")
+        if self.server_log_sha256 != self.server_log_evidence.sha256:
+            raise ValueError("server-log evidence hash differs from the top-level receipt")
+        if self.safe_failure_signals != self.server_log_evidence.safe_failure_signals:
+            raise ValueError("server-log safe signals differ from the top-level receipt")
+        if self.exception_type == _BACKEND_CPU_PLACEMENT_EXCEPTION_TYPE and not (
+            self.server_log_evidence.present
+            and self.server_log_evidence.scan_integrity == "complete"
+            and self.server_log_evidence.backend_diagnostic.cpu_model_graph_fallback_observed
+        ):
+            raise ValueError(
+                "CPU placement failure lacks complete positive backend diagnostics"
+            )
+        return self
+
+
 SmokeFailureReceipt: TypeAlias = (
-    SmokeFailureReceiptV2 | SmokeFailureReceiptV3 | SmokeFailureReceiptV4 | SmokeFailureReceiptV5
+    SmokeFailureReceiptV2
+    | SmokeFailureReceiptV3
+    | SmokeFailureReceiptV4
+    | SmokeFailureReceiptV5
+    | SmokeFailureReceiptV6
 )
 
 
@@ -2600,6 +2693,7 @@ def _validate_smoke_failure_launch_schema(
         "inkling-smoke-terminal-v3": HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
         "inkling-smoke-terminal-v4": LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
         "inkling-smoke-terminal-v5": INSTRUMENTATION_PATCH_SHA256,
+        "inkling-smoke-terminal-v6": INSTRUMENTATION_PATCH_SHA256,
     }
     expected_patch = expected_patch_by_schema.get(schema_version)
     if expected_patch is None:
@@ -2651,6 +2745,8 @@ def validate_smoke_failure_receipt(
             receipt = SmokeFailureReceiptV4.model_validate(raw)
         elif schema_version == "inkling-smoke-terminal-v5":
             receipt = SmokeFailureReceiptV5.model_validate(raw)
+        elif schema_version == "inkling-smoke-terminal-v6":
+            receipt = SmokeFailureReceiptV6.model_validate(raw)
         else:
             raise ValueError("unsupported terminal smoke failure receipt schema version")
     except ValidationError as error:
@@ -2889,6 +2985,10 @@ def smoke_terminal_receipt_sha256(value: Mapping[str, Any]) -> str:
         domain = _SMOKE_RECEIPT_HASH_DOMAIN_V4
     elif schema_version == "inkling-smoke-terminal-v5":
         domain = SMOKE_RECEIPT_HASH_DOMAIN
+    elif schema_version == "inkling-smoke-terminal-v6":
+        if payload.get("status") != "failed":
+            raise ValueError("terminal smoke receipt v6 is valid only for failures")
+        domain = _SMOKE_RECEIPT_HASH_DOMAIN_V6
     else:
         raise ValueError("unsupported terminal smoke receipt schema version")
     return hashlib.sha256(domain + _canonical_json(payload).encode("utf-8")).hexdigest()
@@ -2909,6 +3009,7 @@ __all__ = [
     "SmokeFailureReceiptV3",
     "SmokeFailureReceiptV4",
     "SmokeFailureReceiptV5",
+    "SmokeFailureReceiptV6",
     "SmokeGpuTopologyEvidence",
     "SmokeHostEvidence",
     "SmokeInvocationEvidence",
@@ -2918,6 +3019,7 @@ __all__ = [
     "SmokeRawLogitAudit",
     "SmokeRawLogitAuditV2",
     "SmokeSafeFailureSignals",
+    "SmokeServerLogFailureEvidence",
     "SmokeSubprocessFailureEvidence",
     "SmokeTerminalReceipt",
     "canonical_python_package_inventory",

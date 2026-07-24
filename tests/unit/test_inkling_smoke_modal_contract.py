@@ -20,7 +20,11 @@ from typing import Any
 
 import pytest
 
-from inkling_quant_lab.gguf.inkling_smoke import LLAMA_SERVER_AUDIT_LOG_VERBOSITY
+from inkling_quant_lab.gguf.inkling_smoke import (
+    BACKEND_FAILURE_MARKER_TOKENS,
+    LLAMA_SERVER_AUDIT_LOG_VERBOSITY,
+    BackendFailureDiagnosticAccumulator,
+)
 from inkling_quant_lab.gguf.inkling_smoke_acceptance import (
     SmokePostSpawnAcceptance,
     smoke_post_spawn_acceptance_path,
@@ -39,6 +43,7 @@ from inkling_quant_lab.gguf.inkling_smoke_execution import (
     SmokeGpuTopologyEvidence,
     SmokeInvocationEvidence,
     SmokeNvidiaSmiTopologyDiagnostic,
+    SmokeServerLogFailureEvidence,
     SmokeSubprocessFailureEvidence,
     parse_cgroup_cpu_quota_millicores,
     parse_cgroup_memory_limit_bytes,
@@ -97,9 +102,13 @@ def _isolated_runner_functions(*names: str) -> dict[str, object]:
     namespace: dict[str, object] = {
         "EVIDENCE_MOUNT": Path("/evidence"),
         "Any": Any,
+        "BACKEND_FAILURE_MARKER_TOKENS": BACKEND_FAILURE_MARKER_TOKENS,
+        "BackendFailureDiagnosticAccumulator": BackendFailureDiagnosticAccumulator,
         "Mapping": Mapping,
+        "MAX_FAILURE_LOG_LINE_BYTES": 4 * 1024,
         "Path": Path,
         "Sequence": Sequence,
+        "SmokeServerLogFailureEvidence": SmokeServerLogFailureEvidence,
         "os": os,
         "parse_cgroup_cpu_quota_millicores": parse_cgroup_cpu_quota_millicores,
         "parse_cgroup_memory_limit_bytes": parse_cgroup_memory_limit_bytes,
@@ -1480,7 +1489,23 @@ def test_failure_server_log_hashes_oversized_content_and_cross_chunk_signals(
 ) -> None:
     chunk_size = 1024 * 1024
     signal = b"out of memory"
-    payload = b"x" * (chunk_size - 4) + signal + b"y" * (chunk_size + 17)
+    cpu_marker = (
+        b"IQL_SMOKE_CPU_NODE_V1 graph_uid=7 ordinal=19 "
+        b"op=MUL_MAT name=secret_tensor_name\n"
+    )
+    graph_marker = (
+        b"IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=7 "
+        b"phase=post_assignment_pre_split scope=non_view_compute "
+        b"compute=2 gpu=1 cpu=1 accel=0 other=0 unassigned=0\n"
+    )
+    payload = (
+        b"x" * (chunk_size - 4)
+        + signal
+        + b"y" * (chunk_size + 17)
+        + b"\n"
+        + cpu_marker
+        + graph_marker
+    )
     server_log = tmp_path / "llama-server.log"
     server_log.write_bytes(payload)
     namespace = _isolated_runner_functions("_failure_server_log_evidence")
@@ -1496,16 +1521,98 @@ def test_failure_server_log_hashes_oversized_content_and_cross_chunk_signals(
     assert callable(evidence)
     assert len(payload) > 128
 
-    digest, signals = evidence()
+    observed = evidence()
 
-    assert digest == hashlib.sha256(payload).hexdigest()
-    assert signals == {
+    expected_signals = {
         "out_of_memory_observed": True,
         "no_usable_gpu_observed": False,
         "model_load_failure_observed": False,
         "projector_load_failure_observed": False,
         "unsupported_architecture_observed": False,
     }
+    assert observed["schema_version"] == "inkling-smoke-server-log-failure-v1"
+    assert observed["present"] is True
+    assert observed["size_bytes"] == len(payload)
+    assert observed["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert observed["raw_log_recorded"] is False
+    assert observed["scan_integrity"] == "complete"
+    assert observed["safe_failure_signals"] == expected_signals
+    assert observed["backend_diagnostic"] == {
+        "schema_version": "inkling-smoke-backend-failure-v1",
+        "cpu_model_graph_fallback_observed": True,
+        "graph_marker_count": 1,
+        "cpu_node_marker_count": 1,
+        "affected_graphs": [
+            {
+                "graph_uid": 7,
+                "phase": "post_assignment_pre_split",
+                "scope": "non_view_compute",
+                "compute": 2,
+                "gpu": 1,
+                "cpu": 1,
+                "accel": 0,
+                "other": 0,
+                "unassigned": 0,
+            }
+        ],
+        "cpu_node_samples": [
+            {
+                "graph_uid": 7,
+                "ordinal": 19,
+                "op": "MUL_MAT",
+                "node_name_size_bytes": len(b"secret_tensor_name"),
+                "node_name_sha256": hashlib.sha256(b"secret_tensor_name").hexdigest(),
+                "node_name_recorded": False,
+            }
+        ],
+        "records_truncated": False,
+        "raw_marker_lines_recorded": False,
+        "raw_node_names_recorded": False,
+    }
+    serialized = json.dumps(observed, sort_keys=True)
+    assert "secret_tensor_name" not in serialized
+    assert "IQL_SMOKE_CPU_NODE_V1" not in serialized
+
+
+def test_failure_server_log_distinguishes_missing_empty_and_malformed_marker_lines(
+    tmp_path: Path,
+) -> None:
+    namespace = _isolated_runner_functions("_failure_server_log_evidence")
+    server_log = tmp_path / "llama-server.log"
+    namespace.update(
+        {
+            "SERVER_LOG": server_log,
+            "hashlib": hashlib,
+        }
+    )
+    evidence = namespace["_failure_server_log_evidence"]
+    assert callable(evidence)
+
+    missing = evidence()
+    assert missing["present"] is False
+    assert missing["size_bytes"] == 0
+    assert missing["sha256"] == hashlib.sha256(b"").hexdigest()
+    assert missing["scan_integrity"] == "missing"
+
+    server_log.write_bytes(b"")
+    empty = evidence()
+    assert empty["present"] is True
+    assert empty["size_bytes"] == 0
+    assert empty["sha256"] == hashlib.sha256(b"").hexdigest()
+    assert empty["scan_integrity"] == "complete"
+
+    malformed_payload = (
+        b"IQL_SMOKE_CPU_NODE_V1 graph_uid=7 ordinal=19 "
+        b"op=MUL_MAT name=bad name\n"
+    )
+    server_log.write_bytes(malformed_payload)
+    malformed = evidence()
+    assert malformed["present"] is True
+    assert malformed["size_bytes"] == len(malformed_payload)
+    assert malformed["sha256"] == hashlib.sha256(malformed_payload).hexdigest()
+    assert malformed["scan_integrity"] == "malformed"
+    assert malformed["backend_diagnostic"]["cpu_model_graph_fallback_observed"] is False
+    assert "bad name" not in json.dumps(malformed, sort_keys=True)
 
 
 def test_gpu_topology_identity_preserves_the_exact_ordered_peer_links() -> None:
@@ -1742,14 +1849,20 @@ def test_safe_subprocess_failure_rejects_untrusted_failure_shapes(
         safe_failure(error)
 
 
-def test_record_failure_uses_terminal_v5_safe_subprocess_evidence() -> None:
+def test_record_failure_uses_terminal_v6_sanitized_failure_evidence() -> None:
     source = RUNNER_PATH.read_text(encoding="utf-8")
     start = source.index("def _record_failure(")
     end = source.index("\n\n@app.function(", start)
     function_source = source[start:end]
 
-    assert '"schema_version": "inkling-smoke-terminal-v5"' in function_source
+    assert '"schema_version": "inkling-smoke-terminal-v6"' in function_source
     assert '"safe_subprocess_failure": _safe_subprocess_failure(error)' in function_source
+    assert '"server_log_evidence": server_log_evidence' in function_source
+    assert '"server_log_sha256": server_log_evidence["sha256"]' in function_source
+    assert (
+        '"safe_failure_signals": server_log_evidence["safe_failure_signals"]'
+        in function_source
+    )
     assert '"subprocess_failure":' not in function_source
 
 
@@ -2800,20 +2913,28 @@ def test_terminal_validation_rejects_noncanonical_record_terminators(
 
 
 @pytest.mark.parametrize(
-    ("schema_version", "expects_invocation_validation", "expects_safe_diagnostic"),
     (
-        ("inkling-smoke-terminal-v2", False, False),
-        ("inkling-smoke-terminal-v3", True, False),
-        ("inkling-smoke-terminal-v4", True, True),
-        ("inkling-smoke-terminal-v5", True, True),
+        "schema_version",
+        "expects_invocation_validation",
+        "expects_safe_diagnostic",
+        "expects_server_log_diagnostic",
+    ),
+    (
+        ("inkling-smoke-terminal-v2", False, False, False),
+        ("inkling-smoke-terminal-v3", True, False, False),
+        ("inkling-smoke-terminal-v4", True, True, False),
+        ("inkling-smoke-terminal-v5", True, True, False),
+        ("inkling-smoke-terminal-v6", True, True, True),
     ),
 )
 def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostics(
     schema_version: str,
     expects_invocation_validation: bool,
     expects_safe_diagnostic: bool,
+    expects_server_log_diagnostic: bool,
 ) -> None:
     namespace = _isolated_manager_functions(
+        "_safe_server_log_failure_record",
         "_safe_subprocess_failure_record",
         "_validated_remote_failure_receipts",
     )
@@ -2848,6 +2969,59 @@ def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostic
         stderr="secret raw stderr",
         environment={"TOKEN": "secret"},
     )
+    backend_diagnostic = SimpleNamespace(
+        schema_version="inkling-smoke-backend-failure-v1",
+        cpu_model_graph_fallback_observed=True,
+        graph_marker_count=1,
+        cpu_node_marker_count=1,
+        affected_graphs=(
+            SimpleNamespace(
+                graph_uid=7,
+                phase="post_assignment_pre_split",
+                scope="non_view_compute",
+                compute=2,
+                gpu=1,
+                cpu=1,
+                accel=0,
+                other=0,
+                unassigned=0,
+                raw_line="secret raw graph marker",
+            ),
+        ),
+        cpu_node_samples=(
+            SimpleNamespace(
+                graph_uid=7,
+                ordinal=19,
+                op="MUL_MAT",
+                node_name_size_bytes=len(b"secret_tensor_name"),
+                node_name_sha256=hashlib.sha256(b"secret_tensor_name").hexdigest(),
+                node_name_recorded=False,
+                node_name="secret_tensor_name",
+            ),
+        ),
+        records_truncated=False,
+        raw_marker_lines_recorded=False,
+        raw_node_names_recorded=False,
+    )
+    safe_failure_signals = SimpleNamespace(
+        out_of_memory_observed=False,
+        no_usable_gpu_observed=False,
+        model_load_failure_observed=False,
+        projector_load_failure_observed=False,
+        unsupported_architecture_observed=False,
+        raw_log="secret raw server log",
+    )
+    server_log_evidence = SimpleNamespace(
+        schema_version="inkling-smoke-server-log-failure-v1",
+        present=True,
+        size_bytes=123,
+        sha256="c" * 64,
+        raw_log_recorded=False,
+        scan_integrity="complete",
+        safe_failure_signals=safe_failure_signals,
+        backend_diagnostic=backend_diagnostic,
+        raw_log="secret raw server log",
+    )
     receipt_fields: dict[str, object] = {
         "schema_version": schema_version,
         "receipt_sha256": receipt_sha256,
@@ -2857,13 +3031,17 @@ def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostic
         "inkling-smoke-terminal-v3",
         "inkling-smoke-terminal-v4",
         "inkling-smoke-terminal-v5",
+        "inkling-smoke-terminal-v6",
     }:
         receipt_fields["invocation"] = invocation
     if schema_version in {
         "inkling-smoke-terminal-v4",
         "inkling-smoke-terminal-v5",
+        "inkling-smoke-terminal-v6",
     }:
         receipt_fields["safe_subprocess_failure"] = safe_diagnostic
+    if schema_version == "inkling-smoke-terminal-v6":
+        receipt_fields["server_log_evidence"] = server_log_evidence
     receipt = SimpleNamespace(**receipt_fields)
     acceptance_validations: list[object] = []
     invocation_validations: list[object] = []
@@ -2929,6 +3107,54 @@ def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostic
             "stderr_sha256": hashlib.sha256(b"safe diagnostic payload").hexdigest(),
             "stdout_recorded": False,
             "stderr_recorded": False,
+        }
+    if expects_server_log_diagnostic:
+        expected_record["server_log_evidence"] = {
+            "schema_version": "inkling-smoke-server-log-failure-v1",
+            "present": True,
+            "size_bytes": 123,
+            "sha256": "c" * 64,
+            "raw_log_recorded": False,
+            "scan_integrity": "complete",
+            "safe_failure_signals": {
+                "out_of_memory_observed": False,
+                "no_usable_gpu_observed": False,
+                "model_load_failure_observed": False,
+                "projector_load_failure_observed": False,
+                "unsupported_architecture_observed": False,
+            },
+            "backend_diagnostic": {
+                "schema_version": "inkling-smoke-backend-failure-v1",
+                "cpu_model_graph_fallback_observed": True,
+                "graph_marker_count": 1,
+                "cpu_node_marker_count": 1,
+                "affected_graphs": [
+                    {
+                        "graph_uid": 7,
+                        "phase": "post_assignment_pre_split",
+                        "scope": "non_view_compute",
+                        "compute": 2,
+                        "gpu": 1,
+                        "cpu": 1,
+                        "accel": 0,
+                        "other": 0,
+                        "unassigned": 0,
+                    }
+                ],
+                "cpu_node_samples": [
+                    {
+                        "graph_uid": 7,
+                        "ordinal": 19,
+                        "op": "MUL_MAT",
+                        "node_name_size_bytes": len(b"secret_tensor_name"),
+                        "node_name_sha256": hashlib.sha256(b"secret_tensor_name").hexdigest(),
+                        "node_name_recorded": False,
+                    }
+                ],
+                "records_truncated": False,
+                "raw_marker_lines_recorded": False,
+                "raw_node_names_recorded": False,
+            },
         }
     assert records == [expected_record]
     serialized = json.dumps(records, sort_keys=True)
@@ -3196,7 +3422,9 @@ def test_manager_fails_closed_on_attempt_claim_and_terminal_receipts() -> None:
     assert '"inkling-smoke-terminal-v3"' in failure_source
     assert '"inkling-smoke-terminal-v4"' in failure_source
     assert '"inkling-smoke-terminal-v5"' in failure_source
+    assert '"inkling-smoke-terminal-v6"' in failure_source
     assert "_safe_subprocess_failure_record(" in failure_source
+    assert "_safe_server_log_failure_record(" in failure_source
     assert '"failure_records": failures' in remote_source
     assert "_validate_remote_post_spawn_acceptance(" in failure_source
     assert "_validate_persisted_invocation_records(" in failure_source

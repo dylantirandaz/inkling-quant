@@ -23,9 +23,11 @@ from inkling_quant_lab.gguf.inkling_smoke_execution import (
     SmokeFailureReceiptV3,
     SmokeFailureReceiptV4,
     SmokeFailureReceiptV5,
+    SmokeFailureReceiptV6,
     SmokeHostEvidence,
     SmokeLaunchAcknowledgement,
     SmokeLaunchDeploymentIdentity,
+    SmokeServerLogFailureEvidence,
     canonical_python_package_inventory,
     immutable_source_tree_identity,
     parse_cgroup_cpu_quota_millicores,
@@ -74,14 +76,68 @@ HISTORICAL_V2_FAILURE_RECEIPT_JSON = (
     '"verified_export_reference_sha256":'
     '"9f0fae0a48058e73aab38c2b4f6c86916b69fd32343e0f7b821c7faac5b33198"}'
 )
+EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+BACKEND_CPU_PLACEMENT_EXCEPTION_TYPE = (
+    "inkling_quant_lab.gguf.inkling_smoke.BackendCpuPlacementError"
+)
+
+
+def _backend_failure_diagnostic(*, cpu_fallback: bool) -> dict[str, Any]:
+    if not cpu_fallback:
+        return {
+            "schema_version": "inkling-smoke-backend-failure-v1",
+            "cpu_model_graph_fallback_observed": False,
+            "graph_marker_count": 0,
+            "cpu_node_marker_count": 0,
+            "affected_graphs": [],
+            "cpu_node_samples": [],
+            "records_truncated": False,
+            "raw_marker_lines_recorded": False,
+            "raw_node_names_recorded": False,
+        }
+    return {
+        "schema_version": "inkling-smoke-backend-failure-v1",
+        "cpu_model_graph_fallback_observed": True,
+        "graph_marker_count": 1,
+        "cpu_node_marker_count": 1,
+        "affected_graphs": [
+            {
+                "graph_uid": 7,
+                "phase": "post_assignment_pre_split",
+                "scope": "non_view_compute",
+                "compute": 2,
+                "gpu": 1,
+                "cpu": 1,
+                "accel": 0,
+                "other": 0,
+                "unassigned": 0,
+            }
+        ],
+        "cpu_node_samples": [
+            {
+                "graph_uid": 7,
+                "ordinal": 11,
+                "op": "MUL_MAT",
+                "node_name_size_bytes": 18,
+                "node_name_sha256": "a" * 64,
+                "node_name_recorded": False,
+            }
+        ],
+        "records_truncated": False,
+        "raw_marker_lines_recorded": False,
+        "raw_node_names_recorded": False,
+    }
 
 
 def _failure_receipt(
     schema_version: str = "inkling-smoke-terminal-v3",
     *,
     called_process_error: bool = False,
+    backend_cpu_placement_error: bool = False,
     historical_context: bool | None = None,
 ) -> tuple[dict[str, Any], Any, Any, Any, str, str]:
+    if called_process_error and backend_cpu_placement_error:
+        raise ValueError("test receipt cannot represent two exception types")
     config = load_inkling_smoke_config(CONFIG_PATH)
     reference = load_verified_export_reference(REFERENCE_PATH)
     control_plane = smoke_control_plane_provenance(PROJECT_ROOT)
@@ -142,7 +198,11 @@ def _failure_receipt(
         "exception_type": (
             "subprocess.CalledProcessError"
             if called_process_error
-            else "pydantic_core._pydantic_core.ValidationError"
+            else (
+                BACKEND_CPU_PLACEMENT_EXCEPTION_TYPE
+                if backend_cpu_placement_error
+                else "pydantic_core._pydantic_core.ValidationError"
+            )
         ),
         "server_log_sha256": "0" * 64,
         "safe_failure_signals": {
@@ -159,6 +219,7 @@ def _failure_receipt(
         "inkling-smoke-terminal-v3",
         "inkling-smoke-terminal-v4",
         "inkling-smoke-terminal-v5",
+        "inkling-smoke-terminal-v6",
     }:
         receipt["invocation"] = {
             "schema_version": "inkling-smoke-invocation-v3",
@@ -191,6 +252,7 @@ def _failure_receipt(
     if schema_version in {
         "inkling-smoke-terminal-v4",
         "inkling-smoke-terminal-v5",
+        "inkling-smoke-terminal-v6",
     }:
         receipt["safe_subprocess_failure"] = (
             {
@@ -209,6 +271,19 @@ def _failure_receipt(
             if called_process_error
             else None
         )
+    if schema_version == "inkling-smoke-terminal-v6":
+        receipt["server_log_evidence"] = {
+            "schema_version": "inkling-smoke-server-log-failure-v1",
+            "present": True,
+            "size_bytes": 123,
+            "sha256": receipt["server_log_sha256"],
+            "raw_log_recorded": False,
+            "scan_integrity": "complete",
+            "safe_failure_signals": copy.deepcopy(receipt["safe_failure_signals"]),
+            "backend_diagnostic": _backend_failure_diagnostic(
+                cpu_fallback=backend_cpu_placement_error
+            ),
+        }
     receipt["receipt_sha256"] = smoke_terminal_receipt_sha256(receipt)
     return (
         receipt,
@@ -451,6 +526,25 @@ def test_terminal_receipt_versions_use_distinct_stable_hash_domains() -> None:
     assert len({v3_digest, v4_digest, v5_digest}) == 3
 
 
+def test_terminal_failure_receipt_v6_uses_a_distinct_stable_hash_domain() -> None:
+    payload: dict[str, object] = {
+        "schema_version": "inkling-smoke-terminal-v5",
+        "status": "failed",
+        "run_id": "run-one",
+        "failure_phase": "stop_server",
+    }
+    v5_digest = smoke_terminal_receipt_sha256(payload)
+    payload["schema_version"] = "inkling-smoke-terminal-v6"
+    v6_digest = smoke_terminal_receipt_sha256(payload)
+
+    assert v5_digest == "0c6744fc8a36b9493ae38d1715d16544b21b3161cb23bc2fc93395ac33639c76"
+    assert v6_digest == "FIXME"
+    assert v6_digest != v5_digest
+    payload["status"] = "passed"
+    with pytest.raises(ValueError, match="v6 is valid only for failures"):
+        smoke_terminal_receipt_sha256(payload)
+
+
 def test_terminal_receipt_hash_preserves_legacy_v2_failure_verification() -> None:
     legacy_failure = {
         "schema_version": "inkling-smoke-terminal-v2",
@@ -486,6 +580,7 @@ def test_exact_historical_v2_failure_receipt_remains_valid() -> None:
         ("inkling-smoke-terminal-v3", SmokeFailureReceiptV3),
         ("inkling-smoke-terminal-v4", SmokeFailureReceiptV4),
         ("inkling-smoke-terminal-v5", SmokeFailureReceiptV5),
+        ("inkling-smoke-terminal-v6", SmokeFailureReceiptV6),
     ),
 )
 def test_failure_receipt_validates_exact_launch_and_outcome_path(
@@ -495,6 +590,7 @@ def test_failure_receipt_validates_exact_launch_and_outcome_path(
         | type[SmokeFailureReceiptV3]
         | type[SmokeFailureReceiptV4]
         | type[SmokeFailureReceiptV5]
+        | type[SmokeFailureReceiptV6]
     ),
 ) -> None:
     receipt, config, reference, control_plane, run_id, launch_intent_sha256 = _failure_receipt(
@@ -518,7 +614,12 @@ def test_failure_receipt_validates_exact_launch_and_outcome_path(
     assert observed.receipt_sha256 == receipt["receipt_sha256"]
     if isinstance(
         observed,
-        SmokeFailureReceiptV3 | SmokeFailureReceiptV4 | SmokeFailureReceiptV5,
+        (
+            SmokeFailureReceiptV3
+            | SmokeFailureReceiptV4
+            | SmokeFailureReceiptV5
+            | SmokeFailureReceiptV6
+        ),
     ):
         assert observed.invocation.attempt_claim_sha256 == "6" * 64
         assert observed.invocation.invocation_history_sha256 == "8" * 64
@@ -668,6 +769,273 @@ def test_failure_receipt_v5_accepts_only_hashed_allowlisted_subprocess_evidence(
     assert isinstance(observed, SmokeFailureReceiptV5)
     assert observed.safe_subprocess_failure is not None
     assert observed.safe_subprocess_failure.command_id == "nvidia_smi_identity_v1"
+
+
+def test_failure_receipt_v6_accepts_complete_positive_cpu_placement_evidence() -> None:
+    (
+        receipt,
+        config,
+        reference,
+        control_plane,
+        run_id,
+        launch_intent_sha256,
+    ) = _failure_receipt(
+        "inkling-smoke-terminal-v6",
+        backend_cpu_placement_error=True,
+    )
+
+    observed = validate_smoke_failure_receipt(
+        receipt,
+        config=config,
+        reference=reference,
+        control_plane=control_plane,
+        run_id=run_id,
+        launch_intent_sha256=launch_intent_sha256,
+    )
+
+    assert isinstance(observed, SmokeFailureReceiptV6)
+    assert observed.server_log_evidence.present is True
+    assert observed.server_log_evidence.scan_integrity == "complete"
+    assert (
+        observed.server_log_evidence.backend_diagnostic.cpu_model_graph_fallback_observed
+        is True
+    )
+    assert observed.server_log_evidence.backend_diagnostic.cpu_node_marker_count == 1
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        lambda value: value["server_log_evidence"]["backend_diagnostic"].update(
+            _backend_failure_diagnostic(cpu_fallback=False)
+        ),
+        lambda value: value["server_log_evidence"].update(
+            {
+                "present": False,
+                "size_bytes": 0,
+                "sha256": EMPTY_SHA256,
+                "scan_integrity": "missing",
+                "backend_diagnostic": _backend_failure_diagnostic(cpu_fallback=False),
+            }
+        ),
+        lambda value: value["server_log_evidence"].update(
+            {
+                "scan_integrity": "malformed",
+                "backend_diagnostic": _backend_failure_diagnostic(cpu_fallback=False),
+            }
+        ),
+    ),
+    ids=("negative-diagnostic", "missing-log", "malformed-scan"),
+)
+def test_failure_receipt_v6_requires_complete_positive_cpu_placement_evidence(
+    mutate: Any,
+) -> None:
+    (
+        receipt,
+        config,
+        reference,
+        control_plane,
+        run_id,
+        launch_intent_sha256,
+    ) = _failure_receipt(
+        "inkling-smoke-terminal-v6",
+        backend_cpu_placement_error=True,
+    )
+    mutate(receipt)
+    receipt["server_log_sha256"] = receipt["server_log_evidence"]["sha256"]
+    receipt["receipt_sha256"] = smoke_terminal_receipt_sha256(receipt)
+
+    with pytest.raises(ValueError, match="schema is invalid") as error:
+        validate_smoke_failure_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+            launch_intent_sha256=launch_intent_sha256,
+        )
+
+    assert "CPU placement failure lacks complete positive backend diagnostics" in str(
+        error.value.__cause__
+    )
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        lambda value: value["server_log_evidence"].__setitem__("sha256", "a" * 64),
+        lambda value: value["server_log_evidence"]["safe_failure_signals"].__setitem__(
+            "out_of_memory_observed",
+            True,
+        ),
+    ),
+    ids=("log-hash", "safe-signals"),
+)
+def test_failure_receipt_v6_requires_nested_server_log_equality(mutate: Any) -> None:
+    receipt, config, reference, control_plane, run_id, launch_intent_sha256 = _failure_receipt(
+        "inkling-smoke-terminal-v6"
+    )
+    mutate(receipt)
+    receipt["receipt_sha256"] = smoke_terminal_receipt_sha256(receipt)
+
+    with pytest.raises(ValueError, match="schema is invalid") as error:
+        validate_smoke_failure_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+            launch_intent_sha256=launch_intent_sha256,
+        )
+
+    assert "top-level receipt" in str(error.value.__cause__)
+
+
+def test_server_log_failure_evidence_distinguishes_missing_and_present_empty_logs() -> None:
+    common = {
+        "schema_version": "inkling-smoke-server-log-failure-v1",
+        "size_bytes": 0,
+        "sha256": EMPTY_SHA256,
+        "raw_log_recorded": False,
+        "safe_failure_signals": {
+            "out_of_memory_observed": False,
+            "no_usable_gpu_observed": False,
+            "model_load_failure_observed": False,
+            "projector_load_failure_observed": False,
+            "unsupported_architecture_observed": False,
+        },
+        "backend_diagnostic": _backend_failure_diagnostic(cpu_fallback=False),
+    }
+
+    missing = SmokeServerLogFailureEvidence.model_validate(
+        {**common, "present": False, "scan_integrity": "missing"}
+    )
+    empty = SmokeServerLogFailureEvidence.model_validate(
+        {**common, "present": True, "scan_integrity": "complete"}
+    )
+
+    assert missing.present is False
+    assert missing.scan_integrity == "missing"
+    assert empty.present is True
+    assert empty.scan_integrity == "complete"
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        lambda value: value.__setitem__("present", True),
+        lambda value: value.__setitem__("size_bytes", 1),
+        lambda value: value.__setitem__("sha256", "0" * 64),
+        lambda value: value.__setitem__("scan_integrity", "complete"),
+        lambda value: value["safe_failure_signals"].__setitem__(
+            "model_load_failure_observed",
+            True,
+        ),
+        lambda value: value.__setitem__(
+            "backend_diagnostic",
+            _backend_failure_diagnostic(cpu_fallback=True),
+        ),
+    ),
+    ids=(
+        "present",
+        "nonzero-size",
+        "nonempty-hash",
+        "complete-scan",
+        "safe-signal",
+        "positive-backend-diagnostic",
+    ),
+)
+def test_server_log_failure_evidence_requires_exact_missing_log_identity(
+    mutate: Any,
+) -> None:
+    payload = {
+        "schema_version": "inkling-smoke-server-log-failure-v1",
+        "present": False,
+        "size_bytes": 0,
+        "sha256": EMPTY_SHA256,
+        "raw_log_recorded": False,
+        "scan_integrity": "missing",
+        "safe_failure_signals": {
+            "out_of_memory_observed": False,
+            "no_usable_gpu_observed": False,
+            "model_load_failure_observed": False,
+            "projector_load_failure_observed": False,
+            "unsupported_architecture_observed": False,
+        },
+        "backend_diagnostic": _backend_failure_diagnostic(cpu_fallback=False),
+    }
+    mutate(payload)
+
+    with pytest.raises(ValidationError):
+        SmokeServerLogFailureEvidence.model_validate(payload)
+
+
+def test_server_log_failure_evidence_rejects_positive_malformed_scan() -> None:
+    payload = {
+        "schema_version": "inkling-smoke-server-log-failure-v1",
+        "present": True,
+        "size_bytes": 123,
+        "sha256": "0" * 64,
+        "raw_log_recorded": False,
+        "scan_integrity": "malformed",
+        "safe_failure_signals": {
+            "out_of_memory_observed": False,
+            "no_usable_gpu_observed": False,
+            "model_load_failure_observed": False,
+            "projector_load_failure_observed": False,
+            "unsupported_architecture_observed": False,
+        },
+        "backend_diagnostic": _backend_failure_diagnostic(cpu_fallback=True),
+    }
+
+    with pytest.raises(ValidationError, match="requires one complete server-log scan"):
+        SmokeServerLogFailureEvidence.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        lambda value: value.__setitem__("raw_log_recorded", True),
+        lambda value: value.__setitem__("raw_log", "unguarded server output"),
+        lambda value: value.__setitem__("error_excerpt", "unguarded failure text"),
+        lambda value: value["backend_diagnostic"].__setitem__(
+            "raw_marker_lines_recorded",
+            True,
+        ),
+        lambda value: value["backend_diagnostic"].__setitem__(
+            "raw_node_names_recorded",
+            True,
+        ),
+    ),
+    ids=(
+        "raw-log-recorded",
+        "raw-log-field",
+        "error-excerpt",
+        "raw-markers-recorded",
+        "raw-node-names-recorded",
+    ),
+)
+def test_server_log_failure_evidence_rejects_raw_or_extra_fields(mutate: Any) -> None:
+    payload = {
+        "schema_version": "inkling-smoke-server-log-failure-v1",
+        "present": True,
+        "size_bytes": 123,
+        "sha256": "0" * 64,
+        "raw_log_recorded": False,
+        "scan_integrity": "complete",
+        "safe_failure_signals": {
+            "out_of_memory_observed": False,
+            "no_usable_gpu_observed": False,
+            "model_load_failure_observed": False,
+            "projector_load_failure_observed": False,
+            "unsupported_architecture_observed": False,
+        },
+        "backend_diagnostic": _backend_failure_diagnostic(cpu_fallback=False),
+    }
+    mutate(payload)
+
+    with pytest.raises(ValidationError):
+        SmokeServerLogFailureEvidence.model_validate(payload)
 
 
 @pytest.mark.parametrize(

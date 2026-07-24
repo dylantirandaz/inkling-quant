@@ -56,11 +56,13 @@ from inkling_quant_lab.gguf.inkling import (  # noqa: E402
     require_stage_billing_window,
 )
 from inkling_quant_lab.gguf.inkling_smoke import (  # noqa: E402
+    BACKEND_FAILURE_MARKER_TOKENS,
     CUDA_DRIVER_STUB_RPATH_LINK_DEFINITION,
     INSTRUMENTATION_PATCH_RELATIVE_PATH,
     PINNED_CUDA_IMAGE,
     PINNED_CUDA_IMAGE_DIGEST,
     PINNED_LLAMA_CPP_COMMIT,
+    BackendFailureDiagnosticAccumulator,
     InklingSmokeConfig,
     InklingVerifiedExportReference,
     SmokeProbeConfig,
@@ -100,6 +102,7 @@ from inkling_quant_lab.gguf.inkling_smoke_execution import (  # noqa: E402
     SmokeHostEvidence,
     SmokeLaunchAcknowledgement,
     SmokeNvidiaSmiTopologyDiagnostic,
+    SmokeServerLogFailureEvidence,
     SmokeSubprocessFailureEvidence,
     canonical_python_package_inventory,
     canonical_smoke_attempt_registry_created_at_utc,
@@ -143,6 +146,7 @@ SERVER_LOG = Path("/tmp/inkling-llama-server.log")
 SERVER_PORT: Final = 18080
 MAX_HTTP_RESPONSE_BYTES: Final = 16 * 1024 * 1024
 MAX_SERVER_LOG_BYTES: Final = 64 * 1024 * 1024
+MAX_FAILURE_LOG_LINE_BYTES: Final = 4 * 1024
 MAX_LAUNCH_INTENT_BYTES: Final = 64 * 1024
 MAX_TERMINAL_RECEIPT_BYTES: Final = 16 * 1024 * 1024
 POST_SPAWN_ACCEPTANCE_TIMEOUT_SECONDS: Final = 120.0
@@ -2299,8 +2303,8 @@ def _terminate_process(process: subprocess.Popen[bytes]) -> dict[str, Any]:
     return {"method": "already_exited", "return_code": process.returncode, "clean": False}
 
 
-def _failure_server_log_evidence() -> tuple[str, dict[str, bool]]:
-    """Stream the complete server-log hash and scan bounded chunks for safe signals."""
+def _failure_server_log_evidence() -> dict[str, Any]:
+    """Hash the full log and retain only bounded structural failure evidence."""
 
     patterns = {
         "out_of_memory_observed": b"out of memory",
@@ -2311,28 +2315,81 @@ def _failure_server_log_evidence() -> tuple[str, dict[str, bool]]:
     }
     observed = dict.fromkeys(patterns, False)
     digest = hashlib.sha256()
+    size_bytes = 0
+    backend = BackendFailureDiagnosticAccumulator()
+
+    def result(*, present: bool, scan_integrity: str) -> dict[str, Any]:
+        backend_diagnostic, backend_malformed = backend.finish()
+        if backend_malformed and scan_integrity != "missing":
+            scan_integrity = "malformed"
+        return SmokeServerLogFailureEvidence.model_validate(
+            {
+                "schema_version": "inkling-smoke-server-log-failure-v1",
+                "present": present,
+                "size_bytes": size_bytes,
+                "sha256": digest.hexdigest(),
+                "raw_log_recorded": False,
+                "scan_integrity": scan_integrity,
+                "safe_failure_signals": observed,
+                "backend_diagnostic": backend_diagnostic.model_dump(mode="json"),
+            }
+        ).model_dump(mode="json")
+
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(SERVER_LOG, flags)
     except FileNotFoundError:
-        return digest.hexdigest(), observed
+        return result(present=False, scan_integrity="missing")
     try:
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode):
             raise RuntimeError("llama-server log is not a regular file")
         maximum_pattern_bytes = max(len(pattern) for pattern in patterns.values())
-        tail = b""
+        maximum_marker_bytes = max(len(marker) for marker in BACKEND_FAILURE_MARKER_TOKENS)
+        signal_tail = b""
+        marker_tail = b""
+        line_buffer = bytearray()
+        line_is_overlong = False
         with os.fdopen(descriptor, "rb", closefd=False) as handle:
-            while chunk := handle.read(1024 * 1024):
-                digest.update(chunk)
-                searchable = (tail + chunk).lower()
+            while segment := handle.readline(MAX_FAILURE_LOG_LINE_BYTES + 1):
+                digest.update(segment)
+                size_bytes += len(segment)
+                searchable = (signal_tail + segment).lower()
                 for name, pattern in patterns.items():
                     if not observed[name] and pattern in searchable:
                         observed[name] = True
-                tail = searchable[-(maximum_pattern_bytes - 1) :]
+                signal_tail = searchable[-(maximum_pattern_bytes - 1) :]
+
+                if line_is_overlong:
+                    marker_searchable = marker_tail + segment
+                    if any(marker in marker_searchable for marker in BACKEND_FAILURE_MARKER_TOKENS):
+                        backend.mark_malformed()
+                    marker_tail = marker_searchable[-(maximum_marker_bytes - 1) :]
+                    if segment.endswith(b"\n"):
+                        line_is_overlong = False
+                        marker_tail = b""
+                    continue
+
+                line_buffer.extend(segment)
+                if len(line_buffer) > MAX_FAILURE_LOG_LINE_BYTES:
+                    line_is_overlong = True
+                    marker_searchable = bytes(line_buffer)
+                    if any(marker in marker_searchable for marker in BACKEND_FAILURE_MARKER_TOKENS):
+                        backend.mark_malformed()
+                    marker_tail = marker_searchable[-(maximum_marker_bytes - 1) :]
+                    line_buffer.clear()
+                    if segment.endswith(b"\n"):
+                        line_is_overlong = False
+                        marker_tail = b""
+                    continue
+                if segment.endswith(b"\n"):
+                    backend.observe_line(bytes(line_buffer))
+                    line_buffer.clear()
+            if line_buffer:
+                backend.observe_line(bytes(line_buffer))
     finally:
         os.close(descriptor)
-    return digest.hexdigest(), observed
+    return result(present=True, scan_integrity="complete")
 
 
 def _failed_subprocess_command_id(command: object) -> str:
@@ -2442,9 +2499,9 @@ def _record_failure(
         config=config,
         invocation=invocation,
     )
-    server_log_sha256, safe_failure_signals = _failure_server_log_evidence()
+    server_log_evidence = _failure_server_log_evidence()
     receipt: dict[str, Any] = {
-        "schema_version": "inkling-smoke-terminal-v5",
+        "schema_version": "inkling-smoke-terminal-v6",
         "status": "failed",
         "stage": SMOKE_STAGE,
         "run_id": run_root.name,
@@ -2460,8 +2517,9 @@ def _record_failure(
         "failure_phase": phase,
         "exception_type": f"{type(error).__module__}.{type(error).__qualname__}",
         "safe_subprocess_failure": _safe_subprocess_failure(error),
-        "server_log_sha256": server_log_sha256,
-        "safe_failure_signals": safe_failure_signals,
+        "server_log_sha256": server_log_evidence["sha256"],
+        "safe_failure_signals": server_log_evidence["safe_failure_signals"],
+        "server_log_evidence": server_log_evidence,
         "prompt_text_recorded": False,
         "output_text_recorded": False,
     }

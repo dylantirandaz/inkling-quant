@@ -1071,6 +1071,63 @@ def _safe_subprocess_failure_record(receipt: Any) -> dict[str, Any] | None:
     }
 
 
+def _safe_server_log_failure_record(receipt: Any) -> dict[str, Any]:
+    """Project only the validated structural facts from a version 6 server log."""
+
+    evidence = receipt.server_log_evidence
+    signals = evidence.safe_failure_signals
+    backend = evidence.backend_diagnostic
+    return {
+        "schema_version": evidence.schema_version,
+        "present": evidence.present,
+        "size_bytes": evidence.size_bytes,
+        "sha256": evidence.sha256,
+        "raw_log_recorded": evidence.raw_log_recorded,
+        "scan_integrity": evidence.scan_integrity,
+        "safe_failure_signals": {
+            "out_of_memory_observed": signals.out_of_memory_observed,
+            "no_usable_gpu_observed": signals.no_usable_gpu_observed,
+            "model_load_failure_observed": signals.model_load_failure_observed,
+            "projector_load_failure_observed": signals.projector_load_failure_observed,
+            "unsupported_architecture_observed": signals.unsupported_architecture_observed,
+        },
+        "backend_diagnostic": {
+            "schema_version": backend.schema_version,
+            "cpu_model_graph_fallback_observed": backend.cpu_model_graph_fallback_observed,
+            "graph_marker_count": backend.graph_marker_count,
+            "cpu_node_marker_count": backend.cpu_node_marker_count,
+            "affected_graphs": [
+                {
+                    "graph_uid": graph.graph_uid,
+                    "phase": graph.phase,
+                    "scope": graph.scope,
+                    "compute": graph.compute,
+                    "gpu": graph.gpu,
+                    "cpu": graph.cpu,
+                    "accel": graph.accel,
+                    "other": graph.other,
+                    "unassigned": graph.unassigned,
+                }
+                for graph in backend.affected_graphs
+            ],
+            "cpu_node_samples": [
+                {
+                    "graph_uid": sample.graph_uid,
+                    "ordinal": sample.ordinal,
+                    "op": sample.op,
+                    "node_name_size_bytes": sample.node_name_size_bytes,
+                    "node_name_sha256": sample.node_name_sha256,
+                    "node_name_recorded": sample.node_name_recorded,
+                }
+                for sample in backend.cpu_node_samples
+            ],
+            "records_truncated": backend.records_truncated,
+            "raw_marker_lines_recorded": backend.raw_marker_lines_recorded,
+            "raw_node_names_recorded": backend.raw_node_names_recorded,
+        },
+    }
+
+
 def _validated_remote_failure_receipts(
     volume: Any,
     outcomes: Sequence[Any],
@@ -1139,6 +1196,7 @@ def _validated_remote_failure_receipts(
                 "inkling-smoke-terminal-v3",
                 "inkling-smoke-terminal-v4",
                 "inkling-smoke-terminal-v5",
+                "inkling-smoke-terminal-v6",
             }:
                 invocation = getattr(receipt, "invocation", None)
                 if invocation is None:
@@ -1171,10 +1229,13 @@ def _validated_remote_failure_receipts(
         if receipt.schema_version in {
             "inkling-smoke-terminal-v4",
             "inkling-smoke-terminal-v5",
+            "inkling-smoke-terminal-v6",
         }:
             safe_subprocess_failure = _safe_subprocess_failure_record(receipt)
             if safe_subprocess_failure is not None:
                 record["safe_subprocess_failure"] = safe_subprocess_failure
+        if receipt.schema_version == "inkling-smoke-terminal-v6":
+            record["server_log_evidence"] = _safe_server_log_failure_record(receipt)
         records.append(record)
     return records
 
