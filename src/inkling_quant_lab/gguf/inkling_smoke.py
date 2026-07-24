@@ -17,11 +17,12 @@ import math
 import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
-from typing import Any, Final, Literal
+from typing import Annotated, Any, Final, Literal, TypeAlias
 from uuid import UUID
 
 import yaml
 from pydantic import (
+    AfterValidator,
     Field,
     StrictBool,
     StrictInt,
@@ -153,6 +154,34 @@ _CPU_NODE_MARKER: Final = "IQL_SMOKE_CPU_NODE_V1"
 _CPU_NODE_RE: Final = re.compile(
     rf"{_CPU_NODE_MARKER} graph_uid=([0-9]+) ordinal=(-?[0-9]+) "
     r"op=([^\s]+) name=([^\s]*)"
+)
+MAX_BACKEND_FAILURE_RECORDS: Final = 64
+MAX_BACKEND_FAILURE_LINE_BYTES: Final = 4_096
+MAX_BACKEND_FAILURE_OP_BYTES: Final = 64
+BACKEND_FAILURE_MARKER_TOKENS: Final[tuple[bytes, bytes]] = (
+    _BACKEND_GRAPH_MARKER.encode("ascii"),
+    _CPU_NODE_MARKER.encode("ascii"),
+)
+
+
+def _require_false(value: bool) -> bool:
+    if value is not False:
+        raise ValueError("sanitized evidence flag must be false")
+    return value
+
+
+_RequiredFalse: TypeAlias = Annotated[StrictBool, AfterValidator(_require_false)]
+
+
+_BACKEND_FAILURE_GRAPH_LINE_RE: Final = re.compile(
+    rb"IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=([0-9]+) "
+    rb"phase=(post_assignment_pre_split) scope=(non_view_compute) "
+    rb"compute=([0-9]+) gpu=([0-9]+) cpu=([0-9]+) accel=([0-9]+) "
+    rb"other=([0-9]+) unassigned=([0-9]+)"
+)
+_BACKEND_FAILURE_CPU_NODE_LINE_RE: Final = re.compile(
+    rb"IQL_SMOKE_CPU_NODE_V1 graph_uid=([0-9]+) ordinal=(-?[0-9]+) "
+    rb"op=([^\s]+) name=([^\s]*)"
 )
 _FIRST_SHARD_LOAD_RE: Final = re.compile(
     r"llama_model_loader: loaded meta data with [^\n]* from ([^\s]+)"
@@ -1044,6 +1073,285 @@ class BackendAuditEvidence(StrictFrozenModel):
         return self
 
 
+class BackendCpuPlacementError(ValueError):
+    """A valid runtime marker proves that a model graph operation used the CPU."""
+
+
+class BackendFailureGraphDiagnostic(StrictFrozenModel):
+    """Sanitized counters for one graph that assigned model work to the CPU."""
+
+    graph_uid: StrictInt = Field(gt=0)
+    phase: Literal["post_assignment_pre_split"]
+    scope: Literal["non_view_compute"]
+    compute: StrictInt = Field(gt=0)
+    gpu: StrictInt = Field(ge=0)
+    cpu: StrictInt = Field(gt=0)
+    accel: StrictInt = Field(ge=0)
+    other: StrictInt = Field(ge=0)
+    unassigned: StrictInt = Field(ge=0)
+
+    @model_validator(mode="after")
+    def exact_category_count(self) -> BackendFailureGraphDiagnostic:
+        if self.compute != self.gpu + self.cpu + self.accel + self.other + self.unassigned:
+            raise ValueError("backend failure graph counters do not equal its compute count")
+        return self
+
+
+class BackendFailureCpuNodeDiagnostic(StrictFrozenModel):
+    """One CPU-node marker without its raw node name or raw marker line."""
+
+    graph_uid: StrictInt = Field(gt=0)
+    ordinal: StrictInt = Field(ge=0)
+    op: str = Field(
+        min_length=1,
+        max_length=MAX_BACKEND_FAILURE_OP_BYTES,
+        pattern=r"^[A-Za-z0-9_.:+/\-]+$",
+    )
+    node_name_size_bytes: StrictInt = Field(ge=0, le=MAX_BACKEND_FAILURE_LINE_BYTES)
+    node_name_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    node_name_recorded: _RequiredFalse
+
+
+class BackendFailureDiagnostic(StrictFrozenModel):
+    """Bounded, sanitized backend evidence extracted from a failed server log."""
+
+    schema_version: Literal["inkling-smoke-backend-failure-v1"] = "inkling-smoke-backend-failure-v1"
+    cpu_model_graph_fallback_observed: StrictBool
+    graph_marker_count: StrictInt = Field(ge=0)
+    cpu_node_marker_count: StrictInt = Field(ge=0)
+    affected_graphs: tuple[BackendFailureGraphDiagnostic, ...] = Field(
+        max_length=MAX_BACKEND_FAILURE_RECORDS
+    )
+    cpu_node_samples: tuple[BackendFailureCpuNodeDiagnostic, ...] = Field(
+        max_length=MAX_BACKEND_FAILURE_RECORDS
+    )
+    records_truncated: StrictBool
+    raw_marker_lines_recorded: _RequiredFalse
+    raw_node_names_recorded: _RequiredFalse
+
+    @model_validator(mode="after")
+    def exact_sanitized_relationships(self) -> BackendFailureDiagnostic:
+        graph_uids = tuple(row.graph_uid for row in self.affected_graphs)
+        if len(graph_uids) != len(set(graph_uids)):
+            raise ValueError("backend failure diagnostic contains duplicate graph identities")
+        sample_keys = tuple((row.graph_uid, row.ordinal) for row in self.cpu_node_samples)
+        if len(sample_keys) != len(set(sample_keys)):
+            raise ValueError("backend failure diagnostic contains duplicate CPU-node identities")
+        if any(row.graph_uid not in set(graph_uids) for row in self.cpu_node_samples):
+            raise ValueError("backend failure CPU-node sample lacks an affected graph")
+        if self.graph_marker_count < len(self.affected_graphs):
+            raise ValueError("backend failure graph count is smaller than its retained records")
+        if self.cpu_node_marker_count < len(self.cpu_node_samples):
+            raise ValueError("backend failure CPU-node count is smaller than its retained samples")
+        expected_truncation = (
+            self.graph_marker_count > MAX_BACKEND_FAILURE_RECORDS
+            or self.cpu_node_marker_count > MAX_BACKEND_FAILURE_RECORDS
+        )
+        if self.records_truncated != expected_truncation:
+            raise ValueError("backend diagnostic records_truncated differs from marker counts")
+        if self.records_truncated and (
+            self.cpu_model_graph_fallback_observed or self.affected_graphs or self.cpu_node_samples
+        ):
+            raise ValueError("truncated backend diagnostic must be inconclusive")
+        positive = bool(self.affected_graphs and self.cpu_node_samples)
+        if self.cpu_model_graph_fallback_observed != positive:
+            raise ValueError(
+                "backend CPU fallback result differs from its matched graph and node evidence"
+            )
+        return self
+
+
+class BackendFailureDiagnosticAccumulator:
+    """Scan complete lines while retaining at most 64 graph and node records."""
+
+    def __init__(self) -> None:
+        self._malformed = False
+        self._graph_marker_count = 0
+        self._cpu_node_marker_count = 0
+        self._seen_graph_uids: set[int] = set()
+        self._affected_graphs: list[BackendFailureGraphDiagnostic] = []
+        self._cpu_node_samples: list[BackendFailureCpuNodeDiagnostic] = []
+        self._seen_cpu_node_keys: set[tuple[int, int]] = set()
+
+    def mark_malformed(self) -> None:
+        """Mark external line framing or length validation as inconclusive."""
+
+        self._malformed = True
+
+    def observe_unparsed_marker_counts(
+        self,
+        *,
+        graph_marker_count: int,
+        cpu_node_marker_count: int,
+    ) -> None:
+        """Count markers from an overlong line without retaining that line."""
+
+        counts = (graph_marker_count, cpu_node_marker_count)
+        if any(type(count) is not int or count < 0 for count in counts):
+            raise TypeError("unparsed backend marker counts must be nonnegative integers")
+        if graph_marker_count + cpu_node_marker_count == 0:
+            raise ValueError("unparsed backend marker counts must contain one marker")
+        self._graph_marker_count += graph_marker_count
+        self._cpu_node_marker_count += cpu_node_marker_count
+        self.mark_malformed()
+
+    def observe_line(self, line: bytes) -> None:
+        """Consume one complete line and retain only fixed safe marker fields."""
+
+        if not isinstance(line, bytes):
+            raise TypeError("backend failure diagnostic lines must be bytes")
+
+        graph_tokens = line.count(BACKEND_FAILURE_MARKER_TOKENS[0])
+        cpu_tokens = line.count(BACKEND_FAILURE_MARKER_TOKENS[1])
+        self._graph_marker_count += graph_tokens
+        self._cpu_node_marker_count += cpu_tokens
+        marker_tokens = graph_tokens + cpu_tokens
+        if marker_tokens == 0:
+            return
+        if (
+            len(line) > MAX_BACKEND_FAILURE_LINE_BYTES
+            or marker_tokens != 1
+            or b"\n" in line[:-1]
+            or b"\r" in line
+        ):
+            self.mark_malformed()
+            return
+
+        complete_line = line[:-1] if line.endswith(b"\n") else line
+        if graph_tokens:
+            marker_start = complete_line.find(BACKEND_FAILURE_MARKER_TOKENS[0])
+            match = _BACKEND_FAILURE_GRAPH_LINE_RE.fullmatch(complete_line[marker_start:])
+            if match is None:
+                self.mark_malformed()
+                return
+            self._observe_graph_match(match.groups())
+            return
+
+        marker_start = complete_line.find(BACKEND_FAILURE_MARKER_TOKENS[1])
+        match = _BACKEND_FAILURE_CPU_NODE_LINE_RE.fullmatch(complete_line[marker_start:])
+        if match is None:
+            self.mark_malformed()
+            return
+        self._observe_cpu_node_match(match.groups())
+
+    def _observe_graph_match(self, groups: tuple[bytes, ...]) -> None:
+        try:
+            (
+                graph_uid_raw,
+                phase_raw,
+                scope_raw,
+                compute_raw,
+                gpu_raw,
+                cpu_raw,
+                accel_raw,
+                other_raw,
+                unassigned_raw,
+            ) = groups
+            graph_uid = int(graph_uid_raw)
+            compute = int(compute_raw)
+            gpu = int(gpu_raw)
+            cpu = int(cpu_raw)
+            accel = int(accel_raw)
+            other = int(other_raw)
+            unassigned = int(unassigned_raw)
+            if graph_uid <= 0 or compute <= 0 or compute != gpu + cpu + accel + other + unassigned:
+                raise ValueError("backend failure graph counters are invalid")
+            if graph_uid in self._seen_graph_uids or any(
+                row.graph_uid == graph_uid for row in self._affected_graphs
+            ):
+                self.mark_malformed()
+                return
+            if len(self._seen_graph_uids) < MAX_BACKEND_FAILURE_RECORDS:
+                self._seen_graph_uids.add(graph_uid)
+            if cpu == 0:
+                return
+            graph = BackendFailureGraphDiagnostic(
+                graph_uid=graph_uid,
+                phase=phase_raw.decode("ascii"),
+                scope=scope_raw.decode("ascii"),
+                compute=compute,
+                gpu=gpu,
+                cpu=cpu,
+                accel=accel,
+                other=other,
+                unassigned=unassigned,
+            )
+        except (UnicodeDecodeError, ValidationError, ValueError):
+            self.mark_malformed()
+            return
+        if len(self._affected_graphs) < MAX_BACKEND_FAILURE_RECORDS:
+            self._affected_graphs.append(graph)
+
+    def _observe_cpu_node_match(self, groups: tuple[bytes, ...]) -> None:
+        try:
+            graph_uid_raw, ordinal_raw, op_raw, node_name = groups
+            graph_uid = int(graph_uid_raw)
+            ordinal = int(ordinal_raw)
+            key = (graph_uid, ordinal)
+            if key in self._seen_cpu_node_keys:
+                self.mark_malformed()
+                return
+            sample = BackendFailureCpuNodeDiagnostic(
+                graph_uid=graph_uid,
+                ordinal=ordinal,
+                op=op_raw.decode("ascii"),
+                node_name_size_bytes=len(node_name),
+                node_name_sha256=hashlib.sha256(node_name).hexdigest(),
+                node_name_recorded=False,
+            )
+        except (UnicodeDecodeError, ValidationError, ValueError):
+            self.mark_malformed()
+            return
+        if len(self._seen_cpu_node_keys) < MAX_BACKEND_FAILURE_RECORDS:
+            self._seen_cpu_node_keys.add(key)
+        if len(self._cpu_node_samples) < MAX_BACKEND_FAILURE_RECORDS:
+            self._cpu_node_samples.append(sample)
+
+    def finish(self) -> tuple[BackendFailureDiagnostic, bool]:
+        """Return bounded safe evidence and whether any marker was inconclusive."""
+
+        affected_graphs = tuple(self._affected_graphs)
+        retained_graph_ids = {row.graph_uid for row in affected_graphs}
+        retained_cpu_node_samples = tuple(
+            row for row in self._cpu_node_samples if row.graph_uid in retained_graph_ids
+        )
+        retained_cpu_counts: dict[int, int] = {}
+        for sample in self._cpu_node_samples:
+            retained_cpu_counts[sample.graph_uid] = retained_cpu_counts.get(sample.graph_uid, 0) + 1
+        retained_cpu_graph_ids = set(retained_cpu_counts)
+
+        records_truncated = (
+            self._graph_marker_count > MAX_BACKEND_FAILURE_RECORDS
+            or self._cpu_node_marker_count > MAX_BACKEND_FAILURE_RECORDS
+        )
+        if records_truncated:
+            self.mark_malformed()
+        else:
+            if retained_graph_ids != retained_cpu_graph_ids:
+                self.mark_malformed()
+            for graph in affected_graphs:
+                if retained_cpu_counts.get(graph.graph_uid, 0) != min(graph.cpu, 8):
+                    self.mark_malformed()
+
+        if self._malformed:
+            affected_graphs = ()
+            cpu_node_samples: tuple[BackendFailureCpuNodeDiagnostic, ...] = ()
+        else:
+            cpu_node_samples = retained_cpu_node_samples
+        positive = bool(affected_graphs and cpu_node_samples)
+        diagnostic = BackendFailureDiagnostic(
+            cpu_model_graph_fallback_observed=positive,
+            graph_marker_count=self._graph_marker_count,
+            cpu_node_marker_count=self._cpu_node_marker_count,
+            affected_graphs=affected_graphs,
+            cpu_node_samples=cpu_node_samples,
+            records_truncated=records_truncated,
+            raw_marker_lines_recorded=False,
+            raw_node_names_recorded=False,
+        )
+        return diagnostic, self._malformed
+
+
 class TextShardLoadEvidence(StrictFrozenModel):
     """Exact split metadata and tensor inventory seen by the text loader."""
 
@@ -1233,7 +1541,7 @@ def parse_backend_audit_evidence(log_text: str) -> BackendAuditEvidence:
     if log_text.count(_CPU_NODE_MARKER) != len(cpu_matches):
         raise ValueError("backend CPU-node audit contains a malformed marker")
     if cpu_matches:
-        raise ValueError("backend audit observed a CPU model graph operation")
+        raise BackendCpuPlacementError("backend audit observed a CPU model graph operation")
     if not graph_matches or not identity_matches:
         raise ValueError("backend audit contains no graph markers")
     graphs = tuple(
@@ -2087,6 +2395,7 @@ def _exact_decimal(value: str, *, label: str) -> int:
 __all__ = [
     "B300_CMAKE_ARCHITECTURE",
     "B300_COMPUTE_CAPABILITY",
+    "BACKEND_FAILURE_MARKER_TOKENS",
     "CUDA_DRIVER_STUB_RPATH_LINK_DEFINITION",
     "EXPECTED_FIRST_Q3_MOUNT_PATH",
     "EXPECTED_PROJECTOR_BYTES",
@@ -2102,6 +2411,9 @@ __all__ = [
     "INSTRUMENTATION_SCHEMA_VERSION",
     "LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256",
     "LLAMA_SERVER_AUDIT_LOG_VERBOSITY",
+    "MAX_BACKEND_FAILURE_LINE_BYTES",
+    "MAX_BACKEND_FAILURE_OP_BYTES",
+    "MAX_BACKEND_FAILURE_RECORDS",
     "PINNED_CUDA_IMAGE",
     "PINNED_CUDA_IMAGE_DIGEST",
     "PINNED_CUDA_PLATFORM",
@@ -2118,6 +2430,11 @@ __all__ = [
     "VERIFIED_EXPORT_REFERENCE_RELATIVE_PATH",
     "ArtifactLoadEvidence",
     "BackendAuditEvidence",
+    "BackendCpuPlacementError",
+    "BackendFailureCpuNodeDiagnostic",
+    "BackendFailureDiagnostic",
+    "BackendFailureDiagnosticAccumulator",
+    "BackendFailureGraphDiagnostic",
     "BackendGraphAuditRow",
     "BackendIdentityAuditRow",
     "CudaDriverGpuEvidence",

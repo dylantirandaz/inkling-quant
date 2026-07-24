@@ -28,6 +28,8 @@ from inkling_quant_lab.gguf.inkling_smoke import (
     INSTRUMENTATION_PATCH_SHA256,
     INSTRUMENTATION_SCHEMA_VERSION,
     LLAMA_SERVER_AUDIT_LOG_VERBOSITY,
+    MAX_BACKEND_FAILURE_LINE_BYTES,
+    MAX_BACKEND_FAILURE_RECORDS,
     PINNED_CUDA_IMAGE,
     PINNED_CUDA_IMAGE_DIGEST,
     PINNED_CUDA_PLATFORM,
@@ -39,6 +41,10 @@ from inkling_quant_lab.gguf.inkling_smoke import (
     SUBJECT_RUN_ID,
     SUBJECT_VERIFY_CALL_ID,
     VERIFIED_EXPORT_REFERENCE_RELATIVE_PATH,
+    BackendCpuPlacementError,
+    BackendFailureCpuNodeDiagnostic,
+    BackendFailureDiagnostic,
+    BackendFailureDiagnosticAccumulator,
     CudaDriverGpuEvidence,
     CudaDriverPeerLinkEvidence,
     CudaDriverPeerTopologyEvidence,
@@ -861,8 +867,335 @@ def test_backend_audit_rejects_any_cpu_or_unassigned_operation() -> None:
             "compute=12 gpu=11 cpu=1 accel=0 other=0 unassigned=0",
         )
     )
-    with pytest.raises(ValueError, match="CPU"):
+    with pytest.raises(BackendCpuPlacementError, match="CPU"):
         parse_backend_audit_evidence(bad)
+
+
+def _backend_failure_graph_marker(
+    graph_uid: int,
+    *,
+    cpu: int = 1,
+    gpu: int = 11,
+) -> bytes:
+    compute = cpu + gpu
+    return (
+        f"IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid={graph_uid} "
+        "phase=post_assignment_pre_split scope=non_view_compute "
+        f"compute={compute} gpu={gpu} cpu={cpu} accel=0 other=0 unassigned=0\n"
+    ).encode()
+
+
+def _backend_failure_cpu_marker(
+    graph_uid: int,
+    *,
+    ordinal: int = 7,
+    op: str = "MUL_MAT",
+    name: str = "model.layers.0.secret_node",
+) -> bytes:
+    return (
+        f"IQL_SMOKE_CPU_NODE_V1 graph_uid={graph_uid} ordinal={ordinal} op={op} name={name}\n"
+    ).encode()
+
+
+def test_backend_failure_diagnostic_hashes_node_name_without_recording_it() -> None:
+    node_name = "model.layers.0.private_name"
+    accumulator = BackendFailureDiagnosticAccumulator()
+    accumulator.observe_line(b"ggml: " + _backend_failure_cpu_marker(19, name=node_name))
+    accumulator.observe_line(b"ggml: " + _backend_failure_graph_marker(19))
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is False
+    assert diagnostic.cpu_model_graph_fallback_observed is True
+    assert diagnostic.graph_marker_count == 1
+    assert diagnostic.cpu_node_marker_count == 1
+    assert diagnostic.records_truncated is False
+    assert diagnostic.affected_graphs[0].graph_uid == 19
+    sample = diagnostic.cpu_node_samples[0]
+    assert sample.graph_uid == 19
+    assert sample.ordinal == 7
+    assert sample.op == "MUL_MAT"
+    assert sample.node_name_size_bytes == len(node_name.encode())
+    assert sample.node_name_sha256 == hashlib.sha256(node_name.encode()).hexdigest()
+    assert sample.node_name_recorded is False
+    serialized = diagnostic.model_dump_json()
+    assert node_name not in serialized
+    assert "IQL_SMOKE_CPU_NODE_V1" not in serialized
+
+
+@pytest.mark.parametrize("recorded", (None, True, 0, "false"))
+def test_backend_failure_cpu_node_requires_explicit_false_name_retention(
+    recorded: object | None,
+) -> None:
+    payload: dict[str, object] = {
+        "graph_uid": 1,
+        "ordinal": 7,
+        "op": "MUL_MAT",
+        "node_name_size_bytes": 4,
+        "node_name_sha256": hashlib.sha256(b"name").hexdigest(),
+        "node_name_recorded": recorded,
+    }
+    if recorded is None:
+        del payload["node_name_recorded"]
+
+    with pytest.raises(ValidationError):
+        BackendFailureCpuNodeDiagnostic.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("field", "recorded"),
+    (
+        ("raw_marker_lines_recorded", None),
+        ("raw_marker_lines_recorded", True),
+        ("raw_marker_lines_recorded", 0),
+        ("raw_marker_lines_recorded", "false"),
+        ("raw_node_names_recorded", None),
+        ("raw_node_names_recorded", True),
+        ("raw_node_names_recorded", 0),
+        ("raw_node_names_recorded", "false"),
+    ),
+)
+def test_backend_failure_diagnostic_requires_explicit_false_raw_retention(
+    field: str,
+    recorded: object | None,
+) -> None:
+    payload: dict[str, object] = {
+        "cpu_model_graph_fallback_observed": False,
+        "graph_marker_count": 0,
+        "cpu_node_marker_count": 0,
+        "affected_graphs": (),
+        "cpu_node_samples": (),
+        "records_truncated": False,
+        "raw_marker_lines_recorded": False,
+        "raw_node_names_recorded": False,
+    }
+    if recorded is None:
+        del payload[field]
+    else:
+        payload[field] = recorded
+
+    with pytest.raises(ValidationError):
+        BackendFailureDiagnostic.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "line",
+    (
+        b"IQL_SMOKE_CPU_NODE_V1 graph_uid=1 ordinal=7 op=MUL_MAT\n",
+        b"IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=1 malformed=1\n",
+        (
+            b"IQL_SMOKE_CPU_NODE_V1 graph_uid=1 ordinal=7 op=MUL_MAT name=x "
+            b"IQL_SMOKE_CPU_NODE_V1 graph_uid=1 ordinal=8 op=ADD name=y\n"
+        ),
+    ),
+)
+def test_backend_failure_diagnostic_marks_malformed_markers(line: bytes) -> None:
+    accumulator = BackendFailureDiagnosticAccumulator()
+    accumulator.observe_line(line)
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is True
+    assert diagnostic.cpu_model_graph_fallback_observed is False
+
+
+def test_backend_failure_diagnostic_marks_overlong_marker_line() -> None:
+    accumulator = BackendFailureDiagnosticAccumulator()
+    accumulator.observe_line(
+        b"IQL_SMOKE_CPU_NODE_V1 graph_uid=1 ordinal=7 op=MUL_MAT name="
+        + b"x" * MAX_BACKEND_FAILURE_LINE_BYTES
+        + b"\n"
+    )
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is True
+    assert diagnostic.cpu_node_marker_count == 1
+    assert diagnostic.cpu_node_samples == ()
+
+
+def test_backend_failure_diagnostic_makes_mixed_malformed_scan_inconclusive() -> None:
+    accumulator = BackendFailureDiagnosticAccumulator()
+    accumulator.observe_line(_backend_failure_cpu_marker(1))
+    accumulator.observe_line(_backend_failure_graph_marker(1))
+    accumulator.observe_line(b"IQL_SMOKE_CPU_NODE_V1 graph_uid=2 ordinal=8 op=ADD missing_name\n")
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is True
+    assert diagnostic.cpu_model_graph_fallback_observed is False
+    assert diagnostic.graph_marker_count == 1
+    assert diagnostic.cpu_node_marker_count == 2
+    assert diagnostic.affected_graphs == ()
+    assert diagnostic.cpu_node_samples == ()
+    assert diagnostic.records_truncated is False
+
+
+@pytest.mark.parametrize(
+    "lines",
+    (
+        (
+            _backend_failure_cpu_marker(2),
+            _backend_failure_graph_marker(1),
+        ),
+        (_backend_failure_cpu_marker(1),),
+        (_backend_failure_graph_marker(1),),
+    ),
+)
+def test_backend_failure_diagnostic_marks_mismatched_graphs(
+    lines: tuple[bytes, ...],
+) -> None:
+    accumulator = BackendFailureDiagnosticAccumulator()
+    for line in lines:
+        accumulator.observe_line(line)
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is True
+    assert diagnostic.cpu_model_graph_fallback_observed is False
+    assert diagnostic.affected_graphs == ()
+    assert diagnostic.cpu_node_samples == ()
+
+
+@pytest.mark.parametrize(
+    "lines",
+    (
+        (
+            _backend_failure_cpu_marker(1),
+            _backend_failure_cpu_marker(1),
+            _backend_failure_graph_marker(1),
+        ),
+        (
+            _backend_failure_cpu_marker(1),
+            _backend_failure_graph_marker(1),
+            _backend_failure_graph_marker(1),
+        ),
+    ),
+)
+def test_backend_failure_diagnostic_marks_duplicate_marker_identities(
+    lines: tuple[bytes, ...],
+) -> None:
+    accumulator = BackendFailureDiagnosticAccumulator()
+    for line in lines:
+        accumulator.observe_line(line)
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is True
+    assert diagnostic.cpu_model_graph_fallback_observed is False
+    assert diagnostic.affected_graphs == ()
+    assert diagnostic.cpu_node_samples == ()
+
+
+def test_backend_failure_diagnostic_bounds_records_and_keeps_full_counts() -> None:
+    accumulator = BackendFailureDiagnosticAccumulator()
+    for graph_uid in range(1, MAX_BACKEND_FAILURE_RECORDS + 2):
+        accumulator.observe_line(_backend_failure_cpu_marker(graph_uid, ordinal=graph_uid))
+        accumulator.observe_line(_backend_failure_graph_marker(graph_uid))
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is True
+    assert diagnostic.graph_marker_count == MAX_BACKEND_FAILURE_RECORDS + 1
+    assert diagnostic.cpu_node_marker_count == MAX_BACKEND_FAILURE_RECORDS + 1
+    assert diagnostic.affected_graphs == ()
+    assert diagnostic.cpu_node_samples == ()
+    assert diagnostic.records_truncated is True
+    assert diagnostic.cpu_model_graph_fallback_observed is False
+
+
+def test_backend_failure_diagnostic_accumulator_state_stays_bounded() -> None:
+    accumulator = BackendFailureDiagnosticAccumulator()
+    observed = MAX_BACKEND_FAILURE_RECORDS * 4
+    for graph_uid in range(1, observed + 1):
+        accumulator.observe_line(_backend_failure_cpu_marker(graph_uid, ordinal=graph_uid))
+        accumulator.observe_line(_backend_failure_graph_marker(graph_uid))
+
+    assert len(accumulator._seen_graph_uids) == MAX_BACKEND_FAILURE_RECORDS
+    assert len(accumulator._affected_graphs) == MAX_BACKEND_FAILURE_RECORDS
+    assert len(accumulator._seen_cpu_node_keys) == MAX_BACKEND_FAILURE_RECORDS
+    assert len(accumulator._cpu_node_samples) == MAX_BACKEND_FAILURE_RECORDS
+
+    diagnostic, malformed = accumulator.finish()
+    assert malformed is True
+    assert diagnostic.graph_marker_count == observed
+    assert diagnostic.cpu_node_marker_count == observed
+    assert diagnostic.records_truncated is True
+    assert diagnostic.affected_graphs == ()
+    assert diagnostic.cpu_node_samples == ()
+    assert diagnostic.cpu_model_graph_fallback_observed is False
+
+
+def test_backend_failure_diagnostic_truncates_cpu_free_graph_records() -> None:
+    accumulator = BackendFailureDiagnosticAccumulator()
+    observed = MAX_BACKEND_FAILURE_RECORDS + 1
+    for graph_uid in range(1, observed + 1):
+        accumulator.observe_line(_backend_failure_graph_marker(graph_uid, cpu=0, gpu=2))
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is True
+    assert diagnostic.graph_marker_count == observed
+    assert diagnostic.cpu_node_marker_count == 0
+    assert diagnostic.records_truncated is True
+    assert diagnostic.affected_graphs == ()
+    assert diagnostic.cpu_node_samples == ()
+    assert diagnostic.cpu_model_graph_fallback_observed is False
+
+
+def test_backend_failure_diagnostic_rejects_duplicate_graph_beyond_record_limit() -> None:
+    accumulator = BackendFailureDiagnosticAccumulator()
+    observed = MAX_BACKEND_FAILURE_RECORDS + 1
+    for graph_uid in range(1, observed + 1):
+        accumulator.observe_line(_backend_failure_graph_marker(graph_uid, cpu=0, gpu=2))
+    accumulator.observe_line(_backend_failure_graph_marker(observed, cpu=0, gpu=2))
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is True
+    assert diagnostic.graph_marker_count == observed + 1
+    assert diagnostic.records_truncated is True
+    assert diagnostic.cpu_model_graph_fallback_observed is False
+
+
+def test_backend_failure_diagnostic_counts_malformed_records_after_limit() -> None:
+    accumulator = BackendFailureDiagnosticAccumulator()
+    observed = MAX_BACKEND_FAILURE_RECORDS + 1
+    for graph_uid in range(1, observed + 1):
+        accumulator.observe_line(
+            f"IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid={graph_uid} malformed=1\n".encode()
+        )
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is True
+    assert diagnostic.graph_marker_count == observed
+    assert diagnostic.records_truncated is True
+    assert diagnostic.cpu_model_graph_fallback_observed is False
+
+
+def test_backend_failure_diagnostic_rejects_truncated_positive_records() -> None:
+    accumulator = BackendFailureDiagnosticAccumulator()
+    accumulator.observe_line(_backend_failure_cpu_marker(1))
+    accumulator.observe_line(_backend_failure_graph_marker(1))
+    diagnostic, malformed = accumulator.finish()
+    assert malformed is False
+    payload = diagnostic.model_dump(mode="json")
+    payload["graph_marker_count"] = MAX_BACKEND_FAILURE_RECORDS + 1
+    payload["cpu_node_marker_count"] = MAX_BACKEND_FAILURE_RECORDS + 1
+    payload["records_truncated"] = True
+
+    with pytest.raises(ValidationError, match="truncated"):
+        BackendFailureDiagnostic.model_validate(payload)
+
+
+def test_backend_failure_diagnostic_requires_truncation_above_record_limit() -> None:
+    diagnostic = BackendFailureDiagnosticAccumulator().finish()[0]
+    payload = diagnostic.model_dump(mode="json")
+    payload["graph_marker_count"] = MAX_BACKEND_FAILURE_RECORDS + 1
+
+    with pytest.raises(ValidationError, match="truncated"):
+        BackendFailureDiagnostic.model_validate(payload)
 
 
 def test_backend_audit_requires_compute_on_both_cuda_devices() -> None:

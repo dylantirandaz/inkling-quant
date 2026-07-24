@@ -2345,11 +2345,29 @@ def _failure_server_log_evidence() -> dict[str, Any]:
         if not stat.S_ISREG(metadata.st_mode):
             raise RuntimeError("llama-server log is not a regular file")
         maximum_pattern_bytes = max(len(pattern) for pattern in patterns.values())
-        maximum_marker_bytes = max(len(marker) for marker in BACKEND_FAILURE_MARKER_TOKENS)
         signal_tail = b""
-        marker_tail = b""
+        marker_tails = {marker: b"" for marker in BACKEND_FAILURE_MARKER_TOKENS}
         line_buffer = bytearray()
         line_is_overlong = False
+
+        def observe_overlong_marker_bytes(value: bytes) -> None:
+            counts: dict[bytes, int] = {}
+            for marker in BACKEND_FAILURE_MARKER_TOKENS:
+                searchable = marker_tails[marker] + value
+                counts[marker] = searchable.count(marker)
+                marker_tails[marker] = searchable[-(len(marker) - 1) :]
+            graph_count = counts[BACKEND_FAILURE_MARKER_TOKENS[0]]
+            cpu_count = counts[BACKEND_FAILURE_MARKER_TOKENS[1]]
+            if graph_count + cpu_count:
+                backend.observe_unparsed_marker_counts(
+                    graph_marker_count=graph_count,
+                    cpu_node_marker_count=cpu_count,
+                )
+
+        def reset_marker_tails() -> None:
+            for marker in BACKEND_FAILURE_MARKER_TOKENS:
+                marker_tails[marker] = b""
+
         with os.fdopen(descriptor, "rb", closefd=False) as handle:
             while segment := handle.readline(MAX_FAILURE_LOG_LINE_BYTES + 1):
                 digest.update(segment)
@@ -2361,26 +2379,20 @@ def _failure_server_log_evidence() -> dict[str, Any]:
                 signal_tail = searchable[-(maximum_pattern_bytes - 1) :]
 
                 if line_is_overlong:
-                    marker_searchable = marker_tail + segment
-                    if any(marker in marker_searchable for marker in BACKEND_FAILURE_MARKER_TOKENS):
-                        backend.mark_malformed()
-                    marker_tail = marker_searchable[-(maximum_marker_bytes - 1) :]
+                    observe_overlong_marker_bytes(segment)
                     if segment.endswith(b"\n"):
                         line_is_overlong = False
-                        marker_tail = b""
+                        reset_marker_tails()
                     continue
 
                 line_buffer.extend(segment)
                 if len(line_buffer) > MAX_FAILURE_LOG_LINE_BYTES:
                     line_is_overlong = True
-                    marker_searchable = bytes(line_buffer)
-                    if any(marker in marker_searchable for marker in BACKEND_FAILURE_MARKER_TOKENS):
-                        backend.mark_malformed()
-                    marker_tail = marker_searchable[-(maximum_marker_bytes - 1) :]
+                    observe_overlong_marker_bytes(bytes(line_buffer))
                     line_buffer.clear()
                     if segment.endswith(b"\n"):
                         line_is_overlong = False
-                        marker_tail = b""
+                        reset_marker_tails()
                     continue
                 if segment.endswith(b"\n"):
                     backend.observe_line(bytes(line_buffer))

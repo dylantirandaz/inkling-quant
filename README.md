@@ -40,24 +40,30 @@ It did not measure the quality of the quantized Inkling model.
 The project does not yet have an accepted inference-smoke result for the final files.
 
 The latest controlled smoke attempt used terminal evidence version 5.
+It loaded all 49 model files and the projector on two B300 GPUs.
 It reached server readiness and finished the declared text, image, and audio probe calls.
-It then entered the `stop_server` phase.
-The resource monitor timed out while the server released its CUDA resources.
-The runner had stopped the server before it stopped the monitor.
+The strict backend audit then found a model graph operation on a CPU.
+The run failed in the `stop_server` phase, as required by the no-CPU rule.
 
 The immutable failure receipt has SHA-256
-`2d5d55f6fe38f092a8231bdf6a5093dd6c5fb48644369c31b960bcaac9009f0b`.
+`b0ec38d43d96f448a9e258f4ad4e32d55a59de37e85e2ea1d443f9db8715da7a`.
 The server log has SHA-256
-`5d03d157fe1408a51062a965a6899fe76e0bf5d45b8846fc6c67d8cd6b66da62`.
+`d848365973900761e90db79f86f5a081919fb3bd48e5f355f8d4677affe78773`.
 The safe model-load, GPU, memory, projector, and architecture failure signals were all false.
-The failure receipt does not contain validated probe results.
-This result is an evidence-capture failure.
-It is not a model failure, and it is not a smoke-test pass.
+This result is a backend-placement failure.
+It is not a smoke-test pass.
 
-The correction stops and joins the monitor while the server is still active.
-It then stops the server.
-The monitor join limit is longer than the `nvidia-smi` command limit.
-A monitor timeout, another monitor error, or an empty sample set still fails the run.
+The version 5 receipt did not record the CPU operation.
+The raw server log was temporary and is gone.
+The exact CPU operation cannot be recovered from the retained evidence.
+
+The next failure receipt uses version 6.
+It records bounded graph counters, the CPU operation type, and a hash of the node name.
+It reads and hashes the full server log.
+It does not retain the raw log, prompts, output text, marker lines, or node names.
+A malformed or inconsistent marker makes the result inconclusive.
+Passing receipts remain version 5.
+Historical receipt bytes and validation rules do not change.
 
 A version 5 passing receipt must check the active output vocabulary and the padded output rows.
 It must also meet the strict version 4 GPU rules.
@@ -67,7 +73,7 @@ At least one audited graph must use both devices.
 An auxiliary projector graph can use `CUDA0` only.
 Every audited graph must have positive GPU work and no CPU or other accelerator fallback.
 Historical receipts keep their original validation rules and hashes.
-A corrected remote run needs a new sealed identity and a new confirmation.
+A diagnostic remote run needs a new sealed identity and a new confirmation.
 
 The Git repository does not contain the model files.
 The files are too large for Git, and the project does not upload model weights by default.

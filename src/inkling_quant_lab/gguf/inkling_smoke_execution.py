@@ -663,11 +663,42 @@ class SmokeServerLogFailureEvidence(_SmokeReceiptModel):
                 or self.sha256 != empty_sha256
                 or any(self.safe_failure_signals.model_dump(mode="json").values())
                 or self.backend_diagnostic.cpu_model_graph_fallback_observed
+                or self.backend_diagnostic.graph_marker_count != 0
+                or self.backend_diagnostic.cpu_node_marker_count != 0
+                or self.backend_diagnostic.affected_graphs
+                or self.backend_diagnostic.cpu_node_samples
+                or self.backend_diagnostic.records_truncated
             ):
                 raise ValueError("missing server log evidence contains observed log facts")
             return self
         if not self.present:
             raise ValueError("present server log evidence cannot use an absent log")
+        if (self.size_bytes == 0) != (self.sha256 == empty_sha256):
+            raise ValueError("server log size and SHA-256 have an invalid empty-log identity")
+        if self.backend_diagnostic.records_truncated and self.scan_integrity != "malformed":
+            raise ValueError("truncated backend diagnostics require a malformed scan result")
+        if self.scan_integrity == "complete":
+            samples_by_graph: dict[int, int] = {}
+            for sample in self.backend_diagnostic.cpu_node_samples:
+                samples_by_graph[sample.graph_uid] = samples_by_graph.get(sample.graph_uid, 0) + 1
+            affected_graph_ids = {
+                graph.graph_uid for graph in self.backend_diagnostic.affected_graphs
+            }
+            if self.backend_diagnostic.cpu_node_marker_count != len(
+                self.backend_diagnostic.cpu_node_samples
+            ):
+                raise ValueError(
+                    "complete backend scan CPU-node count differs from retained samples"
+                )
+            if affected_graph_ids != set(samples_by_graph):
+                raise ValueError(
+                    "complete backend scan graph identities differ from CPU-node samples"
+                )
+            for graph in self.backend_diagnostic.affected_graphs:
+                if samples_by_graph.get(graph.graph_uid, 0) != min(graph.cpu, 8):
+                    raise ValueError(
+                        "complete backend scan CPU-node count differs from its graph counter"
+                    )
         if (
             self.backend_diagnostic.cpu_model_graph_fallback_observed
             and self.scan_integrity != "complete"
@@ -930,9 +961,7 @@ class SmokeFailureReceiptV6(_SmokeFailureReceipt):
             and self.server_log_evidence.scan_integrity == "complete"
             and self.server_log_evidence.backend_diagnostic.cpu_model_graph_fallback_observed
         ):
-            raise ValueError(
-                "CPU placement failure lacks complete positive backend diagnostics"
-            )
+            raise ValueError("CPU placement failure lacks complete positive backend diagnostics")
         return self
 
 

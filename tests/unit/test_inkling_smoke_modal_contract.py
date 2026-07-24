@@ -23,6 +23,7 @@ import pytest
 from inkling_quant_lab.gguf.inkling_smoke import (
     BACKEND_FAILURE_MARKER_TOKENS,
     LLAMA_SERVER_AUDIT_LOG_VERBOSITY,
+    MAX_BACKEND_FAILURE_RECORDS,
     BackendFailureDiagnosticAccumulator,
 )
 from inkling_quant_lab.gguf.inkling_smoke_acceptance import (
@@ -1490,8 +1491,7 @@ def test_failure_server_log_hashes_oversized_content_and_cross_chunk_signals(
     chunk_size = 1024 * 1024
     signal = b"out of memory"
     cpu_marker = (
-        b"IQL_SMOKE_CPU_NODE_V1 graph_uid=7 ordinal=19 "
-        b"op=MUL_MAT name=secret_tensor_name\n"
+        b"IQL_SMOKE_CPU_NODE_V1 graph_uid=7 ordinal=19 op=MUL_MAT name=secret_tensor_name\n"
     )
     graph_marker = (
         b"IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=7 "
@@ -1601,10 +1601,7 @@ def test_failure_server_log_distinguishes_missing_empty_and_malformed_marker_lin
     assert empty["sha256"] == hashlib.sha256(b"").hexdigest()
     assert empty["scan_integrity"] == "complete"
 
-    malformed_payload = (
-        b"IQL_SMOKE_CPU_NODE_V1 graph_uid=7 ordinal=19 "
-        b"op=MUL_MAT name=bad name\n"
-    )
+    malformed_payload = b"IQL_SMOKE_CPU_NODE_V1 graph_uid=7 ordinal=19 op=MUL_MAT name=bad name\n"
     server_log.write_bytes(malformed_payload)
     malformed = evidence()
     assert malformed["present"] is True
@@ -1613,6 +1610,180 @@ def test_failure_server_log_distinguishes_missing_empty_and_malformed_marker_lin
     assert malformed["scan_integrity"] == "malformed"
     assert malformed["backend_diagnostic"]["cpu_model_graph_fallback_observed"] is False
     assert "bad name" not in json.dumps(malformed, sort_keys=True)
+
+
+def test_failure_server_log_counts_markers_after_an_overlong_line_limit(
+    tmp_path: Path,
+) -> None:
+    namespace = _isolated_runner_functions("_failure_server_log_evidence")
+    server_log = tmp_path / "llama-server.log"
+    observed_records = MAX_BACKEND_FAILURE_RECORDS + 1
+    payload = (
+        b"x" * (4 * 1024 + 1)
+        + (BACKEND_FAILURE_MARKER_TOKENS[0] + b" malformed ") * observed_records
+        + b"\n"
+    )
+    server_log.write_bytes(payload)
+    namespace.update(
+        {
+            "SERVER_LOG": server_log,
+            "hashlib": hashlib,
+        }
+    )
+    evidence = namespace["_failure_server_log_evidence"]
+    assert callable(evidence)
+
+    observed = evidence()
+
+    diagnostic = observed["backend_diagnostic"]
+    assert observed["present"] is True
+    assert observed["size_bytes"] == len(payload)
+    assert observed["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert observed["scan_integrity"] == "malformed"
+    assert diagnostic["graph_marker_count"] == observed_records
+    assert diagnostic["cpu_node_marker_count"] == 0
+    assert diagnostic["records_truncated"] is True
+    assert diagnostic["cpu_model_graph_fallback_observed"] is False
+    assert diagnostic["affected_graphs"] == []
+    assert diagnostic["cpu_node_samples"] == []
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_graph_count", "expected_cpu_node_count"),
+    (
+        (
+            b"x" * (4 * 1024 + 1) + BACKEND_FAILURE_MARKER_TOKENS[1] + b" malformed\n",
+            0,
+            1,
+        ),
+        (
+            b"x" * (4 * 1024 + 1)
+            + BACKEND_FAILURE_MARKER_TOKENS[0]
+            + b" malformed "
+            + BACKEND_FAILURE_MARKER_TOKENS[1]
+            + b" malformed\n",
+            1,
+            1,
+        ),
+        (
+            b"x" * (4 * 1024 + 1 - 7)
+            + BACKEND_FAILURE_MARKER_TOKENS[1][:7]
+            + BACKEND_FAILURE_MARKER_TOKENS[1][7:]
+            + b" malformed\n",
+            0,
+            1,
+        ),
+    ),
+    ids=("one-cpu-marker", "multiple-marker-types", "marker-split-at-read-limit"),
+)
+def test_failure_server_log_counts_each_marker_in_an_overlong_line(
+    tmp_path: Path,
+    payload: bytes,
+    expected_graph_count: int,
+    expected_cpu_node_count: int,
+) -> None:
+    namespace = _isolated_runner_functions("_failure_server_log_evidence")
+    server_log = tmp_path / "llama-server.log"
+    server_log.write_bytes(payload)
+    namespace.update(
+        {
+            "SERVER_LOG": server_log,
+            "hashlib": hashlib,
+        }
+    )
+    evidence = namespace["_failure_server_log_evidence"]
+    assert callable(evidence)
+
+    observed = evidence()
+
+    diagnostic = observed["backend_diagnostic"]
+    assert observed["size_bytes"] == len(payload)
+    assert observed["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert observed["scan_integrity"] == "malformed"
+    assert diagnostic["graph_marker_count"] == expected_graph_count
+    assert diagnostic["cpu_node_marker_count"] == expected_cpu_node_count
+    assert diagnostic["records_truncated"] is False
+
+
+def test_failure_server_log_makes_mixed_valid_and_malformed_markers_inconclusive(
+    tmp_path: Path,
+) -> None:
+    namespace = _isolated_runner_functions("_failure_server_log_evidence")
+    server_log = tmp_path / "llama-server.log"
+    payload = (
+        b"IQL_SMOKE_CPU_NODE_V1 graph_uid=7 ordinal=19 "
+        b"op=MUL_MAT name=secret_tensor_name\n"
+        b"IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=7 "
+        b"phase=post_assignment_pre_split scope=non_view_compute "
+        b"compute=2 gpu=1 cpu=1 accel=0 other=0 unassigned=0\n"
+        b"IQL_SMOKE_CPU_NODE_V1 graph_uid=8 ordinal=20 "
+        b"op=MUL_MAT name=bad name\n"
+    )
+    server_log.write_bytes(payload)
+    namespace.update(
+        {
+            "SERVER_LOG": server_log,
+            "hashlib": hashlib,
+        }
+    )
+    evidence = namespace["_failure_server_log_evidence"]
+    assert callable(evidence)
+
+    observed = evidence()
+
+    assert observed["present"] is True
+    assert observed["size_bytes"] == len(payload)
+    assert observed["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert observed["scan_integrity"] == "malformed"
+    assert observed["backend_diagnostic"]["cpu_model_graph_fallback_observed"] is False
+    assert observed["backend_diagnostic"]["affected_graphs"] == []
+    assert observed["backend_diagnostic"]["cpu_node_samples"] == []
+    serialized = json.dumps(observed, sort_keys=True)
+    assert "secret_tensor_name" not in serialized
+    assert "bad name" not in serialized
+    assert "IQL_SMOKE_CPU_NODE_V1" not in serialized
+
+
+def test_failure_server_log_makes_truncated_marker_records_inconclusive(
+    tmp_path: Path,
+) -> None:
+    namespace = _isolated_runner_functions("_failure_server_log_evidence")
+    server_log = tmp_path / "llama-server.log"
+    observed_records = MAX_BACKEND_FAILURE_RECORDS + 1
+    payload = b"".join(
+        (
+            f"IQL_SMOKE_CPU_NODE_V1 graph_uid={graph_uid} ordinal={graph_uid} "
+            "op=MUL_MAT name=private_node\n"
+            f"IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid={graph_uid} "
+            "phase=post_assignment_pre_split scope=non_view_compute "
+            "compute=2 gpu=1 cpu=1 accel=0 other=0 unassigned=0\n"
+        ).encode("ascii")
+        for graph_uid in range(1, observed_records + 1)
+    )
+    server_log.write_bytes(payload)
+    namespace.update(
+        {
+            "SERVER_LOG": server_log,
+            "hashlib": hashlib,
+        }
+    )
+    evidence = namespace["_failure_server_log_evidence"]
+    assert callable(evidence)
+
+    observed = evidence()
+
+    diagnostic = observed["backend_diagnostic"]
+    assert observed["present"] is True
+    assert observed["size_bytes"] == len(payload)
+    assert observed["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert observed["scan_integrity"] == "malformed"
+    assert diagnostic["graph_marker_count"] == observed_records
+    assert diagnostic["cpu_node_marker_count"] == observed_records
+    assert diagnostic["records_truncated"] is True
+    assert diagnostic["cpu_model_graph_fallback_observed"] is False
+    assert diagnostic["affected_graphs"] == []
+    assert diagnostic["cpu_node_samples"] == []
+    assert "private_node" not in json.dumps(observed, sort_keys=True)
 
 
 def test_gpu_topology_identity_preserves_the_exact_ordered_peer_links() -> None:
@@ -1859,10 +2030,7 @@ def test_record_failure_uses_terminal_v6_sanitized_failure_evidence() -> None:
     assert '"safe_subprocess_failure": _safe_subprocess_failure(error)' in function_source
     assert '"server_log_evidence": server_log_evidence' in function_source
     assert '"server_log_sha256": server_log_evidence["sha256"]' in function_source
-    assert (
-        '"safe_failure_signals": server_log_evidence["safe_failure_signals"]'
-        in function_source
-    )
+    assert '"safe_failure_signals": server_log_evidence["safe_failure_signals"]' in function_source
     assert '"subprocess_failure":' not in function_source
 
 
