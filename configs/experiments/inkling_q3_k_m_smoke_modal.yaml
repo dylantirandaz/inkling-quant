@@ -1,4 +1,4 @@
-schema_version: inkling-smoke-config-v4
+schema_version: inkling-smoke-config-v5
 verified_export_reference_path: configs/experiments/inkling_q3_k_m_verified_export.json
 verified_export_reference_sha256: 9f0fae0a48058e73aab38c2b4f6c86916b69fd32343e0f7b821c7faac5b33198
 
@@ -12,9 +12,9 @@ output_vocabulary:
 runtime:
   repository: https://github.com/danielhanchen/llama.cpp.git
   commit: a015409e6c27b84f60d688823d4c0126a11571fd
-  instrumentation_schema_version: inkling-llama-smoke-instrumentation-v4
+  instrumentation_schema_version: inkling-llama-smoke-instrumentation-v5
   instrumentation_patch_path: patches/inkling-smoke-a015409.patch
-  instrumentation_patch_sha256: 83eb5a1340c4951096d4f0d48c18ace41b182c9802babfea8eec7ff47cc1aa72
+  instrumentation_patch_sha256: 005f1f342511fc3fc843bdcc7be814ed8a60e67033b733eb7e7e4af53925be04
   image:
     image: nvidia/cuda:13.1.2-devel-ubuntu24.04
     digest: sha256:952e42d23230610a2714c8484f38e9c934ed68e6f9c9c7fac62dcd5f98858a6e

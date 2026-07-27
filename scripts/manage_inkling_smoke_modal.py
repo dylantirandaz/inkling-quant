@@ -1268,6 +1268,7 @@ def _validated_remote_failure_receipts(
                 "inkling-smoke-terminal-v6",
                 "inkling-smoke-terminal-v7",
                 "inkling-smoke-terminal-v8",
+                "inkling-smoke-terminal-v9",
             }:
                 invocation = getattr(receipt, "invocation", None)
                 if invocation is None:
@@ -1303,6 +1304,7 @@ def _validated_remote_failure_receipts(
             "inkling-smoke-terminal-v6",
             "inkling-smoke-terminal-v7",
             "inkling-smoke-terminal-v8",
+            "inkling-smoke-terminal-v9",
         }:
             safe_subprocess_failure = _safe_subprocess_failure_record(receipt)
             if safe_subprocess_failure is not None:
@@ -1311,11 +1313,13 @@ def _validated_remote_failure_receipts(
             "inkling-smoke-terminal-v6",
             "inkling-smoke-terminal-v7",
             "inkling-smoke-terminal-v8",
+            "inkling-smoke-terminal-v9",
         }:
             record["server_log_evidence"] = _safe_server_log_failure_record(receipt)
         if receipt.schema_version in {
             "inkling-smoke-terminal-v7",
             "inkling-smoke-terminal-v8",
+            "inkling-smoke-terminal-v9",
         }:
             relation = getattr(receipt, "cpu_placement_evidence_relation", None)
             if relation is None:

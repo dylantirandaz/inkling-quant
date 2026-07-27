@@ -156,7 +156,7 @@ EXPECTED_PATCHED_SOURCE_BLOB_PINS = (
     ),
     (
         "src/llama-model-loader.cpp",
-        "fad59d654dfe84b2c778c7f85a84c7408c55c264",
+        "2464b091c56e15a07e4047503fbfb1ba7eb8c672",
     ),
     (
         "src/llama-model-loader.h",
@@ -936,7 +936,7 @@ def test_smoke_runner_build_and_mount_contract_is_closed() -> None:
     assert patched_diff_git_options == EXPECTED_PATCHED_DIFF_GIT_OPTIONS
     assert (
         inkling_smoke.INSTRUMENTATION_PATCHED_DIFF_SHA256
-        == "f9bd7ed63e0caa66c061dbd3dc270503ae43032d7c26d2fee9aad18292504908"
+        == "7371c3e1bfe0e76b85a8de7da89a0678260d5066db95547564f29e8a9ef60294"
     )
     assert len(source_blob_pins) == 15
     assert len(patched_source_blob_pins) == 15
@@ -994,6 +994,23 @@ def test_smoke_runner_build_and_mount_contract_is_closed() -> None:
     assert "test ! -e {CUDA_DRIVER_LINK_DIR}" in source
     assert "parse_cuda_driver_linkage" in source
     assert "Runtime CUDA driver resolved to the build stub" in source
+
+
+def test_smoke_patch_accounts_metadata_only_split_by_reconciliation() -> None:
+    patch = (PROJECT_ROOT / inkling_smoke.INSTRUMENTATION_PATCH_RELATIVE_PATH).read_text(
+        encoding="utf-8"
+    )
+
+    assert "std::vector<size_t> iql_expected_tensor_counts(files.size(), 0);" in patch
+    assert "for (const auto & entry : weights_map)" in patch
+    assert "if (weight.idx >= iql_expected_tensor_counts.size())" in patch
+    assert "source file index %u is outside the %zu-file split inventory" in patch
+    assert "++iql_expected_tensor_counts[weight.idx];" in patch
+    assert "iql_loaded_tensor_counts[idx] == iql_expected_tensor_counts[idx]" in patch
+    assert "Metadata-only split files reconcile when both counts are zero." in patch
+    assert "IQL_SMOKE_TEXT_LOAD_V2" in patch
+    assert "IQL_SMOKE_TEXT_LOAD_V1" not in patch
+    assert "if (iql_loaded_tensor_counts[idx] > 0)" not in patch
 
 
 def test_patched_diff_command_ignores_repository_abbreviation_default(tmp_path: Path) -> None:
@@ -2763,13 +2780,13 @@ def test_safe_subprocess_failure_rejects_untrusted_failure_shapes(
         safe_failure(error)
 
 
-def test_record_failure_uses_terminal_v8_sanitized_failure_evidence() -> None:
+def test_record_failure_uses_terminal_v9_sanitized_failure_evidence() -> None:
     source = RUNNER_PATH.read_text(encoding="utf-8")
     start = source.index("def _record_failure(")
     end = source.index("\n\n@app.function(", start)
     function_source = source[start:end]
 
-    assert '"schema_version": "inkling-smoke-terminal-v8"' in function_source
+    assert '"schema_version": "inkling-smoke-terminal-v9"' in function_source
     assert '"safe_subprocess_failure": _safe_subprocess_failure(error)' in function_source
     assert '"server_log_evidence": server_log_evidence' in function_source
     assert '"server_log_sha256": server_log_evidence["sha256"]' in function_source
@@ -2778,14 +2795,15 @@ def test_record_failure_uses_terminal_v8_sanitized_failure_evidence() -> None:
     assert '"subprocess_failure":' not in function_source
 
 
-def test_smoke_runner_emits_terminal_v8_success_receipt() -> None:
+def test_smoke_runner_emits_terminal_v9_success_receipt() -> None:
     source = RUNNER_PATH.read_text(encoding="utf-8")
     smoke_start = source.index("def smoke_test(")
     success_start = source.index('        phase = "publish_success"', smoke_start)
     receipt_hash = source.index('        receipt["receipt_sha256"]', success_start)
     success_receipt_source = source[success_start:receipt_hash]
 
-    assert success_receipt_source.count('"schema_version": "inkling-smoke-terminal-v8"') == 1
+    assert success_receipt_source.count('"schema_version": "inkling-smoke-terminal-v9"') == 1
+    assert '"schema_version": "inkling-smoke-terminal-v8"' not in success_receipt_source
     assert '"schema_version": "inkling-smoke-terminal-v7"' not in success_receipt_source
 
 
@@ -3850,6 +3868,7 @@ def test_terminal_validation_rejects_noncanonical_record_terminators(
         ("inkling-smoke-terminal-v6", True, True, True),
         ("inkling-smoke-terminal-v7", True, True, True),
         ("inkling-smoke-terminal-v8", True, True, True),
+        ("inkling-smoke-terminal-v9", True, True, True),
     ),
 )
 def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostics(
@@ -3961,6 +3980,7 @@ def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostic
         "inkling-smoke-terminal-v6",
         "inkling-smoke-terminal-v7",
         "inkling-smoke-terminal-v8",
+        "inkling-smoke-terminal-v9",
     }:
         receipt_fields["invocation"] = invocation
     if schema_version in {
@@ -3969,17 +3989,20 @@ def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostic
         "inkling-smoke-terminal-v6",
         "inkling-smoke-terminal-v7",
         "inkling-smoke-terminal-v8",
+        "inkling-smoke-terminal-v9",
     }:
         receipt_fields["safe_subprocess_failure"] = safe_diagnostic
     if schema_version in {
         "inkling-smoke-terminal-v6",
         "inkling-smoke-terminal-v7",
         "inkling-smoke-terminal-v8",
+        "inkling-smoke-terminal-v9",
     }:
         receipt_fields["server_log_evidence"] = server_log_evidence
     if schema_version in {
         "inkling-smoke-terminal-v7",
         "inkling-smoke-terminal-v8",
+        "inkling-smoke-terminal-v9",
     }:
         receipt_fields["cpu_placement_evidence_relation"] = "matched"
     receipt = SimpleNamespace(**receipt_fields)
@@ -4100,6 +4123,7 @@ def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostic
     if schema_version in {
         "inkling-smoke-terminal-v7",
         "inkling-smoke-terminal-v8",
+        "inkling-smoke-terminal-v9",
     }:
         expected_record["cpu_placement_evidence_relation"] = "matched"
     assert records == [expected_record]
@@ -4539,6 +4563,7 @@ def test_manager_fails_closed_on_attempt_claim_and_terminal_receipts() -> None:
     assert '"inkling-smoke-terminal-v6"' in failure_source
     assert '"inkling-smoke-terminal-v7"' in failure_source
     assert '"inkling-smoke-terminal-v8"' in failure_source
+    assert '"inkling-smoke-terminal-v9"' in failure_source
     assert "_safe_subprocess_failure_record(" in failure_source
     assert "_safe_server_log_failure_record(" in failure_source
     assert '"cpu_placement_evidence_relation"' in failure_source

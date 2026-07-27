@@ -300,7 +300,7 @@ PATCHED_SOURCE_BLOB_PINS: Final = (
     ),
     (
         "src/llama-model-loader.cpp",
-        "fad59d654dfe84b2c778c7f85a84c7408c55c264",
+        "2464b091c56e15a07e4047503fbfb1ba7eb8c672",
     ),
     (
         "src/llama-model-loader.h",
@@ -2653,7 +2653,7 @@ def _record_failure(
     )
     server_log_evidence = _failure_server_log_evidence()
     receipt: dict[str, Any] = {
-        "schema_version": "inkling-smoke-terminal-v8",
+        "schema_version": "inkling-smoke-terminal-v9",
         "status": "failed",
         "stage": SMOKE_STAGE,
         "run_id": run_root.name,
@@ -2902,7 +2902,7 @@ def smoke_test(
         artifact_load = parse_artifact_load_evidence(log_text)
         phase = "publish_success"
         receipt: dict[str, Any] = {
-            "schema_version": "inkling-smoke-terminal-v8",
+            "schema_version": "inkling-smoke-terminal-v9",
             "status": "passed",
             "stage": SMOKE_STAGE,
             "run_id": run_id,

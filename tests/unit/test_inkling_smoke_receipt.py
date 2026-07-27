@@ -17,6 +17,8 @@ from inkling_quant_lab.gguf.inkling_smoke import (
     LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
     OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
     PRE_OWNER_INSTRUMENTATION_PATCH_SHA256,
+    PRE_RECONCILIATION_INSTRUMENTATION_PATCH_SHA256,
+    PRE_RECONCILIATION_INSTRUMENTATION_PATCHED_DIFF_SHA256,
     load_inkling_smoke_config,
     load_verified_export_reference,
 )
@@ -26,6 +28,7 @@ from inkling_quant_lab.gguf.inkling_smoke_execution import (
     SmokeRawLogitAuditV2,
     SmokeSuccessReceiptV7,
     SmokeSuccessReceiptV8,
+    SmokeSuccessReceiptV9,
     smoke_control_plane_provenance,
     smoke_control_plane_tree_sha256,
     smoke_hardware_topology_sha256,
@@ -41,6 +44,7 @@ CONFIG_PATH = PROJECT_ROOT / "configs/experiments/inkling_q3_k_m_smoke_modal.yam
 REFERENCE_PATH = PROJECT_ROOT / "configs/experiments/inkling_q3_k_m_verified_export.json"
 EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 OWNER_TAGGED_PATCH_SIZE_BYTES = 25_073
+PRE_RECONCILIATION_PATCH_SIZE_BYTES = 47_777
 OWNER_TAGGED_SOURCE_BLOBS = {
     "ggml/include/ggml-backend.h": "2924fdbe9884df40abf505fd89d277f5281a835b",
     "ggml/src/ggml-backend.cpp": "87615921c09be5ef8c4996faa70fb3f49c385031",
@@ -254,6 +258,41 @@ def _initialized_owner_tagged_receipt_context() -> tuple[
             update={
                 "sha256": INITIALIZED_OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
                 "size_bytes": 26_160,
+            }
+        )
+        if item.path == "patches/inkling-smoke-a015409.patch"
+        else item
+        for item in current_control_plane.files
+    )
+    control_plane = SmokeControlPlaneProvenance(
+        file_count=len(files),
+        files=files,
+        tree_sha256=smoke_control_plane_tree_sha256(files),
+    )
+    return config, reference, control_plane, smoke_run_id(config, control_plane.tree_sha256)
+
+
+def _pre_reconciliation_receipt_context() -> tuple[
+    Any,
+    Any,
+    SmokeControlPlaneProvenance,
+    str,
+]:
+    current_config, reference, current_control_plane, _run_id = _receipt_context()
+    config_payload = current_config.model_dump(mode="json")
+    config_payload["schema_version"] = "inkling-smoke-config-v4"
+    config_payload["runtime"]["instrumentation_schema_version"] = (
+        "inkling-llama-smoke-instrumentation-v4"
+    )
+    config_payload["runtime"]["instrumentation_patch_sha256"] = (
+        PRE_RECONCILIATION_INSTRUMENTATION_PATCH_SHA256
+    )
+    config = type(current_config).model_validate(config_payload)
+    files = tuple(
+        item.model_copy(
+            update={
+                "sha256": PRE_RECONCILIATION_INSTRUMENTATION_PATCH_SHA256,
+                "size_bytes": PRE_RECONCILIATION_PATCH_SIZE_BYTES,
             }
         )
         if item.path == "patches/inkling-smoke-a015409.patch"
@@ -974,7 +1013,7 @@ def _valid_v8_receipt() -> tuple[
     str,
 ]:
     receipt, _v7_config, reference, _v7_control_plane, _run_id = _valid_v7_receipt()
-    config, current_reference, control_plane, run_id = _receipt_context()
+    config, current_reference, control_plane, run_id = _pre_reconciliation_receipt_context()
     assert current_reference == reference
     _bind_receipt_to_context(
         receipt,
@@ -986,10 +1025,42 @@ def _valid_v8_receipt() -> tuple[
     _set_runtime_source_contract(
         receipt,
         instrumentation_schema_version="inkling-llama-smoke-instrumentation-v4",
+        instrumentation_patch_sha256=PRE_RECONCILIATION_INSTRUMENTATION_PATCH_SHA256,
+        source_blobs=ACTIVE_CUDA_SOURCE_BLOBS,
+    )
+    receipt["runtime"]["patched_diff_sha256"] = (
+        PRE_RECONCILIATION_INSTRUMENTATION_PATCHED_DIFF_SHA256
+    )
+    receipt["server"]["artifact_load"]["schema_version"] = "inkling-artifact-load-v1"
+    _reseal(receipt)
+    return receipt, config, reference, control_plane, run_id
+
+
+def _valid_v9_receipt() -> tuple[
+    dict[str, Any],
+    Any,
+    Any,
+    SmokeControlPlaneProvenance,
+    str,
+]:
+    receipt, _v8_config, reference, _v8_control_plane, _run_id = _valid_v8_receipt()
+    config, current_reference, control_plane, run_id = _receipt_context()
+    assert current_reference == reference
+    _bind_receipt_to_context(
+        receipt,
+        schema_version="inkling-smoke-terminal-v9",
+        config=config,
+        control_plane=control_plane,
+        run_id=run_id,
+    )
+    _set_runtime_source_contract(
+        receipt,
+        instrumentation_schema_version="inkling-llama-smoke-instrumentation-v5",
         instrumentation_patch_sha256=INSTRUMENTATION_PATCH_SHA256,
         source_blobs=ACTIVE_CUDA_SOURCE_BLOBS,
     )
     receipt["runtime"]["patched_diff_sha256"] = INSTRUMENTATION_PATCHED_DIFF_SHA256
+    receipt["server"]["artifact_load"]["schema_version"] = "inkling-artifact-load-v2"
     _reseal(receipt)
     return receipt, config, reference, control_plane, run_id
 
@@ -1182,7 +1253,7 @@ def test_complete_v7_terminal_receipt_accepts_initialized_owner_patch() -> None:
     )
 
 
-def test_complete_v8_terminal_receipt_binds_active_cuda_instrumentation() -> None:
+def test_complete_v8_terminal_receipt_keeps_pre_reconciliation_contract_frozen() -> None:
     receipt, config, reference, control_plane, run_id = _valid_v8_receipt()
 
     observed = validate_smoke_terminal_receipt(
@@ -1198,10 +1269,41 @@ def test_complete_v8_terminal_receipt_binds_active_cuda_instrumentation() -> Non
     assert observed.runtime.instrumentation_schema_version == (
         "inkling-llama-smoke-instrumentation-v4"
     )
+    assert (
+        observed.runtime.instrumentation_patch_sha256
+        == PRE_RECONCILIATION_INSTRUMENTATION_PATCH_SHA256
+    )
+    assert (
+        observed.runtime.patched_diff_sha256
+        == PRE_RECONCILIATION_INSTRUMENTATION_PATCHED_DIFF_SHA256
+    )
+    assert observed.runtime.patched_source_paths == tuple(sorted(ACTIVE_CUDA_SOURCE_BLOBS))
+    assert len(observed.runtime.patched_source_paths) == 15
+    assert observed.server.artifact_load.schema_version == "inkling-artifact-load-v1"
+    assert "--override-tensor" not in observed.server.command
+
+
+def test_complete_v9_terminal_receipt_binds_current_reconciled_contract() -> None:
+    receipt, config, reference, control_plane, run_id = _valid_v9_receipt()
+
+    observed = validate_smoke_terminal_receipt(
+        receipt,
+        config=config,
+        reference=reference,
+        control_plane=control_plane,
+        run_id=run_id,
+    )
+
+    assert isinstance(observed, SmokeSuccessReceiptV9)
+    assert config.schema_version == "inkling-smoke-config-v5"
+    assert observed.runtime.instrumentation_schema_version == (
+        "inkling-llama-smoke-instrumentation-v5"
+    )
     assert observed.runtime.instrumentation_patch_sha256 == INSTRUMENTATION_PATCH_SHA256
     assert observed.runtime.patched_diff_sha256 == INSTRUMENTATION_PATCHED_DIFF_SHA256
     assert observed.runtime.patched_source_paths == tuple(sorted(ACTIVE_CUDA_SOURCE_BLOBS))
     assert len(observed.runtime.patched_source_paths) == 15
+    assert observed.server.artifact_load.schema_version == "inkling-artifact-load-v2"
     assert "--override-tensor" not in observed.server.command
 
 
@@ -1225,8 +1327,28 @@ def test_v8_missing_output_vocabulary_error_is_schema_neutral() -> None:
         )
 
 
-def test_v8_terminal_receipt_rejects_tampered_patched_diff() -> None:
-    receipt, config, reference, control_plane, run_id = _valid_v8_receipt()
+@pytest.mark.parametrize(
+    ("factory", "expected_message"),
+    (
+        (
+            _valid_v8_receipt,
+            "runtime patched diff differs from the pre-reconciliation source patch",
+        ),
+        (
+            _valid_v9_receipt,
+            "runtime patched diff differs from the current source patch",
+        ),
+    ),
+    ids=("v8", "v9"),
+)
+def test_terminal_receipt_rejects_tampered_patched_diff(
+    factory: Callable[
+        [],
+        tuple[dict[str, Any], Any, Any, SmokeControlPlaneProvenance, str],
+    ],
+    expected_message: str,
+) -> None:
+    receipt, config, reference, control_plane, run_id = factory()
     receipt["runtime"]["patched_diff_sha256"] = "0" * 64
     _reseal(receipt)
 
@@ -1239,7 +1361,38 @@ def test_v8_terminal_receipt_rejects_tampered_patched_diff() -> None:
             run_id=run_id,
         )
 
-    assert "runtime patched diff differs from the current source patch" in str(
+    assert expected_message in str(error.value.__cause__)
+
+
+@pytest.mark.parametrize(
+    ("factory", "artifact_load_schema_version"),
+    (
+        (_valid_v8_receipt, "inkling-artifact-load-v2"),
+        (_valid_v9_receipt, "inkling-artifact-load-v1"),
+    ),
+    ids=("v8-with-v2", "v9-with-v1"),
+)
+def test_terminal_receipt_rejects_mismatched_artifact_load_schema(
+    factory: Callable[
+        [],
+        tuple[dict[str, Any], Any, Any, SmokeControlPlaneProvenance, str],
+    ],
+    artifact_load_schema_version: str,
+) -> None:
+    receipt, config, reference, control_plane, run_id = factory()
+    receipt["server"]["artifact_load"]["schema_version"] = artifact_load_schema_version
+    _reseal(receipt)
+
+    with pytest.raises(ValueError, match="schema is invalid") as error:
+        validate_smoke_terminal_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+        )
+
+    assert "terminal and artifact-load evidence schemas describe different accounting rules" in str(
         error.value.__cause__
     )
 
