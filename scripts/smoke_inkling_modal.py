@@ -56,13 +56,15 @@ from inkling_quant_lab.gguf.inkling import (  # noqa: E402
     require_stage_billing_window,
 )
 from inkling_quant_lab.gguf.inkling_smoke import (  # noqa: E402
-    BACKEND_FAILURE_MARKER_TOKENS,
+    BACKEND_FAILURE_MARKER_TOKENS_V2,
+    BACKEND_FAILURE_PROTOCOL_CONTAMINATION_TOKENS_V2,
     CUDA_DRIVER_STUB_RPATH_LINK_DEFINITION,
     INSTRUMENTATION_PATCH_RELATIVE_PATH,
     PINNED_CUDA_IMAGE,
     PINNED_CUDA_IMAGE_DIGEST,
     PINNED_LLAMA_CPP_COMMIT,
-    BackendFailureDiagnosticAccumulator,
+    BackendCpuPlacementError,
+    BackendFailureDiagnosticAccumulatorV2,
     InklingSmokeConfig,
     InklingVerifiedExportReference,
     SmokeProbeConfig,
@@ -72,7 +74,7 @@ from inkling_quant_lab.gguf.inkling_smoke import (  # noqa: E402
     load_inkling_smoke_config,
     load_verified_export_reference,
     parse_artifact_load_evidence,
-    parse_backend_audit_evidence,
+    parse_backend_audit_evidence_v2,
     parse_cuda_driver_linkage,
     parse_loader_offload_evidence,
     parse_nvidia_smi_csv,
@@ -102,7 +104,7 @@ from inkling_quant_lab.gguf.inkling_smoke_execution import (  # noqa: E402
     SmokeHostEvidence,
     SmokeLaunchAcknowledgement,
     SmokeNvidiaSmiTopologyDiagnostic,
-    SmokeServerLogFailureEvidence,
+    SmokeServerLogFailureEvidenceV2,
     SmokeSubprocessFailureEvidence,
     canonical_python_package_inventory,
     canonical_smoke_attempt_registry_created_at_utc,
@@ -189,8 +191,16 @@ SERVER_REQUIRED_FLAGS: Final = (
 )
 SOURCE_BLOB_PINS: Final = (
     (
+        "ggml/include/ggml-backend.h",
+        "2924fdbe9884df40abf505fd89d277f5281a835b",
+    ),
+    (
         "ggml/src/ggml-backend.cpp",
         "87615921c09be5ef8c4996faa70fb3f49c385031",
+    ),
+    (
+        "src/llama-context.cpp",
+        "3a469bc90bd90fbdf3d924afa696d4b61fcd1d00",
     ),
     (
         "src/llama-model-loader.cpp",
@@ -232,6 +242,34 @@ SOURCE_CONTRACT_ASSERTIONS: Final = (
 )
 PATCHED_SOURCE_BLOB_PINS: Final = (
     (
+        "ggml/include/ggml-backend.h",
+        "9b8787c8bbd2d89378c63fc22d440920ab257298",
+    ),
+    (
+        "ggml/src/ggml-backend.cpp",
+        "4c9eeb8d1486914c4a675eb0c40c53cd20dd13f0",
+    ),
+    (
+        "src/llama-context.cpp",
+        "389f04f4c56e8200fd028c680bf5f454792efee8",
+    ),
+    (
+        "src/llama-model-loader.cpp",
+        "fad59d654dfe84b2c778c7f85a84c7408c55c264",
+    ),
+    (
+        "src/llama-model-loader.h",
+        "b495fe733fd6a64a41a1eff92c10ea4fe15805bb",
+    ),
+    (
+        "tools/mtmd/clip.cpp",
+        "77abad10845bff3b0ef32ce98b0b0e43a46f7b87",
+    ),
+    (
+        "tools/mtmd/mtmd.cpp",
+        "85f25f2aaa07537894ad3c35c258b937d3f4b84b",
+    ),
+    (
         "tools/server/server-context.cpp",
         "58b90ccbecd60cb0784810224d79e70e4152b521",
     ),
@@ -240,6 +278,10 @@ PATCHED_SOURCE_BLOB_PINS: Final = (
         "9be8c02497080fa57ad9460084c2337a1997f89b",
     ),
 )
+if tuple(path for path, _blob_id in PATCHED_SOURCE_BLOB_PINS) != tuple(
+    path for path, _blob_id in SOURCE_BLOB_PINS
+):
+    raise RuntimeError("Post-patch source inventory must exactly match its base-source inventory")
 SERVER_AUDIT_ENVIRONMENT: Final = {
     "IQL_SMOKE_BACKEND_AUDIT": "1",
     "IQL_SMOKE_RAW_LOGIT_AUDIT": "1",
@@ -2316,15 +2358,15 @@ def _failure_server_log_evidence() -> dict[str, Any]:
     observed = dict.fromkeys(patterns, False)
     digest = hashlib.sha256()
     size_bytes = 0
-    backend = BackendFailureDiagnosticAccumulator()
+    backend = BackendFailureDiagnosticAccumulatorV2()
 
     def result(*, present: bool, scan_integrity: str) -> dict[str, Any]:
         backend_diagnostic, backend_malformed = backend.finish()
         if backend_malformed and scan_integrity != "missing":
             scan_integrity = "malformed"
-        return SmokeServerLogFailureEvidence.model_validate(
+        return SmokeServerLogFailureEvidenceV2.model_validate(
             {
-                "schema_version": "inkling-smoke-server-log-failure-v1",
+                "schema_version": "inkling-smoke-server-log-failure-v2",
                 "present": present,
                 "size_bytes": size_bytes,
                 "sha256": digest.hexdigest(),
@@ -2346,26 +2388,37 @@ def _failure_server_log_evidence() -> dict[str, Any]:
             raise RuntimeError("llama-server log is not a regular file")
         maximum_pattern_bytes = max(len(pattern) for pattern in patterns.values())
         signal_tail = b""
-        marker_tails = {marker: b"" for marker in BACKEND_FAILURE_MARKER_TOKENS}
+        marker_tokens = (
+            *BACKEND_FAILURE_MARKER_TOKENS_V2,
+            *BACKEND_FAILURE_PROTOCOL_CONTAMINATION_TOKENS_V2,
+        )
+        marker_tails = {marker: b"" for marker in marker_tokens}
         line_buffer = bytearray()
         line_is_overlong = False
 
         def observe_overlong_marker_bytes(value: bytes) -> None:
             counts: dict[bytes, int] = {}
-            for marker in BACKEND_FAILURE_MARKER_TOKENS:
+            for marker in marker_tokens:
                 searchable = marker_tails[marker] + value
                 counts[marker] = searchable.count(marker)
                 marker_tails[marker] = searchable[-(len(marker) - 1) :]
-            graph_count = counts[BACKEND_FAILURE_MARKER_TOKENS[0]]
-            cpu_count = counts[BACKEND_FAILURE_MARKER_TOKENS[1]]
-            if graph_count + cpu_count:
+            graph_count = counts[BACKEND_FAILURE_MARKER_TOKENS_V2[0]]
+            cpu_count = counts[BACKEND_FAILURE_MARKER_TOKENS_V2[1]]
+            identity_count = counts[BACKEND_FAILURE_MARKER_TOKENS_V2[2]]
+            contamination_count = sum(
+                counts[marker] for marker in BACKEND_FAILURE_PROTOCOL_CONTAMINATION_TOKENS_V2
+            )
+            if graph_count + cpu_count + identity_count:
                 backend.observe_unparsed_marker_counts(
                     graph_marker_count=graph_count,
                     cpu_node_marker_count=cpu_count,
+                    identity_marker_count=identity_count,
                 )
+            if contamination_count:
+                backend.observe_protocol_contamination(marker_count=contamination_count)
 
         def reset_marker_tails() -> None:
-            for marker in BACKEND_FAILURE_MARKER_TOKENS:
+            for marker in marker_tokens:
                 marker_tails[marker] = b""
 
         with os.fdopen(descriptor, "rb", closefd=False) as handle:
@@ -2496,6 +2549,25 @@ def _safe_subprocess_failure(
     ).model_dump(mode="json")
 
 
+def _cpu_placement_evidence_relation(
+    error: BaseException,
+    server_log_evidence: Mapping[str, Any],
+) -> str:
+    """Classify independent exception and first-CPU-proof evidence."""
+
+    diagnostic = server_log_evidence.get("backend_diagnostic")
+    log_proves_cpu = (
+        isinstance(diagnostic, Mapping) and diagnostic.get("first_cpu_placement_proof") is not None
+    )
+    exception_proves_cpu = type(error) is BackendCpuPlacementError
+    return {
+        (True, True): "matched",
+        (True, False): "exception_only",
+        (False, True): "log_only",
+        (False, False): "none",
+    }[(exception_proves_cpu, log_proves_cpu)]
+
+
 def _record_failure(
     run_root: Path,
     *,
@@ -2513,7 +2585,7 @@ def _record_failure(
     )
     server_log_evidence = _failure_server_log_evidence()
     receipt: dict[str, Any] = {
-        "schema_version": "inkling-smoke-terminal-v6",
+        "schema_version": "inkling-smoke-terminal-v7",
         "status": "failed",
         "stage": SMOKE_STAGE,
         "run_id": run_root.name,
@@ -2532,6 +2604,10 @@ def _record_failure(
         "server_log_sha256": server_log_evidence["sha256"],
         "safe_failure_signals": server_log_evidence["safe_failure_signals"],
         "server_log_evidence": server_log_evidence,
+        "cpu_placement_evidence_relation": _cpu_placement_evidence_relation(
+            error,
+            server_log_evidence,
+        ),
         "prompt_text_recorded": False,
         "output_text_recorded": False,
     }
@@ -2754,11 +2830,11 @@ def smoke_test(
             vocab_size=vocab_size,
             unpadded_vocab_size=output_vocabulary.unpadded_vocab_size,
         )
-        backend_audit = parse_backend_audit_evidence(log_text)
+        backend_audit = parse_backend_audit_evidence_v2(log_text)
         artifact_load = parse_artifact_load_evidence(log_text)
         phase = "publish_success"
         receipt: dict[str, Any] = {
-            "schema_version": "inkling-smoke-terminal-v5",
+            "schema_version": "inkling-smoke-terminal-v7",
             "status": "passed",
             "stage": SMOKE_STAGE,
             "run_id": run_id,

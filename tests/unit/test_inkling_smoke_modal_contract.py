@@ -22,10 +22,11 @@ import pytest
 
 import inkling_quant_lab.gguf.inkling_smoke as inkling_smoke
 from inkling_quant_lab.gguf.inkling_smoke import (
-    BACKEND_FAILURE_MARKER_TOKENS,
+    BACKEND_FAILURE_MARKER_TOKENS_V2,
+    BACKEND_FAILURE_PROTOCOL_CONTAMINATION_TOKENS_V2,
     LLAMA_SERVER_AUDIT_LOG_VERBOSITY,
     MAX_BACKEND_FAILURE_RECORDS,
-    BackendFailureDiagnosticAccumulator,
+    BackendFailureDiagnosticAccumulatorV2,
 )
 from inkling_quant_lab.gguf.inkling_smoke_acceptance import (
     SmokePostSpawnAcceptance,
@@ -45,7 +46,7 @@ from inkling_quant_lab.gguf.inkling_smoke_execution import (
     SmokeGpuTopologyEvidence,
     SmokeInvocationEvidence,
     SmokeNvidiaSmiTopologyDiagnostic,
-    SmokeServerLogFailureEvidence,
+    SmokeServerLogFailureEvidenceV2,
     SmokeSubprocessFailureEvidence,
     parse_cgroup_cpu_quota_millicores,
     parse_cgroup_memory_limit_bytes,
@@ -104,13 +105,16 @@ def _isolated_runner_functions(*names: str) -> dict[str, object]:
     namespace: dict[str, object] = {
         "EVIDENCE_MOUNT": Path("/evidence"),
         "Any": Any,
-        "BACKEND_FAILURE_MARKER_TOKENS": BACKEND_FAILURE_MARKER_TOKENS,
-        "BackendFailureDiagnosticAccumulator": BackendFailureDiagnosticAccumulator,
+        "BACKEND_FAILURE_MARKER_TOKENS_V2": BACKEND_FAILURE_MARKER_TOKENS_V2,
+        "BACKEND_FAILURE_PROTOCOL_CONTAMINATION_TOKENS_V2": (
+            BACKEND_FAILURE_PROTOCOL_CONTAMINATION_TOKENS_V2
+        ),
+        "BackendFailureDiagnosticAccumulatorV2": BackendFailureDiagnosticAccumulatorV2,
         "Mapping": Mapping,
         "MAX_FAILURE_LOG_LINE_BYTES": 4 * 1024,
         "Path": Path,
         "Sequence": Sequence,
-        "SmokeServerLogFailureEvidence": SmokeServerLogFailureEvidence,
+        "SmokeServerLogFailureEvidenceV2": SmokeServerLogFailureEvidenceV2,
         "os": os,
         "parse_cgroup_cpu_quota_millicores": parse_cgroup_cpu_quota_millicores,
         "parse_cgroup_memory_limit_bytes": parse_cgroup_memory_limit_bytes,
@@ -801,6 +805,7 @@ def test_smoke_runner_build_and_mount_contract_is_closed() -> None:
     assert "SOURCE_BLOB_PINS" in source
     assert "SOURCE_CONTRACT_ASSERTIONS" in source
     assert "PATCHED_SOURCE_BLOB_PINS" in source
+    assert "Post-patch source inventory must exactly match its base-source inventory" in source
     assert LLAMA_SERVER_AUDIT_LOG_VERBOSITY == 4
     assert '("common/log.h", "#define LOG_LEVEL_TRACE  4")' in source
     assert '("common/log.cpp", "case GGML_LOG_LEVEL_INFO:  return LOG_LEVEL_TRACE;")' in source
@@ -1492,12 +1497,22 @@ def test_failure_server_log_hashes_oversized_content_and_cross_chunk_signals(
     chunk_size = 1024 * 1024
     signal = b"out of memory"
     cpu_marker = (
-        b"IQL_SMOKE_CPU_NODE_V1 graph_uid=7 ordinal=19 op=MUL_MAT name=secret_tensor_name\n"
+        b"IQL_SMOKE_CPU_NODE_V2 graph_uid=7 graph_owner=text "
+        b"backend_index=2 device_type=cpu ordinal=19 op=MUL_MAT "
+        b"name_len=18 name_hex=7365637265745f74656e736f725f6e616d65\n"
     )
     graph_marker = (
-        b"IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=7 "
+        b"IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid=7 graph_owner=text "
         b"phase=post_assignment_pre_split scope=non_view_compute "
         b"compute=2 gpu=1 cpu=1 accel=0 other=0 unassigned=0\n"
+    )
+    identity_markers = (
+        b"IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid=7 graph_owner=text "
+        b"backend_index=0 backend_name=CUDA0 device_name=CUDA0 "
+        b"device_type=gpu compute=1\n"
+        b"IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid=7 graph_owner=text "
+        b"backend_index=2 backend_name=CPU device_name=CPU "
+        b"device_type=cpu compute=1\n"
     )
     payload = (
         b"x" * (chunk_size - 4)
@@ -1505,6 +1520,7 @@ def test_failure_server_log_hashes_oversized_content_and_cross_chunk_signals(
         + b"y" * (chunk_size + 17)
         + b"\n"
         + cpu_marker
+        + identity_markers
         + graph_marker
     )
     server_log = tmp_path / "llama-server.log"
@@ -1531,7 +1547,7 @@ def test_failure_server_log_hashes_oversized_content_and_cross_chunk_signals(
         "projector_load_failure_observed": False,
         "unsupported_architecture_observed": False,
     }
-    assert observed["schema_version"] == "inkling-smoke-server-log-failure-v1"
+    assert observed["schema_version"] == "inkling-smoke-server-log-failure-v2"
     assert observed["present"] is True
     assert observed["size_bytes"] == len(payload)
     assert observed["sha256"] == hashlib.sha256(payload).hexdigest()
@@ -1539,14 +1555,16 @@ def test_failure_server_log_hashes_oversized_content_and_cross_chunk_signals(
     assert observed["scan_integrity"] == "complete"
     assert observed["safe_failure_signals"] == expected_signals
     assert observed["backend_diagnostic"] == {
-        "schema_version": "inkling-smoke-backend-failure-v1",
+        "schema_version": "inkling-smoke-backend-failure-v2",
         "cpu_model_graph_fallback_observed": True,
         "graph_marker_count": 1,
+        "identity_marker_count": 2,
         "affected_graph_marker_count": 1,
         "cpu_node_marker_count": 1,
         "affected_graphs": [
             {
                 "graph_uid": 7,
+                "graph_owner": "text",
                 "phase": "post_assignment_pre_split",
                 "scope": "non_view_compute",
                 "compute": 2,
@@ -1560,6 +1578,9 @@ def test_failure_server_log_hashes_oversized_content_and_cross_chunk_signals(
         "cpu_node_samples": [
             {
                 "graph_uid": 7,
+                "graph_owner": "text",
+                "backend_index": 2,
+                "device_type": "cpu",
                 "ordinal": 19,
                 "op": "MUL_MAT",
                 "node_name_size_bytes": len(b"secret_tensor_name"),
@@ -1567,13 +1588,26 @@ def test_failure_server_log_hashes_oversized_content_and_cross_chunk_signals(
                 "node_name_recorded": False,
             }
         ],
+        "first_cpu_placement_proof": {
+            "schema_version": "inkling-smoke-backend-cpu-placement-proof-v1",
+            "graph_uid": 7,
+            "graph_owner": "text",
+            "backend_index": 2,
+            "device_type": "cpu",
+            "ordinal": 19,
+            "op": "MUL_MAT",
+            "node_name_size_bytes": len(b"secret_tensor_name"),
+            "node_name_sha256": hashlib.sha256(b"secret_tensor_name").hexdigest(),
+            "node_name_recorded": False,
+            "graph_corroborated": True,
+        },
         "records_truncated": False,
         "raw_marker_lines_recorded": False,
         "raw_node_names_recorded": False,
     }
     serialized = json.dumps(observed, sort_keys=True)
     assert "secret_tensor_name" not in serialized
-    assert "IQL_SMOKE_CPU_NODE_V1" not in serialized
+    assert "IQL_SMOKE_CPU_NODE_V2" not in serialized
 
 
 def test_failure_server_log_distinguishes_missing_empty_and_malformed_marker_lines(
@@ -1603,7 +1637,11 @@ def test_failure_server_log_distinguishes_missing_empty_and_malformed_marker_lin
     assert empty["sha256"] == hashlib.sha256(b"").hexdigest()
     assert empty["scan_integrity"] == "complete"
 
-    malformed_payload = b"IQL_SMOKE_CPU_NODE_V1 graph_uid=7 ordinal=19 op=MUL_MAT name=bad name\n"
+    malformed_payload = (
+        b"IQL_SMOKE_CPU_NODE_V2 graph_uid=7 graph_owner=text "
+        b"backend_index=2 device_type=cpu ordinal=19 op=MUL_MAT "
+        b"name_len=8 name_hex=not_hex!\n"
+    )
     server_log.write_bytes(malformed_payload)
     malformed = evidence()
     assert malformed["present"] is True
@@ -1614,6 +1652,67 @@ def test_failure_server_log_distinguishes_missing_empty_and_malformed_marker_lin
     assert "bad name" not in json.dumps(malformed, sort_keys=True)
 
 
+@pytest.mark.parametrize(
+    "marker",
+    BACKEND_FAILURE_PROTOCOL_CONTAMINATION_TOKENS_V2,
+    ids=("legacy-graph", "legacy-cpu-node", "legacy-identity"),
+)
+def test_failure_server_log_rejects_legacy_backend_protocol(
+    tmp_path: Path,
+    marker: bytes,
+) -> None:
+    namespace = _isolated_runner_functions("_failure_server_log_evidence")
+    server_log = tmp_path / "llama-server.log"
+    payload = marker + b" ignored=1\n"
+    server_log.write_bytes(payload)
+    namespace.update(
+        {
+            "SERVER_LOG": server_log,
+            "hashlib": hashlib,
+        }
+    )
+    evidence = namespace["_failure_server_log_evidence"]
+    assert callable(evidence)
+
+    observed = evidence()
+
+    diagnostic = observed["backend_diagnostic"]
+    assert observed["scan_integrity"] == "malformed"
+    assert diagnostic["graph_marker_count"] == 0
+    assert diagnostic["identity_marker_count"] == 0
+    assert diagnostic["cpu_node_marker_count"] == 0
+    assert diagnostic["cpu_model_graph_fallback_observed"] is False
+
+
+def test_failure_server_log_rejects_split_legacy_marker_in_overlong_line(
+    tmp_path: Path,
+) -> None:
+    namespace = _isolated_runner_functions("_failure_server_log_evidence")
+    server_log = tmp_path / "llama-server.log"
+    marker = BACKEND_FAILURE_PROTOCOL_CONTAMINATION_TOKENS_V2[1]
+    payload = b"x" * (4 * 1024 + 1 - 7) + marker[:7] + marker[7:] + b" ignored=1\n"
+    server_log.write_bytes(payload)
+    namespace.update(
+        {
+            "SERVER_LOG": server_log,
+            "hashlib": hashlib,
+        }
+    )
+    evidence = namespace["_failure_server_log_evidence"]
+    assert callable(evidence)
+
+    observed = evidence()
+
+    diagnostic = observed["backend_diagnostic"]
+    assert observed["size_bytes"] == len(payload)
+    assert observed["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert observed["scan_integrity"] == "malformed"
+    assert diagnostic["graph_marker_count"] == 0
+    assert diagnostic["identity_marker_count"] == 0
+    assert diagnostic["cpu_node_marker_count"] == 0
+    assert diagnostic["cpu_model_graph_fallback_observed"] is False
+
+
 def test_failure_server_log_counts_markers_after_an_overlong_line_limit(
     tmp_path: Path,
 ) -> None:
@@ -1622,7 +1721,7 @@ def test_failure_server_log_counts_markers_after_an_overlong_line_limit(
     observed_records = MAX_BACKEND_FAILURE_RECORDS + 1
     payload = (
         b"x" * (4 * 1024 + 1)
-        + (BACKEND_FAILURE_MARKER_TOKENS[0] + b" malformed ") * observed_records
+        + (BACKEND_FAILURE_MARKER_TOKENS_V2[0] + b" malformed ") * observed_records
         + b"\n"
     )
     server_log.write_bytes(payload)
@@ -1655,23 +1754,23 @@ def test_failure_server_log_counts_markers_after_an_overlong_line_limit(
     ("payload", "expected_graph_count", "expected_cpu_node_count"),
     (
         (
-            b"x" * (4 * 1024 + 1) + BACKEND_FAILURE_MARKER_TOKENS[1] + b" malformed\n",
+            b"x" * (4 * 1024 + 1) + BACKEND_FAILURE_MARKER_TOKENS_V2[1] + b" malformed\n",
             0,
             1,
         ),
         (
             b"x" * (4 * 1024 + 1)
-            + BACKEND_FAILURE_MARKER_TOKENS[0]
+            + BACKEND_FAILURE_MARKER_TOKENS_V2[0]
             + b" malformed "
-            + BACKEND_FAILURE_MARKER_TOKENS[1]
+            + BACKEND_FAILURE_MARKER_TOKENS_V2[1]
             + b" malformed\n",
             1,
             1,
         ),
         (
             b"x" * (4 * 1024 + 1 - 7)
-            + BACKEND_FAILURE_MARKER_TOKENS[1][:7]
-            + BACKEND_FAILURE_MARKER_TOKENS[1][7:]
+            + BACKEND_FAILURE_MARKER_TOKENS_V2[1][:7]
+            + BACKEND_FAILURE_MARKER_TOKENS_V2[1][7:]
             + b" malformed\n",
             0,
             1,
@@ -1715,13 +1814,15 @@ def test_failure_server_log_makes_mixed_valid_and_malformed_markers_inconclusive
     namespace = _isolated_runner_functions("_failure_server_log_evidence")
     server_log = tmp_path / "llama-server.log"
     payload = (
-        b"IQL_SMOKE_CPU_NODE_V1 graph_uid=7 ordinal=19 "
-        b"op=MUL_MAT name=secret_tensor_name\n"
-        b"IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=7 "
+        b"IQL_SMOKE_CPU_NODE_V2 graph_uid=7 graph_owner=text "
+        b"backend_index=2 device_type=cpu ordinal=19 op=MUL_MAT "
+        b"name_len=18 name_hex=7365637265745f74656e736f725f6e616d65\n"
+        b"IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid=7 graph_owner=text "
         b"phase=post_assignment_pre_split scope=non_view_compute "
         b"compute=2 gpu=1 cpu=1 accel=0 other=0 unassigned=0\n"
-        b"IQL_SMOKE_CPU_NODE_V1 graph_uid=8 ordinal=20 "
-        b"op=MUL_MAT name=bad name\n"
+        b"IQL_SMOKE_CPU_NODE_V2 graph_uid=8 graph_owner=text "
+        b"backend_index=2 device_type=cpu ordinal=20 op=MUL_MAT "
+        b"name_len=8 name_hex=not_hex!\n"
     )
     server_log.write_bytes(payload)
     namespace.update(
@@ -1739,13 +1840,17 @@ def test_failure_server_log_makes_mixed_valid_and_malformed_markers_inconclusive
     assert observed["size_bytes"] == len(payload)
     assert observed["sha256"] == hashlib.sha256(payload).hexdigest()
     assert observed["scan_integrity"] == "malformed"
-    assert observed["backend_diagnostic"]["cpu_model_graph_fallback_observed"] is False
-    assert observed["backend_diagnostic"]["affected_graphs"] == []
-    assert observed["backend_diagnostic"]["cpu_node_samples"] == []
+    diagnostic = observed["backend_diagnostic"]
+    assert diagnostic["cpu_model_graph_fallback_observed"] is True
+    assert [row["graph_uid"] for row in diagnostic["affected_graphs"]] == [7]
+    assert [row["graph_uid"] for row in diagnostic["cpu_node_samples"]] == [7]
+    assert diagnostic["first_cpu_placement_proof"]["graph_uid"] == 7
+    assert diagnostic["first_cpu_placement_proof"]["graph_owner"] == "text"
+    assert diagnostic["first_cpu_placement_proof"]["op"] == "MUL_MAT"
     serialized = json.dumps(observed, sort_keys=True)
     assert "secret_tensor_name" not in serialized
-    assert "bad name" not in serialized
-    assert "IQL_SMOKE_CPU_NODE_V1" not in serialized
+    assert "not_hex" not in serialized
+    assert "IQL_SMOKE_CPU_NODE_V2" not in serialized
 
 
 def test_failure_server_log_makes_truncated_marker_records_inconclusive(
@@ -1756,9 +1861,61 @@ def test_failure_server_log_makes_truncated_marker_records_inconclusive(
     observed_records = MAX_BACKEND_FAILURE_RECORDS + 1
     payload = b"".join(
         (
-            f"IQL_SMOKE_CPU_NODE_V1 graph_uid={graph_uid} ordinal={graph_uid} "
-            "op=MUL_MAT name=private_node\n"
-            f"IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid={graph_uid} "
+            f"IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid={graph_uid} "
+            "graph_owner=text backend_index=0 backend_name=CUDA0 "
+            "device_name=CUDA0 device_type=gpu compute=1\n"
+            f"IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid={graph_uid} "
+            "graph_owner=text backend_index=2 backend_name=CPU "
+            "device_name=CPU device_type=cpu compute=1\n"
+            f"IQL_SMOKE_CPU_NODE_V2 graph_uid={graph_uid} graph_owner=text "
+            f"backend_index=2 device_type=cpu ordinal={graph_uid} op=MUL_MAT "
+            "name_len=12 name_hex=707269766174655f6e6f6465\n"
+            f"IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid={graph_uid} graph_owner=text "
+            "phase=post_assignment_pre_split scope=non_view_compute "
+            "compute=2 gpu=1 cpu=1 accel=0 other=0 unassigned=0\n"
+        ).encode("ascii")
+        for graph_uid in range(1, observed_records + 1)
+    )
+    server_log.write_bytes(payload)
+    namespace.update(
+        {
+            "SERVER_LOG": server_log,
+            "hashlib": hashlib,
+        }
+    )
+    evidence = namespace["_failure_server_log_evidence"]
+    assert callable(evidence)
+
+    observed = evidence()
+
+    diagnostic = observed["backend_diagnostic"]
+    assert observed["present"] is True
+    assert observed["size_bytes"] == len(payload)
+    assert observed["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert observed["scan_integrity"] == "complete"
+    assert diagnostic["graph_marker_count"] == observed_records
+    assert diagnostic["affected_graph_marker_count"] == observed_records
+    assert diagnostic["identity_marker_count"] == observed_records * 2
+    assert diagnostic["cpu_node_marker_count"] == observed_records
+    assert diagnostic["records_truncated"] is True
+    assert diagnostic["cpu_model_graph_fallback_observed"] is True
+    assert len(diagnostic["affected_graphs"]) == MAX_BACKEND_FAILURE_RECORDS
+    assert len(diagnostic["cpu_node_samples"]) == MAX_BACKEND_FAILURE_RECORDS
+    assert diagnostic["first_cpu_placement_proof"]["graph_uid"] == 1
+    assert diagnostic["first_cpu_placement_proof"]["graph_owner"] == "text"
+    assert diagnostic["first_cpu_placement_proof"]["graph_corroborated"] is True
+    assert "private_node" not in json.dumps(observed, sort_keys=True)
+
+
+def test_failure_server_log_serializes_truncated_no_proof_as_malformed(
+    tmp_path: Path,
+) -> None:
+    namespace = _isolated_runner_functions("_failure_server_log_evidence")
+    server_log = tmp_path / "llama-server.log"
+    observed_records = MAX_BACKEND_FAILURE_RECORDS + 1
+    payload = b"".join(
+        (
+            f"IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid={graph_uid} graph_owner=text "
             "phase=post_assignment_pre_split scope=non_view_compute "
             "compute=2 gpu=1 cpu=1 accel=0 other=0 unassigned=0\n"
         ).encode("ascii")
@@ -1783,12 +1940,197 @@ def test_failure_server_log_makes_truncated_marker_records_inconclusive(
     assert observed["scan_integrity"] == "malformed"
     assert diagnostic["graph_marker_count"] == observed_records
     assert diagnostic["affected_graph_marker_count"] == observed_records
-    assert diagnostic["cpu_node_marker_count"] == observed_records
+    assert diagnostic["cpu_node_marker_count"] == 0
     assert diagnostic["records_truncated"] is True
     assert diagnostic["cpu_model_graph_fallback_observed"] is False
-    assert diagnostic["affected_graphs"] == []
+    assert diagnostic["first_cpu_placement_proof"] is None
     assert diagnostic["cpu_node_samples"] == []
-    assert "private_node" not in json.dumps(observed, sort_keys=True)
+
+
+def test_failure_server_log_marks_identity_owner_mismatch_malformed(
+    tmp_path: Path,
+) -> None:
+    namespace = _isolated_runner_functions("_failure_server_log_evidence")
+    server_log = tmp_path / "llama-server.log"
+    payload = (
+        b"IQL_SMOKE_CPU_NODE_V2 graph_uid=7 graph_owner=text "
+        b"backend_index=2 device_type=cpu ordinal=19 op=MUL_MAT "
+        b"name_len=18 name_hex=7365637265745f74656e736f725f6e616d65\n"
+        b"IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid=7 graph_owner=text "
+        b"phase=post_assignment_pre_split scope=non_view_compute "
+        b"compute=2 gpu=1 cpu=1 accel=0 other=0 unassigned=0\n"
+        b"IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid=7 graph_owner=audio "
+        b"backend_index=2 backend_name=CPU device_name=CPU "
+        b"device_type=cpu compute=1\n"
+    )
+    server_log.write_bytes(payload)
+    namespace.update(
+        {
+            "SERVER_LOG": server_log,
+            "hashlib": hashlib,
+        }
+    )
+    evidence = namespace["_failure_server_log_evidence"]
+    assert callable(evidence)
+
+    observed = evidence()
+
+    diagnostic = observed["backend_diagnostic"]
+    assert observed["scan_integrity"] == "malformed"
+    assert diagnostic["cpu_model_graph_fallback_observed"] is True
+    assert diagnostic["first_cpu_placement_proof"]["graph_uid"] == 7
+    assert diagnostic["first_cpu_placement_proof"]["graph_owner"] == "text"
+    assert diagnostic["first_cpu_placement_proof"]["graph_corroborated"] is True
+
+
+def test_failure_server_log_marks_missing_identity_malformed_but_keeps_proof(
+    tmp_path: Path,
+) -> None:
+    namespace = _isolated_runner_functions("_failure_server_log_evidence")
+    server_log = tmp_path / "llama-server.log"
+    payload = (
+        b"IQL_SMOKE_CPU_NODE_V2 graph_uid=7 graph_owner=text "
+        b"backend_index=2 device_type=cpu ordinal=19 op=MUL_MAT "
+        b"name_len=18 name_hex=7365637265745f74656e736f725f6e616d65\n"
+        b"IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid=7 graph_owner=text "
+        b"phase=post_assignment_pre_split scope=non_view_compute "
+        b"compute=2 gpu=1 cpu=1 accel=0 other=0 unassigned=0\n"
+    )
+    server_log.write_bytes(payload)
+    namespace.update(
+        {
+            "SERVER_LOG": server_log,
+            "hashlib": hashlib,
+        }
+    )
+    evidence = namespace["_failure_server_log_evidence"]
+    assert callable(evidence)
+
+    observed = evidence()
+
+    diagnostic = observed["backend_diagnostic"]
+    assert observed["scan_integrity"] == "malformed"
+    assert diagnostic["identity_marker_count"] == 0
+    assert diagnostic["cpu_model_graph_fallback_observed"] is True
+    assert diagnostic["first_cpu_placement_proof"]["graph_uid"] == 7
+    assert diagnostic["first_cpu_placement_proof"]["graph_owner"] == "text"
+    assert diagnostic["first_cpu_placement_proof"]["graph_corroborated"] is True
+
+
+def test_failure_server_log_marks_malformed_identity_malformed_but_keeps_proof(
+    tmp_path: Path,
+) -> None:
+    namespace = _isolated_runner_functions("_failure_server_log_evidence")
+    server_log = tmp_path / "llama-server.log"
+    payload = (
+        b"IQL_SMOKE_CPU_NODE_V2 graph_uid=7 graph_owner=text "
+        b"backend_index=2 device_type=cpu ordinal=19 op=MUL_MAT "
+        b"name_len=18 name_hex=7365637265745f74656e736f725f6e616d65\n"
+        b"IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid=7 graph_owner=text "
+        b"backend_index=2 backend_name=CPU device_name=CPU "
+        b"device_type=cpu malformed=1\n"
+        b"IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid=7 graph_owner=text "
+        b"phase=post_assignment_pre_split scope=non_view_compute "
+        b"compute=2 gpu=1 cpu=1 accel=0 other=0 unassigned=0\n"
+    )
+    server_log.write_bytes(payload)
+    namespace.update(
+        {
+            "SERVER_LOG": server_log,
+            "hashlib": hashlib,
+        }
+    )
+    evidence = namespace["_failure_server_log_evidence"]
+    assert callable(evidence)
+
+    observed = evidence()
+
+    diagnostic = observed["backend_diagnostic"]
+    assert observed["scan_integrity"] == "malformed"
+    assert diagnostic["identity_marker_count"] == 1
+    assert diagnostic["cpu_model_graph_fallback_observed"] is True
+    assert diagnostic["first_cpu_placement_proof"]["graph_uid"] == 7
+    assert diagnostic["first_cpu_placement_proof"]["graph_owner"] == "text"
+    assert diagnostic["first_cpu_placement_proof"]["graph_corroborated"] is True
+
+
+def test_failure_server_log_accepts_matching_complete_identity_evidence(
+    tmp_path: Path,
+) -> None:
+    namespace = _isolated_runner_functions("_failure_server_log_evidence")
+    server_log = tmp_path / "llama-server.log"
+    payload = (
+        b"IQL_SMOKE_CPU_NODE_V2 graph_uid=7 graph_owner=text "
+        b"backend_index=2 device_type=cpu ordinal=19 op=MUL_MAT "
+        b"name_len=18 name_hex=7365637265745f74656e736f725f6e616d65\n"
+        b"IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid=7 graph_owner=text "
+        b"backend_index=0 backend_name=CUDA0 device_name=CUDA0 "
+        b"device_type=gpu compute=1\n"
+        b"IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid=7 graph_owner=text "
+        b"backend_index=2 backend_name=CPU device_name=CPU "
+        b"device_type=cpu compute=1\n"
+        b"IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid=7 graph_owner=text "
+        b"phase=post_assignment_pre_split scope=non_view_compute "
+        b"compute=2 gpu=1 cpu=1 accel=0 other=0 unassigned=0\n"
+    )
+    server_log.write_bytes(payload)
+    namespace.update(
+        {
+            "SERVER_LOG": server_log,
+            "hashlib": hashlib,
+        }
+    )
+    evidence = namespace["_failure_server_log_evidence"]
+    assert callable(evidence)
+
+    observed = evidence()
+
+    diagnostic = observed["backend_diagnostic"]
+    assert observed["scan_integrity"] == "complete"
+    assert diagnostic["identity_marker_count"] == 2
+    assert diagnostic["cpu_model_graph_fallback_observed"] is True
+    assert diagnostic["first_cpu_placement_proof"]["graph_uid"] == 7
+    assert diagnostic["first_cpu_placement_proof"]["graph_owner"] == "text"
+    assert diagnostic["first_cpu_placement_proof"]["graph_corroborated"] is True
+
+
+def test_failure_server_log_counts_identity_marker_in_overlong_line_and_keeps_proof(
+    tmp_path: Path,
+) -> None:
+    namespace = _isolated_runner_functions("_failure_server_log_evidence")
+    server_log = tmp_path / "llama-server.log"
+    payload = (
+        b"IQL_SMOKE_CPU_NODE_V2 graph_uid=7 graph_owner=text "
+        b"backend_index=2 device_type=cpu ordinal=19 op=MUL_MAT "
+        b"name_len=18 name_hex=7365637265745f74656e736f725f6e616d65\n"
+        b"IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid=7 graph_owner=text "
+        b"phase=post_assignment_pre_split scope=non_view_compute "
+        b"compute=2 gpu=1 cpu=1 accel=0 other=0 unassigned=0\n"
+        + b"x"
+        * (4 * 1024 + 1)
+        + b"IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid=7 graph_owner=text "
+        b"backend_index=2 backend_name=CPU device_name=CPU "
+        b"device_type=cpu compute=1\n"
+    )
+    server_log.write_bytes(payload)
+    namespace.update(
+        {
+            "SERVER_LOG": server_log,
+            "hashlib": hashlib,
+        }
+    )
+    evidence = namespace["_failure_server_log_evidence"]
+    assert callable(evidence)
+
+    observed = evidence()
+
+    diagnostic = observed["backend_diagnostic"]
+    assert observed["scan_integrity"] == "malformed"
+    assert diagnostic["identity_marker_count"] == 1
+    assert diagnostic["cpu_model_graph_fallback_observed"] is True
+    assert diagnostic["first_cpu_placement_proof"]["graph_uid"] == 7
+    assert diagnostic["first_cpu_placement_proof"]["graph_owner"] == "text"
+    assert diagnostic["first_cpu_placement_proof"]["graph_corroborated"] is True
 
 
 def test_failure_server_log_keeps_cpu_evidence_after_many_benign_graphs(
@@ -1800,15 +2142,25 @@ def test_failure_server_log_keeps_cpu_evidence_after_many_benign_graphs(
     affected_graph_uid = benign_graphs + 1
     payload = b"".join(
         (
-            f"IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid={graph_uid} "
+            f"IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid={graph_uid} "
+            "graph_owner=text backend_index=0 backend_name=CUDA0 "
+            "device_name=CUDA0 device_type=gpu compute=2\n"
+            f"IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid={graph_uid} graph_owner=text "
             "phase=post_assignment_pre_split scope=non_view_compute "
             "compute=2 gpu=2 cpu=0 accel=0 other=0 unassigned=0\n"
         ).encode("ascii")
         for graph_uid in range(1, benign_graphs + 1)
     ) + (
-        f"IQL_SMOKE_CPU_NODE_V1 graph_uid={affected_graph_uid} "
-        f"ordinal={affected_graph_uid} op=MUL_MAT name=private_node\n"
-        f"IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid={affected_graph_uid} "
+        f"IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid={affected_graph_uid} "
+        "graph_owner=text backend_index=0 backend_name=CUDA0 "
+        "device_name=CUDA0 device_type=gpu compute=1\n"
+        f"IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid={affected_graph_uid} "
+        "graph_owner=text backend_index=2 backend_name=CPU "
+        "device_name=CPU device_type=cpu compute=1\n"
+        f"IQL_SMOKE_CPU_NODE_V2 graph_uid={affected_graph_uid} graph_owner=text "
+        f"backend_index=2 device_type=cpu ordinal={affected_graph_uid} op=MUL_MAT "
+        "name_len=12 name_hex=707269766174655f6e6f6465\n"
+        f"IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid={affected_graph_uid} graph_owner=text "
         "phase=post_assignment_pre_split scope=non_view_compute "
         "compute=2 gpu=1 cpu=1 accel=0 other=0 unassigned=0\n"
     ).encode("ascii")
@@ -1831,11 +2183,15 @@ def test_failure_server_log_keeps_cpu_evidence_after_many_benign_graphs(
     assert observed["scan_integrity"] == "complete"
     assert diagnostic["graph_marker_count"] == benign_graphs + 1
     assert diagnostic["affected_graph_marker_count"] == 1
+    assert diagnostic["identity_marker_count"] == benign_graphs + 2
     assert diagnostic["cpu_node_marker_count"] == 1
     assert diagnostic["records_truncated"] is False
     assert diagnostic["cpu_model_graph_fallback_observed"] is True
     assert [row["graph_uid"] for row in diagnostic["affected_graphs"]] == [affected_graph_uid]
     assert [row["graph_uid"] for row in diagnostic["cpu_node_samples"]] == [affected_graph_uid]
+    assert diagnostic["first_cpu_placement_proof"]["graph_uid"] == affected_graph_uid
+    assert diagnostic["first_cpu_placement_proof"]["graph_owner"] == "text"
+    assert diagnostic["first_cpu_placement_proof"]["graph_corroborated"] is True
     assert "private_node" not in json.dumps(observed, sort_keys=True)
 
 
@@ -1847,7 +2203,7 @@ def test_failure_server_log_hashes_full_log_after_graph_identity_limit(
     observed_graphs = inkling_smoke._MAX_BACKEND_FAILURE_GRAPH_IDENTITIES + 1
     payload = b"".join(
         (
-            f"IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid={graph_uid} "
+            f"IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid={graph_uid} graph_owner=text "
             "phase=post_assignment_pre_split scope=non_view_compute "
             "compute=2 gpu=2 cpu=0 accel=0 other=0 unassigned=0\n"
         ).encode("ascii")
@@ -2113,17 +2469,18 @@ def test_safe_subprocess_failure_rejects_untrusted_failure_shapes(
         safe_failure(error)
 
 
-def test_record_failure_uses_terminal_v6_sanitized_failure_evidence() -> None:
+def test_record_failure_uses_terminal_v7_sanitized_failure_evidence() -> None:
     source = RUNNER_PATH.read_text(encoding="utf-8")
     start = source.index("def _record_failure(")
     end = source.index("\n\n@app.function(", start)
     function_source = source[start:end]
 
-    assert '"schema_version": "inkling-smoke-terminal-v6"' in function_source
+    assert '"schema_version": "inkling-smoke-terminal-v7"' in function_source
     assert '"safe_subprocess_failure": _safe_subprocess_failure(error)' in function_source
     assert '"server_log_evidence": server_log_evidence' in function_source
     assert '"server_log_sha256": server_log_evidence["sha256"]' in function_source
     assert '"safe_failure_signals": server_log_evidence["safe_failure_signals"]' in function_source
+    assert '"cpu_placement_evidence_relation":' in function_source
     assert '"subprocess_failure":' not in function_source
 
 
@@ -3186,6 +3543,7 @@ def test_terminal_validation_rejects_noncanonical_record_terminators(
         ("inkling-smoke-terminal-v4", True, True, False),
         ("inkling-smoke-terminal-v5", True, True, False),
         ("inkling-smoke-terminal-v6", True, True, True),
+        ("inkling-smoke-terminal-v7", True, True, True),
     ),
 )
 def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostics(
@@ -3234,6 +3592,7 @@ def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostic
         schema_version="inkling-smoke-backend-failure-v1",
         cpu_model_graph_fallback_observed=True,
         graph_marker_count=1,
+        identity_marker_count=2,
         affected_graph_marker_count=1,
         cpu_node_marker_count=1,
         affected_graphs=(
@@ -3294,16 +3653,23 @@ def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostic
         "inkling-smoke-terminal-v4",
         "inkling-smoke-terminal-v5",
         "inkling-smoke-terminal-v6",
+        "inkling-smoke-terminal-v7",
     }:
         receipt_fields["invocation"] = invocation
     if schema_version in {
         "inkling-smoke-terminal-v4",
         "inkling-smoke-terminal-v5",
         "inkling-smoke-terminal-v6",
+        "inkling-smoke-terminal-v7",
     }:
         receipt_fields["safe_subprocess_failure"] = safe_diagnostic
-    if schema_version == "inkling-smoke-terminal-v6":
+    if schema_version in {
+        "inkling-smoke-terminal-v6",
+        "inkling-smoke-terminal-v7",
+    }:
         receipt_fields["server_log_evidence"] = server_log_evidence
+    if schema_version == "inkling-smoke-terminal-v7":
+        receipt_fields["cpu_placement_evidence_relation"] = "matched"
     receipt = SimpleNamespace(**receipt_fields)
     acceptance_validations: list[object] = []
     invocation_validations: list[object] = []
@@ -3419,10 +3785,180 @@ def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostic
                 "raw_node_names_recorded": False,
             },
         }
+    if schema_version == "inkling-smoke-terminal-v7":
+        expected_record["cpu_placement_evidence_relation"] = "matched"
     assert records == [expected_record]
     serialized = json.dumps(records, sort_keys=True)
     assert "secret" not in serialized
     assert "argv" not in serialized
+
+
+def test_manager_projects_v2_server_log_failure_without_raw_names_or_logs() -> None:
+    namespace = _isolated_manager_functions("_safe_server_log_failure_record")
+    graph = SimpleNamespace(
+        graph_uid=7,
+        graph_owner="vision",
+        phase="post_assignment_pre_split",
+        scope="non_view_compute",
+        compute=2,
+        gpu=1,
+        cpu=1,
+        accel=0,
+        other=0,
+        unassigned=0,
+        raw_line="secret raw graph marker",
+    )
+    sample = SimpleNamespace(
+        graph_uid=7,
+        graph_owner="vision",
+        backend_index=2,
+        device_type="cpu",
+        ordinal=19,
+        op="MUL_MAT",
+        node_name_size_bytes=len(b"secret_tensor_name"),
+        node_name_sha256=hashlib.sha256(b"secret_tensor_name").hexdigest(),
+        node_name_recorded=False,
+        node_name="secret_tensor_name",
+        name_hex=b"736563726574",
+    )
+    proof = SimpleNamespace(
+        schema_version="inkling-smoke-backend-cpu-placement-proof-v1",
+        graph_uid=sample.graph_uid,
+        graph_owner=sample.graph_owner,
+        backend_index=sample.backend_index,
+        device_type=sample.device_type,
+        ordinal=sample.ordinal,
+        op=sample.op,
+        node_name_size_bytes=sample.node_name_size_bytes,
+        node_name_sha256=sample.node_name_sha256,
+        node_name_recorded=False,
+        graph_corroborated=True,
+        node_name="secret_tensor_name",
+        name_hex=b"736563726574",
+    )
+    backend = SimpleNamespace(
+        schema_version="inkling-smoke-backend-failure-v2",
+        cpu_model_graph_fallback_observed=True,
+        graph_marker_count=1,
+        identity_marker_count=2,
+        affected_graph_marker_count=1,
+        cpu_node_marker_count=1,
+        affected_graphs=(graph,),
+        cpu_node_samples=(sample,),
+        first_cpu_placement_proof=proof,
+        records_truncated=False,
+        raw_marker_lines_recorded=False,
+        raw_node_names_recorded=False,
+    )
+    signals = SimpleNamespace(
+        out_of_memory_observed=False,
+        no_usable_gpu_observed=False,
+        model_load_failure_observed=False,
+        projector_load_failure_observed=False,
+        unsupported_architecture_observed=False,
+        raw_log="secret raw server log",
+    )
+    receipt = SimpleNamespace(
+        server_log_evidence=SimpleNamespace(
+            schema_version="inkling-smoke-server-log-failure-v2",
+            present=True,
+            size_bytes=123,
+            sha256="c" * 64,
+            raw_log_recorded=False,
+            scan_integrity="complete",
+            safe_failure_signals=signals,
+            backend_diagnostic=backend,
+            raw_log="secret raw server log",
+        )
+    )
+
+    project = namespace["_safe_server_log_failure_record"]
+    assert callable(project)
+    observed = project(receipt)
+
+    assert observed == {
+        "schema_version": "inkling-smoke-server-log-failure-v2",
+        "present": True,
+        "size_bytes": 123,
+        "sha256": "c" * 64,
+        "raw_log_recorded": False,
+        "scan_integrity": "complete",
+        "safe_failure_signals": {
+            "out_of_memory_observed": False,
+            "no_usable_gpu_observed": False,
+            "model_load_failure_observed": False,
+            "projector_load_failure_observed": False,
+            "unsupported_architecture_observed": False,
+        },
+        "backend_diagnostic": {
+            "schema_version": "inkling-smoke-backend-failure-v2",
+            "cpu_model_graph_fallback_observed": True,
+            "graph_marker_count": 1,
+            "identity_marker_count": 2,
+            "affected_graph_marker_count": 1,
+            "cpu_node_marker_count": 1,
+            "affected_graphs": [
+                {
+                    "graph_uid": 7,
+                    "graph_owner": "vision",
+                    "phase": "post_assignment_pre_split",
+                    "scope": "non_view_compute",
+                    "compute": 2,
+                    "gpu": 1,
+                    "cpu": 1,
+                    "accel": 0,
+                    "other": 0,
+                    "unassigned": 0,
+                }
+            ],
+            "cpu_node_samples": [
+                {
+                    "graph_uid": 7,
+                    "graph_owner": "vision",
+                    "backend_index": 2,
+                    "device_type": "cpu",
+                    "ordinal": 19,
+                    "op": "MUL_MAT",
+                    "node_name_size_bytes": len(b"secret_tensor_name"),
+                    "node_name_sha256": hashlib.sha256(b"secret_tensor_name").hexdigest(),
+                    "node_name_recorded": False,
+                }
+            ],
+            "records_truncated": False,
+            "raw_marker_lines_recorded": False,
+            "raw_node_names_recorded": False,
+            "first_cpu_placement_proof": {
+                "schema_version": "inkling-smoke-backend-cpu-placement-proof-v1",
+                "graph_uid": 7,
+                "graph_owner": "vision",
+                "backend_index": 2,
+                "device_type": "cpu",
+                "ordinal": 19,
+                "op": "MUL_MAT",
+                "node_name_size_bytes": len(b"secret_tensor_name"),
+                "node_name_sha256": hashlib.sha256(b"secret_tensor_name").hexdigest(),
+                "node_name_recorded": False,
+                "graph_corroborated": True,
+            },
+        },
+    }
+    serialized = json.dumps(observed, sort_keys=True)
+    assert "secret" not in serialized
+    assert "name_hex" not in serialized
+
+
+def test_manager_rejects_mismatched_server_log_and_backend_schemas() -> None:
+    namespace = _isolated_manager_functions("_safe_server_log_failure_record")
+    receipt = SimpleNamespace(
+        server_log_evidence=SimpleNamespace(
+            schema_version="inkling-smoke-server-log-failure-v2",
+            safe_failure_signals=object(),
+            backend_diagnostic=SimpleNamespace(schema_version="inkling-smoke-backend-failure-v1"),
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="incompatible backend diagnostic"):
+        namespace["_safe_server_log_failure_record"](receipt)
 
 
 def test_smoke_runner_claims_the_only_attempt_atomically_before_volume_writes() -> None:
@@ -3686,8 +4222,10 @@ def test_manager_fails_closed_on_attempt_claim_and_terminal_receipts() -> None:
     assert '"inkling-smoke-terminal-v4"' in failure_source
     assert '"inkling-smoke-terminal-v5"' in failure_source
     assert '"inkling-smoke-terminal-v6"' in failure_source
+    assert '"inkling-smoke-terminal-v7"' in failure_source
     assert "_safe_subprocess_failure_record(" in failure_source
     assert "_safe_server_log_failure_record(" in failure_source
+    assert '"cpu_placement_evidence_relation"' in failure_source
     assert '"failure_records": failures' in remote_source
     assert "_validate_remote_post_spawn_acceptance(" in failure_source
     assert "_validate_persisted_invocation_records(" in failure_source

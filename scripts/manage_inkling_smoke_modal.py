@@ -1072,11 +1072,113 @@ def _safe_subprocess_failure_record(receipt: Any) -> dict[str, Any] | None:
 
 
 def _safe_server_log_failure_record(receipt: Any) -> dict[str, Any]:
-    """Project only the validated structural facts from a version 6 server log."""
+    """Project only validated structural facts from a server-log failure receipt."""
 
     evidence = receipt.server_log_evidence
     signals = evidence.safe_failure_signals
     backend = evidence.backend_diagnostic
+    if evidence.schema_version == "inkling-smoke-server-log-failure-v1":
+        if backend.schema_version != "inkling-smoke-backend-failure-v1":
+            raise RuntimeError("V1 server-log evidence has an incompatible backend diagnostic")
+        affected_graphs = [
+            {
+                "graph_uid": graph.graph_uid,
+                "phase": graph.phase,
+                "scope": graph.scope,
+                "compute": graph.compute,
+                "gpu": graph.gpu,
+                "cpu": graph.cpu,
+                "accel": graph.accel,
+                "other": graph.other,
+                "unassigned": graph.unassigned,
+            }
+            for graph in backend.affected_graphs
+        ]
+        cpu_node_samples = [
+            {
+                "graph_uid": sample.graph_uid,
+                "ordinal": sample.ordinal,
+                "op": sample.op,
+                "node_name_size_bytes": sample.node_name_size_bytes,
+                "node_name_sha256": sample.node_name_sha256,
+                "node_name_recorded": sample.node_name_recorded,
+            }
+            for sample in backend.cpu_node_samples
+        ]
+        first_cpu_placement_proof = None
+    elif evidence.schema_version == "inkling-smoke-server-log-failure-v2":
+        if backend.schema_version != "inkling-smoke-backend-failure-v2":
+            raise RuntimeError("V2 server-log evidence has an incompatible backend diagnostic")
+        affected_graphs = [
+            {
+                "graph_uid": graph.graph_uid,
+                "graph_owner": graph.graph_owner,
+                "phase": graph.phase,
+                "scope": graph.scope,
+                "compute": graph.compute,
+                "gpu": graph.gpu,
+                "cpu": graph.cpu,
+                "accel": graph.accel,
+                "other": graph.other,
+                "unassigned": graph.unassigned,
+            }
+            for graph in backend.affected_graphs
+        ]
+        cpu_node_samples = [
+            {
+                "graph_uid": sample.graph_uid,
+                "graph_owner": sample.graph_owner,
+                "backend_index": sample.backend_index,
+                "device_type": sample.device_type,
+                "ordinal": sample.ordinal,
+                "op": sample.op,
+                "node_name_size_bytes": sample.node_name_size_bytes,
+                "node_name_sha256": sample.node_name_sha256,
+                "node_name_recorded": sample.node_name_recorded,
+            }
+            for sample in backend.cpu_node_samples
+        ]
+        proof = backend.first_cpu_placement_proof
+        first_cpu_placement_proof = (
+            None
+            if proof is None
+            else {
+                "schema_version": proof.schema_version,
+                "graph_uid": proof.graph_uid,
+                "graph_owner": proof.graph_owner,
+                "backend_index": proof.backend_index,
+                "device_type": proof.device_type,
+                "ordinal": proof.ordinal,
+                "op": proof.op,
+                "node_name_size_bytes": proof.node_name_size_bytes,
+                "node_name_sha256": proof.node_name_sha256,
+                "node_name_recorded": proof.node_name_recorded,
+                "graph_corroborated": proof.graph_corroborated,
+            }
+        )
+    else:
+        raise RuntimeError("Server-log failure evidence has an unsupported schema")
+
+    backend_diagnostic = {
+        "schema_version": backend.schema_version,
+        "cpu_model_graph_fallback_observed": backend.cpu_model_graph_fallback_observed,
+        "graph_marker_count": backend.graph_marker_count,
+        **(
+            {"identity_marker_count": backend.identity_marker_count}
+            if evidence.schema_version == "inkling-smoke-server-log-failure-v2"
+            else {}
+        ),
+        "affected_graph_marker_count": backend.affected_graph_marker_count,
+        "cpu_node_marker_count": backend.cpu_node_marker_count,
+        "affected_graphs": affected_graphs,
+        "cpu_node_samples": cpu_node_samples,
+        "records_truncated": backend.records_truncated,
+        "raw_marker_lines_recorded": backend.raw_marker_lines_recorded,
+        "raw_node_names_recorded": backend.raw_node_names_recorded,
+    }
+    if evidence.schema_version == "inkling-smoke-server-log-failure-v2":
+        backend_diagnostic["first_cpu_placement_proof"] = first_cpu_placement_proof
+
     return {
         "schema_version": evidence.schema_version,
         "present": evidence.present,
@@ -1091,41 +1193,7 @@ def _safe_server_log_failure_record(receipt: Any) -> dict[str, Any]:
             "projector_load_failure_observed": signals.projector_load_failure_observed,
             "unsupported_architecture_observed": signals.unsupported_architecture_observed,
         },
-        "backend_diagnostic": {
-            "schema_version": backend.schema_version,
-            "cpu_model_graph_fallback_observed": backend.cpu_model_graph_fallback_observed,
-            "graph_marker_count": backend.graph_marker_count,
-            "affected_graph_marker_count": backend.affected_graph_marker_count,
-            "cpu_node_marker_count": backend.cpu_node_marker_count,
-            "affected_graphs": [
-                {
-                    "graph_uid": graph.graph_uid,
-                    "phase": graph.phase,
-                    "scope": graph.scope,
-                    "compute": graph.compute,
-                    "gpu": graph.gpu,
-                    "cpu": graph.cpu,
-                    "accel": graph.accel,
-                    "other": graph.other,
-                    "unassigned": graph.unassigned,
-                }
-                for graph in backend.affected_graphs
-            ],
-            "cpu_node_samples": [
-                {
-                    "graph_uid": sample.graph_uid,
-                    "ordinal": sample.ordinal,
-                    "op": sample.op,
-                    "node_name_size_bytes": sample.node_name_size_bytes,
-                    "node_name_sha256": sample.node_name_sha256,
-                    "node_name_recorded": sample.node_name_recorded,
-                }
-                for sample in backend.cpu_node_samples
-            ],
-            "records_truncated": backend.records_truncated,
-            "raw_marker_lines_recorded": backend.raw_marker_lines_recorded,
-            "raw_node_names_recorded": backend.raw_node_names_recorded,
-        },
+        "backend_diagnostic": backend_diagnostic,
     }
 
 
@@ -1198,6 +1266,7 @@ def _validated_remote_failure_receipts(
                 "inkling-smoke-terminal-v4",
                 "inkling-smoke-terminal-v5",
                 "inkling-smoke-terminal-v6",
+                "inkling-smoke-terminal-v7",
             }:
                 invocation = getattr(receipt, "invocation", None)
                 if invocation is None:
@@ -1231,12 +1300,18 @@ def _validated_remote_failure_receipts(
             "inkling-smoke-terminal-v4",
             "inkling-smoke-terminal-v5",
             "inkling-smoke-terminal-v6",
+            "inkling-smoke-terminal-v7",
         }:
             safe_subprocess_failure = _safe_subprocess_failure_record(receipt)
             if safe_subprocess_failure is not None:
                 record["safe_subprocess_failure"] = safe_subprocess_failure
-        if receipt.schema_version == "inkling-smoke-terminal-v6":
+        if receipt.schema_version in {
+            "inkling-smoke-terminal-v6",
+            "inkling-smoke-terminal-v7",
+        }:
             record["server_log_evidence"] = _safe_server_log_failure_record(receipt)
+        if receipt.schema_version == "inkling-smoke-terminal-v7":
+            record["cpu_placement_evidence_relation"] = receipt.cpu_placement_evidence_relation
         records.append(record)
     return records
 

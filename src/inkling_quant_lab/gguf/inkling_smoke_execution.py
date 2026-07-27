@@ -41,10 +41,13 @@ from inkling_quant_lab.gguf.inkling_smoke import (
     INSTRUMENTATION_PATCH_SHA256,
     INSTRUMENTATION_SCHEMA_VERSION,
     LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
+    OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
     PINNED_LLAMA_CPP_COMMIT,
     PINNED_MODEL_REVISION,
+    PRE_OWNER_INSTRUMENTATION_PATCH_SHA256,
     BackendCpuPlacementError,
     BackendFailureDiagnostic,
+    BackendFailureDiagnosticV2,
     InklingSmokeConfig,
     InklingVerifiedExportReference,
 )
@@ -55,6 +58,7 @@ _SMOKE_RECEIPT_HASH_DOMAIN_V3 = b"inkling-smoke-terminal-receipt-v3\0"
 _SMOKE_RECEIPT_HASH_DOMAIN_V4 = b"inkling-smoke-terminal-receipt-v4\0"
 SMOKE_RECEIPT_HASH_DOMAIN = b"inkling-smoke-terminal-receipt-v5\0"
 _SMOKE_RECEIPT_HASH_DOMAIN_V6 = b"inkling-smoke-terminal-receipt-v6\0"
+_SMOKE_RECEIPT_HASH_DOMAIN_V7 = b"inkling-smoke-terminal-receipt-v7\0"
 SMOKE_PACKAGE_MANIFEST_HASH_DOMAIN = b"inkling-smoke-package-manifest-v2\0"
 _SMOKE_HARDWARE_TOPOLOGY_HASH_DOMAIN_V2 = b"inkling-smoke-hardware-topology-v2\0"
 _SMOKE_HARDWARE_TOPOLOGY_HASH_DOMAIN_V3 = b"inkling-smoke-hardware-topology-v3\0"
@@ -139,8 +143,46 @@ _SMOKE_HISTORICAL_PATCHED_SOURCE_BLOB_IDS = (
         "7564ad4e9cfb8e77d610e90c7530121214a4c483",
     ),
 )
-_SMOKE_PATCHED_SOURCE_BLOB_IDS = (
+_SMOKE_PRE_OWNER_PATCHED_SOURCE_BLOB_IDS = (
     *_SMOKE_HISTORICAL_PATCHED_SOURCE_BLOB_IDS,
+    (
+        "tools/server/server.cpp",
+        "20effbb14851b201118843bf14fa5bc51de1e304",
+    ),
+)
+_SMOKE_PATCHED_SOURCE_BLOB_IDS = (
+    (
+        "ggml/include/ggml-backend.h",
+        "2924fdbe9884df40abf505fd89d277f5281a835b",
+    ),
+    (
+        "ggml/src/ggml-backend.cpp",
+        "87615921c09be5ef8c4996faa70fb3f49c385031",
+    ),
+    (
+        "src/llama-context.cpp",
+        "3a469bc90bd90fbdf3d924afa696d4b61fcd1d00",
+    ),
+    (
+        "src/llama-model-loader.cpp",
+        "28f8bb7934bbc807a08dc13ad58724ec77281903",
+    ),
+    (
+        "src/llama-model-loader.h",
+        "c476026d3e510ad03d3e6f0d619ecea7fc95319c",
+    ),
+    (
+        "tools/mtmd/clip.cpp",
+        "dbd07081bf73f336a17bd3b8d8359830128c424b",
+    ),
+    (
+        "tools/mtmd/mtmd.cpp",
+        "3e81e44143fa635e56e0a757ce1ba33d34d107e4",
+    ),
+    (
+        "tools/server/server-context.cpp",
+        "7564ad4e9cfb8e77d610e90c7530121214a4c483",
+    ),
     (
         "tools/server/server.cpp",
         "20effbb14851b201118843bf14fa5bc51de1e304",
@@ -148,6 +190,9 @@ _SMOKE_PATCHED_SOURCE_BLOB_IDS = (
 )
 _SMOKE_HISTORICAL_PATCHED_SOURCE_PATHS = tuple(
     sorted(path for path, _git_blob_id in _SMOKE_HISTORICAL_PATCHED_SOURCE_BLOB_IDS)
+)
+_SMOKE_PRE_OWNER_PATCHED_SOURCE_PATHS = tuple(
+    sorted(path for path, _git_blob_id in _SMOKE_PRE_OWNER_PATCHED_SOURCE_BLOB_IDS)
 )
 _SMOKE_PATCHED_SOURCE_PATHS = tuple(
     sorted(path for path, _git_blob_id in _SMOKE_PATCHED_SOURCE_BLOB_IDS)
@@ -714,6 +759,82 @@ class SmokeServerLogFailureEvidence(_SmokeReceiptModel):
         return self
 
 
+class SmokeServerLogFailureEvidenceV2(_SmokeReceiptModel):
+    """Bounded V2 failure-log evidence with monotonic positive CPU proof."""
+
+    schema_version: Literal["inkling-smoke-server-log-failure-v2"]
+    present: StrictBool
+    size_bytes: StrictInt = Field(ge=0)
+    sha256: StrictStr = Field(pattern=r"^[0-9a-f]{64}$")
+    raw_log_recorded: RequiredFalse
+    scan_integrity: Literal["complete", "malformed", "missing"]
+    safe_failure_signals: SmokeSafeFailureSignals
+    backend_diagnostic: BackendFailureDiagnosticV2
+
+    @model_validator(mode="after")
+    def log_identity_and_scan_are_consistent(self) -> SmokeServerLogFailureEvidenceV2:
+        empty_sha256 = hashlib.sha256(b"").hexdigest()
+        diagnostic = self.backend_diagnostic
+        if self.scan_integrity == "missing":
+            if (
+                self.present
+                or self.size_bytes != 0
+                or self.sha256 != empty_sha256
+                or any(self.safe_failure_signals.model_dump(mode="json").values())
+                or diagnostic.cpu_model_graph_fallback_observed
+                or diagnostic.graph_marker_count != 0
+                or diagnostic.identity_marker_count != 0
+                or diagnostic.affected_graph_marker_count != 0
+                or diagnostic.cpu_node_marker_count != 0
+                or diagnostic.affected_graphs
+                or diagnostic.cpu_node_samples
+                or diagnostic.first_cpu_placement_proof is not None
+                or diagnostic.records_truncated
+            ):
+                raise ValueError("missing server log evidence contains observed log facts")
+            return self
+        if not self.present:
+            raise ValueError("present server log evidence cannot use an absent log")
+        if (self.size_bytes == 0) != (self.sha256 == empty_sha256):
+            raise ValueError("server log size and SHA-256 have an invalid empty-log identity")
+        if (
+            self.scan_integrity == "complete"
+            and diagnostic.records_truncated
+            and diagnostic.first_cpu_placement_proof is None
+        ):
+            raise ValueError("complete truncated diagnostics lack a retained first CPU proof")
+        if self.scan_integrity == "complete" and not diagnostic.records_truncated:
+            samples_by_graph: dict[tuple[int, str], int] = {}
+            for sample in diagnostic.cpu_node_samples:
+                key = (sample.graph_uid, sample.graph_owner)
+                samples_by_graph[key] = samples_by_graph.get(key, 0) + 1
+            affected_graph_keys = {
+                (graph.graph_uid, graph.graph_owner) for graph in diagnostic.affected_graphs
+            }
+            if diagnostic.affected_graph_marker_count != len(diagnostic.affected_graphs):
+                raise ValueError(
+                    "complete backend scan affected graph count differs from retained records"
+                )
+            if diagnostic.cpu_node_marker_count != len(diagnostic.cpu_node_samples):
+                raise ValueError(
+                    "complete backend scan CPU-node count differs from retained samples"
+                )
+            if affected_graph_keys != set(samples_by_graph):
+                raise ValueError(
+                    "complete backend scan graph identities differ from CPU-node samples"
+                )
+            for graph in diagnostic.affected_graphs:
+                key = (graph.graph_uid, graph.graph_owner)
+                if samples_by_graph.get(key, 0) != min(graph.cpu, 8):
+                    raise ValueError(
+                        "complete backend scan CPU-node count differs from its graph counter"
+                    )
+            proof = diagnostic.first_cpu_placement_proof
+            if proof is not None and not proof.graph_corroborated:
+                raise ValueError("complete backend scan has an uncorroborated CPU proof")
+        return self
+
+
 class SmokeSubprocessFailureEvidence(_SmokeReceiptModel):
     """Safe identity of one failed allowlisted preflight subprocess."""
 
@@ -972,12 +1093,70 @@ class SmokeFailureReceiptV6(_SmokeFailureReceipt):
         return self
 
 
+class SmokeFailureReceiptV7(_SmokeFailureReceipt):
+    """Version 7 failure evidence with owner-tagged monotonic CPU proof."""
+
+    schema_version: Literal["inkling-smoke-terminal-v7"]
+    invocation: SmokeInvocationEvidence
+    safe_subprocess_failure: SmokeSubprocessFailureEvidence | None
+    server_log_evidence: SmokeServerLogFailureEvidenceV2
+    cpu_placement_evidence_relation: Literal[
+        "matched",
+        "exception_only",
+        "log_only",
+        "none",
+    ]
+
+    @model_validator(mode="after")
+    def invocation_and_failure_are_consistent(self) -> SmokeFailureReceiptV7:
+        if (
+            self.invocation.run_id,
+            self.invocation.call_id,
+            self.invocation.input_id,
+            self.invocation.task_id,
+            self.invocation.launch_intent_sha256,
+            self.invocation.smoke_config_hash,
+            self.invocation.control_plane_sha256,
+        ) != (
+            self.run_id,
+            self.call_id,
+            self.input_id,
+            self.task_id,
+            self.launch_intent_sha256,
+            self.smoke_config_hash,
+            self.control_plane_sha256,
+        ):
+            raise ValueError("failure invocation differs from the top-level receipt identity")
+        is_called_process_error = self.exception_type == "subprocess.CalledProcessError"
+        if is_called_process_error != (self.safe_subprocess_failure is not None):
+            raise ValueError("subprocess failure evidence differs from the exception type")
+        if self.server_log_sha256 != self.server_log_evidence.sha256:
+            raise ValueError("server-log evidence hash differs from the top-level receipt")
+        if self.safe_failure_signals != self.server_log_evidence.safe_failure_signals:
+            raise ValueError("server-log safe signals differ from the top-level receipt")
+
+        exception_proves_cpu = self.exception_type == _BACKEND_CPU_PLACEMENT_EXCEPTION_TYPE
+        log_proves_cpu = (
+            self.server_log_evidence.backend_diagnostic.first_cpu_placement_proof is not None
+        )
+        expected_relation = {
+            (True, True): "matched",
+            (True, False): "exception_only",
+            (False, True): "log_only",
+            (False, False): "none",
+        }[(exception_proves_cpu, log_proves_cpu)]
+        if self.cpu_placement_evidence_relation != expected_relation:
+            raise ValueError("CPU placement evidence relation differs from observed evidence")
+        return self
+
+
 SmokeFailureReceipt: TypeAlias = (
     SmokeFailureReceiptV2
     | SmokeFailureReceiptV3
     | SmokeFailureReceiptV4
     | SmokeFailureReceiptV5
     | SmokeFailureReceiptV6
+    | SmokeFailureReceiptV7
 )
 
 
@@ -1143,6 +1322,7 @@ class SmokeRuntimeEvidence(_SmokeReceiptModel):
     instrumentation_schema_version: Literal[
         "inkling-llama-smoke-instrumentation-v1",
         "inkling-llama-smoke-instrumentation-v2",
+        "inkling-llama-smoke-instrumentation-v3",
     ]
     instrumentation_patch_path: Literal["/root/inkling-smoke-a015409.patch"]
     instrumentation_patch_sha256: StrictStr = Field(pattern=r"^[0-9a-f]{64}$")
@@ -1225,10 +1405,17 @@ class SmokeRuntimeEvidence(_SmokeReceiptModel):
             expected_paths = _SMOKE_HISTORICAL_PATCHED_SOURCE_PATHS
             expected_instrumentation_schema = "inkling-llama-smoke-instrumentation-v1"
         elif self.instrumentation_patch_sha256 == LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256:
-            expected_blobs = _SMOKE_PATCHED_SOURCE_BLOB_IDS
-            expected_paths = _SMOKE_PATCHED_SOURCE_PATHS
+            expected_blobs = _SMOKE_PRE_OWNER_PATCHED_SOURCE_BLOB_IDS
+            expected_paths = _SMOKE_PRE_OWNER_PATCHED_SOURCE_PATHS
             expected_instrumentation_schema = "inkling-llama-smoke-instrumentation-v1"
-        elif self.instrumentation_patch_sha256 == INSTRUMENTATION_PATCH_SHA256:
+        elif self.instrumentation_patch_sha256 == PRE_OWNER_INSTRUMENTATION_PATCH_SHA256:
+            expected_blobs = _SMOKE_PRE_OWNER_PATCHED_SOURCE_BLOB_IDS
+            expected_paths = _SMOKE_PRE_OWNER_PATCHED_SOURCE_PATHS
+            expected_instrumentation_schema = "inkling-llama-smoke-instrumentation-v2"
+        elif self.instrumentation_patch_sha256 in {
+            OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
+            INSTRUMENTATION_PATCH_SHA256,
+        }:
             expected_blobs = _SMOKE_PATCHED_SOURCE_BLOB_IDS
             expected_paths = _SMOKE_PATCHED_SOURCE_PATHS
             expected_instrumentation_schema = INSTRUMENTATION_SCHEMA_VERSION
@@ -1944,6 +2131,104 @@ class SmokeBackendAudit(_SmokeReceiptModel):
         return self
 
 
+class SmokeBackendGraphEvidenceV2(_SmokeReceiptModel):
+    """One owner-tagged graph's post-assignment compute placement."""
+
+    graph_uid: StrictInt = Field(gt=0)
+    graph_owner: Literal["text", "vision", "audio"]
+    phase: Literal["post_assignment_pre_split"]
+    scope: Literal["non_view_compute"]
+    compute: StrictInt = Field(gt=0)
+    gpu: StrictInt = Field(gt=0)
+    cpu: StrictInt = Field(ge=0, le=0)
+    accel: StrictInt = Field(ge=0)
+    other: StrictInt = Field(ge=0, le=0)
+    unassigned: StrictInt = Field(ge=0, le=0)
+
+    @model_validator(mode="after")
+    def categories_cover_compute(self) -> SmokeBackendGraphEvidenceV2:
+        if self.compute != (self.gpu + self.cpu + self.accel + self.other + self.unassigned):
+            raise ValueError("backend graph categories do not cover its compute nodes")
+        return self
+
+
+class SmokeBackendIdentityEvidenceV2(_SmokeReceiptModel):
+    """One owner-tagged backend device count within one graph."""
+
+    graph_uid: StrictInt = Field(gt=0)
+    graph_owner: Literal["text", "vision", "audio"]
+    backend_index: StrictInt = Field(ge=0)
+    backend_name: StrictStr = Field(pattern=r"^\S+$")
+    device_name: StrictStr = Field(pattern=r"^\S+$")
+    device_type: Literal["cpu", "gpu", "igpu", "accel", "meta", "unassigned"]
+    compute: StrictInt = Field(gt=0)
+
+
+class SmokeBackendAuditV2(_SmokeReceiptModel):
+    """Complete owner-tagged GPU-only placement proof."""
+
+    schema_version: Literal["inkling-backend-audit-v2"]
+    graphs: tuple[SmokeBackendGraphEvidenceV2, ...]
+    identities: tuple[SmokeBackendIdentityEvidenceV2, ...]
+    observed_graphs: StrictInt = Field(gt=0)
+    compute_operations: StrictInt = Field(gt=0)
+    gpu_operations: StrictInt = Field(gt=0)
+    accelerator_operations: StrictInt = Field(ge=0)
+    cpu_operations: StrictInt = Field(ge=0, le=0)
+    other_operations: StrictInt = Field(ge=0, le=0)
+    unassigned_operations: StrictInt = Field(ge=0, le=0)
+    all_compute_operations_accelerated: RequiredTrue
+    no_cpu_model_graph_fallback: RequiredTrue
+
+    @model_validator(mode="after")
+    def all_operations_are_accelerated(self) -> SmokeBackendAuditV2:
+        graph_uids = tuple(graph.graph_uid for graph in self.graphs)
+        if len(graph_uids) != self.observed_graphs or len(graph_uids) != len(set(graph_uids)):
+            raise ValueError("backend graph identities are missing or duplicated")
+        if {graph.graph_owner for graph in self.graphs} != {"text", "vision", "audio"}:
+            raise ValueError("backend audit does not cover text, vision, and audio owners")
+        identity_keys = tuple(
+            (identity.graph_uid, identity.backend_index) for identity in self.identities
+        )
+        if len(identity_keys) != len(set(identity_keys)):
+            raise ValueError("backend device identities are duplicated")
+        if {identity.graph_uid for identity in self.identities} != set(graph_uids):
+            raise ValueError("backend identities do not cover the exact graph set")
+
+        graph_by_uid = {graph.graph_uid: graph for graph in self.graphs}
+        for graph_uid, graph in graph_by_uid.items():
+            rows = tuple(
+                identity for identity in self.identities if identity.graph_uid == graph_uid
+            )
+            if any(identity.graph_owner != graph.graph_owner for identity in rows):
+                raise ValueError("backend graph and identity owner fields differ")
+            category_counts = {
+                "gpu": sum(row.compute for row in rows if row.device_type in {"gpu", "igpu"}),
+                "cpu": sum(row.compute for row in rows if row.device_type == "cpu"),
+                "accel": sum(row.compute for row in rows if row.device_type == "accel"),
+                "other": sum(row.compute for row in rows if row.device_type == "meta"),
+                "unassigned": sum(row.compute for row in rows if row.device_type == "unassigned"),
+            }
+            if sum(row.compute for row in rows) != graph.compute:
+                raise ValueError("backend identities do not cover a graph's compute nodes")
+            if any(category_counts[name] != getattr(graph, name) for name in category_counts):
+                raise ValueError("backend identity categories differ from graph evidence")
+
+        aggregates = {
+            "compute_operations": sum(graph.compute for graph in self.graphs),
+            "gpu_operations": sum(graph.gpu for graph in self.graphs),
+            "accelerator_operations": sum(graph.accel for graph in self.graphs),
+            "cpu_operations": sum(graph.cpu for graph in self.graphs),
+            "other_operations": sum(graph.other for graph in self.graphs),
+            "unassigned_operations": sum(graph.unassigned for graph in self.graphs),
+        }
+        if any(getattr(self, name) != value for name, value in aggregates.items()):
+            raise ValueError("backend aggregates differ from per-graph evidence")
+        if self.gpu_operations + self.accelerator_operations != self.compute_operations:
+            raise ValueError("backend audit does not assign every operation to an accelerator")
+        return self
+
+
 class SmokeServerCleanup(_SmokeReceiptModel):
     """Bounded server shutdown result."""
 
@@ -1979,7 +2264,7 @@ class SmokeServerEvidence(_SmokeReceiptModel):
     loader_offload: SmokeLoaderOffloadEvidence
     artifact_load: SmokeArtifactLoadEvidence
     raw_logit_audit: SmokeRawLogitAuditEvidence
-    backend_audit: SmokeBackendAudit
+    backend_audit: SmokeBackendAudit | SmokeBackendAuditV2
     properties: SmokeServerProperties
     server_log_sha256: StrictStr = Field(pattern=r"^[0-9a-f]{64}$")
     cleanup: SmokeServerCleanup
@@ -2182,6 +2467,7 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
         "inkling-smoke-terminal-v3",
         "inkling-smoke-terminal-v4",
         "inkling-smoke-terminal-v5",
+        "inkling-smoke-terminal-v7",
     ]
     status: Literal["passed"]
     stage: Literal["smoke_test"]
@@ -2233,9 +2519,12 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
         predicted = sum(trial.tokens_predicted for probe in self.probes for trial in probe.trials)
         if self.server.raw_logit_audit.expected_generated_token_vectors != predicted:
             raise ValueError("raw-logit audit does not cover every generated token")
-        if self.schema_version == "inkling-smoke-terminal-v5":
+        if self.schema_version in {
+            "inkling-smoke-terminal-v5",
+            "inkling-smoke-terminal-v7",
+        }:
             if not isinstance(self.server.raw_logit_audit, SmokeRawLogitAuditV2):
-                raise ValueError("terminal receipt v5 requires raw-logit audit v2")
+                raise ValueError("current terminal receipt requires raw-logit audit v2")
             token_id_limit = self.server.raw_logit_audit.unpadded_vocab_size
         else:
             if not isinstance(self.server.raw_logit_audit, SmokeRawLogitAudit):
@@ -2259,6 +2548,11 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
             raise ValueError("receipt GPUs must use one driver version")
         if len({gpu.cuda_driver_api_version for gpu in self.hardware}) != 1:
             raise ValueError("receipt GPUs must use one CUDA driver API version")
+        if self.schema_version == "inkling-smoke-terminal-v7":
+            if not isinstance(self.server.backend_audit, SmokeBackendAuditV2):
+                raise ValueError("terminal receipt v7 requires owner-tagged backend audit v2")
+        elif not isinstance(self.server.backend_audit, SmokeBackendAudit):
+            raise ValueError("historical terminal receipt requires backend audit v1")
         if self.schema_version == "inkling-smoke-terminal-v3":
             historical_source_blobs = tuple(
                 (identity.path, identity.git_blob_id)
@@ -2283,10 +2577,22 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
             if (
                 self.runtime.instrumentation_patch_sha256
                 != LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256
-                or self.runtime.patched_source_paths != _SMOKE_PATCHED_SOURCE_PATHS
-                or current_source_blobs != _SMOKE_PATCHED_SOURCE_BLOB_IDS
+                or self.runtime.patched_source_paths != _SMOKE_PRE_OWNER_PATCHED_SOURCE_PATHS
+                or current_source_blobs != _SMOKE_PRE_OWNER_PATCHED_SOURCE_BLOB_IDS
             ):
                 raise ValueError("version 4 success receipt uses the wrong source patch")
+        elif self.schema_version == "inkling-smoke-terminal-v5":
+            _require_current_cuda_backend_identities(self.server.backend_audit.identities)
+            current_source_blobs = tuple(
+                (identity.path, identity.git_blob_id)
+                for identity in self.runtime.base_source_blob_ids
+            )
+            if (
+                self.runtime.instrumentation_patch_sha256 != PRE_OWNER_INSTRUMENTATION_PATCH_SHA256
+                or self.runtime.patched_source_paths != _SMOKE_PRE_OWNER_PATCHED_SOURCE_PATHS
+                or current_source_blobs != _SMOKE_PRE_OWNER_PATCHED_SOURCE_BLOB_IDS
+            ):
+                raise ValueError("version 5 success receipt uses the wrong source patch")
         else:
             _require_current_cuda_backend_identities(self.server.backend_audit.identities)
             current_source_blobs = tuple(
@@ -2294,14 +2600,19 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
                 for identity in self.runtime.base_source_blob_ids
             )
             if (
-                self.runtime.instrumentation_patch_sha256 != INSTRUMENTATION_PATCH_SHA256
+                self.runtime.instrumentation_patch_sha256
+                not in {
+                    OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
+                    INSTRUMENTATION_PATCH_SHA256,
+                }
                 or self.runtime.patched_source_paths != _SMOKE_PATCHED_SOURCE_PATHS
                 or current_source_blobs != _SMOKE_PATCHED_SOURCE_BLOB_IDS
             ):
-                raise ValueError("version 5 success receipt uses the wrong source patch")
+                raise ValueError("version 7 success receipt uses the wrong source patch")
         if self.schema_version in {
             "inkling-smoke-terminal-v4",
             "inkling-smoke-terminal-v5",
+            "inkling-smoke-terminal-v7",
         }:
             if self.gpu_topology is None:
                 raise ValueError("current success receipt lacks CUDA peer topology evidence")
@@ -2350,6 +2661,12 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
             if peak_mib > gpu.nvidia_smi_memory_total_mib:
                 raise ValueError("receipt GPU peak memory exceeds installed memory")
         return self
+
+
+class SmokeSuccessReceiptV7(SmokeTerminalReceipt):
+    """Owner-tagged version 7 success evidence."""
+
+    schema_version: Literal["inkling-smoke-terminal-v7"]
 
 
 def smoke_control_plane_tree_sha256(
@@ -2587,7 +2904,10 @@ def strict_json_object(payload: str | bytes) -> dict[str, Any]:
 
 
 def _require_current_cuda_backend_identities(
-    identities: tuple[SmokeBackendIdentityEvidence, ...],
+    identities: tuple[
+        SmokeBackendIdentityEvidence | SmokeBackendIdentityEvidenceV2,
+        ...,
+    ],
 ) -> None:
     if any(identity.device_type != "gpu" for identity in identities):
         raise ValueError("current backend audit used a non-CUDA accelerator")
@@ -2618,6 +2938,7 @@ def _expected_server_command(
         "inkling-smoke-terminal-v3",
         "inkling-smoke-terminal-v4",
         "inkling-smoke-terminal-v5",
+        "inkling-smoke-terminal-v7",
     ],
 ) -> tuple[str, ...]:
     first_shard = f"/subject/{reference.q3_shards[0].path}"
@@ -2665,6 +2986,7 @@ def _expected_server_command(
             in {
                 "inkling-smoke-terminal-v4",
                 "inkling-smoke-terminal-v5",
+                "inkling-smoke-terminal-v7",
             }
             else (*common_arguments, *verbosity_arguments)
         ),
@@ -2724,17 +3046,21 @@ def _validate_smoke_failure_launch_schema(
     if patch_sha256 != config.runtime.instrumentation_patch_sha256:
         raise ValueError("smoke failure control-plane patch differs from the smoke config")
 
-    expected_patch_by_schema = {
-        "inkling-smoke-terminal-v2": HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
-        "inkling-smoke-terminal-v3": HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
-        "inkling-smoke-terminal-v4": LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
-        "inkling-smoke-terminal-v5": INSTRUMENTATION_PATCH_SHA256,
-        "inkling-smoke-terminal-v6": INSTRUMENTATION_PATCH_SHA256,
+    expected_patches_by_schema = {
+        "inkling-smoke-terminal-v2": {HISTORICAL_INSTRUMENTATION_PATCH_SHA256},
+        "inkling-smoke-terminal-v3": {HISTORICAL_INSTRUMENTATION_PATCH_SHA256},
+        "inkling-smoke-terminal-v4": {LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256},
+        "inkling-smoke-terminal-v5": {PRE_OWNER_INSTRUMENTATION_PATCH_SHA256},
+        "inkling-smoke-terminal-v6": {PRE_OWNER_INSTRUMENTATION_PATCH_SHA256},
+        "inkling-smoke-terminal-v7": {
+            OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
+            INSTRUMENTATION_PATCH_SHA256,
+        },
     }
-    expected_patch = expected_patch_by_schema.get(schema_version)
-    if expected_patch is None:
+    expected_patches = expected_patches_by_schema.get(schema_version)
+    if expected_patches is None:
         raise ValueError("terminal smoke failure schema version is unsupported")
-    if patch_sha256 != expected_patch:
+    if patch_sha256 not in expected_patches:
         raise ValueError("terminal smoke failure schema differs from its instrumentation patch")
 
 
@@ -2772,9 +3098,10 @@ def validate_smoke_failure_receipt(
         raise ValueError("terminal smoke failure receipt self-hash does not match its payload")
 
     schema_version = raw.get("schema_version")
+    receipt: SmokeFailureReceipt
     try:
         if schema_version == "inkling-smoke-terminal-v2":
-            receipt: SmokeFailureReceipt = SmokeFailureReceiptV2.model_validate(raw)
+            receipt = SmokeFailureReceiptV2.model_validate(raw)
         elif schema_version == "inkling-smoke-terminal-v3":
             receipt = SmokeFailureReceiptV3.model_validate(raw)
         elif schema_version == "inkling-smoke-terminal-v4":
@@ -2783,6 +3110,8 @@ def validate_smoke_failure_receipt(
             receipt = SmokeFailureReceiptV5.model_validate(raw)
         elif schema_version == "inkling-smoke-terminal-v6":
             receipt = SmokeFailureReceiptV6.model_validate(raw)
+        elif schema_version == "inkling-smoke-terminal-v7":
+            receipt = SmokeFailureReceiptV7.model_validate(raw)
         else:
             raise ValueError("unsupported terminal smoke failure receipt schema version")
     except ValidationError as error:
@@ -2840,8 +3169,12 @@ def validate_smoke_terminal_receipt(
     receipt_sha256 = raw.get("receipt_sha256")
     if not isinstance(receipt_sha256, str) or receipt_sha256 != smoke_terminal_receipt_sha256(raw):
         raise ValueError("terminal smoke receipt self-hash does not match its payload")
+    receipt: SmokeTerminalReceipt
     try:
-        receipt = SmokeTerminalReceipt.model_validate(raw)
+        if raw.get("schema_version") == "inkling-smoke-terminal-v7":
+            receipt = SmokeSuccessReceiptV7.model_validate(raw)
+        else:
+            receipt = SmokeTerminalReceipt.model_validate(raw)
     except ValidationError as error:
         raise ValueError("terminal smoke receipt schema is invalid") from error
 
@@ -2874,7 +3207,10 @@ def validate_smoke_terminal_receipt(
     )
     if exact_identity != expected_identity:
         raise ValueError("terminal smoke receipt differs from the exact run identity")
-    if receipt.schema_version == "inkling-smoke-terminal-v5":
+    if receipt.schema_version in {
+        "inkling-smoke-terminal-v5",
+        "inkling-smoke-terminal-v7",
+    }:
         output_vocabulary = config.output_vocabulary
         raw_logit_audit = receipt.server.raw_logit_audit
         if output_vocabulary is None or not isinstance(
@@ -3025,6 +3361,8 @@ def smoke_terminal_receipt_sha256(value: Mapping[str, Any]) -> str:
         if payload.get("status") != "failed":
             raise ValueError("terminal smoke receipt v6 is valid only for failures")
         domain = _SMOKE_RECEIPT_HASH_DOMAIN_V6
+    elif schema_version == "inkling-smoke-terminal-v7":
+        domain = _SMOKE_RECEIPT_HASH_DOMAIN_V7
     else:
         raise ValueError("unsupported terminal smoke receipt schema version")
     return hashlib.sha256(domain + _canonical_json(payload).encode("utf-8")).hexdigest()
@@ -3037,6 +3375,9 @@ __all__ = [
     "SMOKE_ENVIRONMENT_NAME",
     "SMOKE_STAGE",
     "SMOKE_WORKSPACE_BUDGET_USD",
+    "SmokeBackendAuditV2",
+    "SmokeBackendGraphEvidenceV2",
+    "SmokeBackendIdentityEvidenceV2",
     "SmokeControlPlaneFile",
     "SmokeControlPlaneProvenance",
     "SmokeCudaPeerEdgeEvidence",
@@ -3046,6 +3387,7 @@ __all__ = [
     "SmokeFailureReceiptV4",
     "SmokeFailureReceiptV5",
     "SmokeFailureReceiptV6",
+    "SmokeFailureReceiptV7",
     "SmokeGpuTopologyEvidence",
     "SmokeHostEvidence",
     "SmokeInvocationEvidence",
@@ -3056,7 +3398,9 @@ __all__ = [
     "SmokeRawLogitAuditV2",
     "SmokeSafeFailureSignals",
     "SmokeServerLogFailureEvidence",
+    "SmokeServerLogFailureEvidenceV2",
     "SmokeSubprocessFailureEvidence",
+    "SmokeSuccessReceiptV7",
     "SmokeTerminalReceipt",
     "canonical_python_package_inventory",
     "canonical_smoke_attempt_registry_created_at_utc",

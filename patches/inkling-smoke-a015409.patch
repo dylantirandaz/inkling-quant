@@ -1,19 +1,79 @@
+diff --git a/ggml/include/ggml-backend.h b/ggml/include/ggml-backend.h
+index 2924fdbe9884df40abf505fd89d277f5281a835b..9b8787c8bbd2d89378c63fc22d440920ab257298 100644
+--- a/ggml/include/ggml-backend.h
++++ b/ggml/include/ggml-backend.h
+@@ -303,6 +303,12 @@ extern "C" {
+     */
+
+     typedef struct ggml_backend_sched * ggml_backend_sched_t;
++    enum ggml_backend_sched_owner {
++        GGML_BACKEND_SCHED_OWNER_UNKNOWN = 0,
++        GGML_BACKEND_SCHED_OWNER_TEXT,
++        GGML_BACKEND_SCHED_OWNER_VISION,
++        GGML_BACKEND_SCHED_OWNER_AUDIO,
++    };
+
+     // Evaluation callback for each node in the graph (set with ggml_backend_sched_set_eval_callback)
+     // when ask == true, the scheduler wants to know if the user wants to observe this node
+@@ -316,6 +322,7 @@ extern "C" {
+     // Initialize a backend scheduler, backends with low index are given priority over backends with high index
+     GGML_API ggml_backend_sched_t ggml_backend_sched_new(ggml_backend_t * backends, ggml_backend_buffer_type_t * bufts, int n_backends, size_t graph_size, bool parallel, bool op_offload);
+     GGML_API void                 ggml_backend_sched_free(ggml_backend_sched_t sched);
++    GGML_API void                 ggml_backend_sched_set_owner(ggml_backend_sched_t sched, enum ggml_backend_sched_owner owner);
+
+     // Initialize backend buffers from a measure graph
+     GGML_API void                 ggml_backend_sched_reserve_size(ggml_backend_sched_t sched, struct ggml_cgraph * measure_graph, size_t * sizes);
 diff --git a/ggml/src/ggml-backend.cpp b/ggml/src/ggml-backend.cpp
-index 8761592..2743859 100644
+index 87615921c09be5ef8c4996faa70fb3f49c385031..4c9eeb8d1486914c4a675eb0c40c53cd20dd13f0 100644
 --- a/ggml/src/ggml-backend.cpp
 +++ b/ggml/src/ggml-backend.cpp
 @@ -14,6 +14,7 @@
  #include "ggml-impl.h"
- 
+
  #include <assert.h>
 +#include <inttypes.h>
  #include <limits.h>
  #include <stdarg.h>
  #include <stdio.h>
-@@ -1010,6 +1011,115 @@ static void ggml_backend_sched_set_if_supported(ggml_backend_sched_t sched, stru
+@@ -775,6 +776,7 @@ struct ggml_backend_sched {
+     bool is_reset; // true if the scheduler has been reset since the last graph split
+     bool is_alloc;
+
++    enum ggml_backend_sched_owner iql_owner;
+     int n_backends;
+
+     ggml_backend_t backends[GGML_SCHED_MAX_BACKENDS];
+@@ -1010,6 +1012,159 @@ static void ggml_backend_sched_set_if_supported(ggml_backend_sched_t sched, stru
      }
  }
- 
+
++void ggml_backend_sched_set_owner(
++        ggml_backend_sched_t sched,
++        enum ggml_backend_sched_owner owner) {
++    GGML_ASSERT(sched != nullptr);
++    GGML_ASSERT(
++            owner == GGML_BACKEND_SCHED_OWNER_UNKNOWN ||
++            owner == GGML_BACKEND_SCHED_OWNER_TEXT ||
++            owner == GGML_BACKEND_SCHED_OWNER_VISION ||
++            owner == GGML_BACKEND_SCHED_OWNER_AUDIO);
++    sched->iql_owner = owner;
++}
++
++static const char * ggml_backend_sched_iql_owner_name(enum ggml_backend_sched_owner owner) {
++    switch (owner) {
++        case GGML_BACKEND_SCHED_OWNER_TEXT:
++            return "text";
++        case GGML_BACKEND_SCHED_OWNER_VISION:
++            return "vision";
++        case GGML_BACKEND_SCHED_OWNER_AUDIO:
++            return "audio";
++        case GGML_BACKEND_SCHED_OWNER_UNKNOWN:
++            return "unknown";
++    }
++
++    return "unknown";
++}
++
 +static void ggml_backend_sched_iql_audit(ggml_backend_sched_t sched, struct ggml_cgraph * graph) {
 +    size_t backend_compute_counts[GGML_SCHED_MAX_BACKENDS] = {};
 +    size_t compute_count = 0;
@@ -23,6 +83,7 @@ index 8761592..2743859 100644
 +    size_t other_count = 0;
 +    size_t unassigned_count = 0;
 +    size_t cpu_diagnostics = 0;
++    const char * graph_owner = ggml_backend_sched_iql_owner_name(sched->iql_owner);
 +
 +    for (int i = 0; i < graph->n_nodes; ++i) {
 +        struct ggml_tensor * node = graph->nodes[i];
@@ -54,12 +115,26 @@ index 8761592..2743859 100644
 +            case GGML_BACKEND_DEVICE_TYPE_CPU:
 +                ++cpu_count;
 +                if (cpu_diagnostics < 8) {
++                    size_t name_len = 0;
++                    while (name_len < sizeof(node->name) && node->name[name_len] != '\0') {
++                        ++name_len;
++                    }
++                    char name_hex[2 * sizeof(node->name) + 1] = {};
++                    static const char hex_digits[] = "0123456789abcdef";
++                    for (size_t j = 0; j < name_len; ++j) {
++                        const uint8_t byte = static_cast<uint8_t>(node->name[j]);
++                        name_hex[2 * j] = hex_digits[byte >> 4];
++                        name_hex[2 * j + 1] = hex_digits[byte & 0x0f];
++                    }
 +                    GGML_LOG_INFO(
-+                            "IQL_SMOKE_CPU_NODE_V1 graph_uid=%" PRIu64 " ordinal=%d op=%s name=%s\n",
++                            "IQL_SMOKE_CPU_NODE_V2 graph_uid=%" PRIu64 " graph_owner=%s backend_index=%d device_type=cpu ordinal=%d op=%s name_len=%zu name_hex=%s\n",
 +                            graph->uid,
++                            graph_owner,
++                            backend_id,
 +                            i,
 +                            ggml_op_name(node->op),
-+                            node->name);
++                            name_len,
++                            name_hex);
 +                    ++cpu_diagnostics;
 +                }
 +                break;
@@ -103,8 +178,9 @@ index 8761592..2743859 100644
 +        }
 +
 +        GGML_LOG_INFO(
-+                "IQL_SMOKE_BACKEND_IDENTITY_V1 graph_uid=%" PRIu64 " backend_index=%d backend_name=%s device_name=%s device_type=%s compute=%zu\n",
++                "IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid=%" PRIu64 " graph_owner=%s backend_index=%d backend_name=%s device_name=%s device_type=%s compute=%zu\n",
 +                graph->uid,
++                graph_owner,
 +                backend_id,
 +                ggml_backend_name(backend),
 +                device_name,
@@ -113,8 +189,9 @@ index 8761592..2743859 100644
 +    }
 +
 +    GGML_LOG_INFO(
-+            "IQL_SMOKE_BACKEND_GRAPH_V1 graph_uid=%" PRIu64 " phase=post_assignment_pre_split scope=non_view_compute compute=%zu gpu=%zu cpu=%zu accel=%zu other=%zu unassigned=%zu\n",
++            "IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid=%" PRIu64 " graph_owner=%s phase=post_assignment_pre_split scope=non_view_compute compute=%zu gpu=%zu cpu=%zu accel=%zu other=%zu unassigned=%zu\n",
 +            graph->uid,
++            graph_owner,
 +            compute_count,
 +            gpu_count,
 +            cpu_count,
@@ -126,25 +203,53 @@ index 8761592..2743859 100644
  // assigns backends to ops and splits the graph into subgraphs that can be computed on the same backend
  void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct ggml_cgraph * graph) {
      // reset splits
-@@ -1242,6 +1352,8 @@ void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct ggml_cgra
+@@ -1242,6 +1397,8 @@ void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct ggml_cgra
          GGML_ASSERT(*cur_backend_id != -1);
      }
- 
+
 +    ggml_backend_sched_iql_audit(sched, graph);
 +
      // pass 5: split graph, find tensors that need to be copied
      {
          int i_split = 0;
+@@ -1736,6 +1893,7 @@ ggml_backend_sched_t ggml_backend_sched_new(
+     GGML_ASSERT(ggml_backend_dev_type(ggml_backend_get_device(backends[n_backends - 1])) == GGML_BACKEND_DEVICE_TYPE_CPU);
+
+     struct ggml_backend_sched * sched = (ggml_backend_sched *) calloc(1, sizeof(struct ggml_backend_sched));
++    sched->iql_owner = GGML_BACKEND_SCHED_OWNER_UNKNOWN;
+
+     const char * GGML_SCHED_DEBUG = getenv("GGML_SCHED_DEBUG");
+     sched->debug = GGML_SCHED_DEBUG ? atoi(GGML_SCHED_DEBUG) : 0;
+diff --git a/src/llama-context.cpp b/src/llama-context.cpp
+index 3a469bc90bd90fbdf3d924afa696d4b61fcd1d00..389f04f4c56e8200fd028c680bf5f454792efee8 100644
+--- a/src/llama-context.cpp
++++ b/src/llama-context.cpp
+@@ -563,6 +563,7 @@ void llama_context::sched_reserve() {
+     gf_res_reserve.reset(new llm_graph_result(max_nodes));
+
+     sched.reset(ggml_backend_sched_new(backend_ptrs.data(), backend_buft.data(), backend_ptrs.size(), max_nodes, cparams.pipeline_parallel, cparams.op_offload));
++    ggml_backend_sched_set_owner(sched.get(), GGML_BACKEND_SCHED_OWNER_TEXT);
+
+     llama_memory_context_ptr mctx;
+     if (memory) {
+@@ -598,6 +599,7 @@ void llama_context::sched_reserve() {
+                 LLAMA_LOG_WARN("%s: compute buffer allocation failed, retrying without pipeline parallelism\n", __func__);
+                 cparams.pipeline_parallel = false;
+                 sched.reset(ggml_backend_sched_new(backend_ptrs.data(), backend_buft.data(), backend_ptrs.size(), max_nodes, false, cparams.op_offload));
++                ggml_backend_sched_set_owner(sched.get(), GGML_BACKEND_SCHED_OWNER_TEXT);
+                 gf = graph_reserve(n_tokens, n_seqs, n_outputs_pp, mctx.get());
+             }
+             if (!gf) {
 diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
-index 28f8bb7..fad59d6 100644
+index 28f8bb7934bbc807a08dc13ad58724ec77281903..fad59d654dfe84b2c778c7f85a84c7408c55c264 100644
 --- a/src/llama-model-loader.cpp
 +++ b/src/llama-model-loader.cpp
 @@ -541,6 +541,7 @@ llama_model_loader::llama_model_loader(
      }
- 
+
      tensor_buft_overrides = param_tensor_buft_overrides_p;
 +    uint16_t iql_expected_split_count = 1;
- 
+
      if (!fname.empty()) {
          // Load the main GGUF
 @@ -591,6 +592,7 @@ llama_model_loader::llama_model_loader(
@@ -152,13 +257,13 @@ index 28f8bb7..fad59d6 100644
          uint16_t n_split = 0;
          get_key(llm_kv(LLM_KV_SPLIT_COUNT), n_split, false);
 +        iql_expected_split_count = std::max<uint16_t>(1, n_split);
- 
+
          // Load additional GGML contexts
          if (n_split > 1) {
 @@ -707,6 +709,13 @@ llama_model_loader::llama_model_loader(
      n_kv      = gguf_get_n_kv(metadata);
      n_tensors = weights_map.size();
- 
+
 +    LLAMA_LOG_INFO(
 +            "IQL_SMOKE_TEXT_SHARDS_V1 expected=%u opened=%zu contexts=%zu tensors=%zu\n",
 +            iql_expected_split_count,
@@ -167,12 +272,12 @@ index 28f8bb7..fad59d6 100644
 +            weights_map.size());
 +
      fver = (enum llama_fver) gguf_get_version(metadata);
- 
+
      LLAMA_LOG_INFO("%s: loaded meta data with %d key-value pairs and %d tensors from %s (version %s)\n",
 @@ -1426,6 +1435,13 @@ bool llama_model_loader::load_all_data(
      }
      GGML_ASSERT(size_data != 0 && "call init_mappings() first");
- 
+
 +    if (iql_loaded_tensor_counts.empty()) {
 +        iql_loaded_tensor_counts.resize(files.size(), 0);
 +        iql_loaded_tensor_bytes.resize(files.size(), 0);
@@ -182,17 +287,17 @@ index 28f8bb7..fad59d6 100644
 +
      std::vector<no_init<uint8_t>> read_buf;
      std::vector<std::future<std::pair<ggml_tensor *, bool>>> validation_result;
- 
+
 @@ -1647,6 +1663,9 @@ bool llama_model_loader::load_all_data(
              }
          }
- 
+
 +        GGML_ASSERT(weight->idx < iql_loaded_tensor_counts.size());
 +        ++iql_loaded_tensor_counts[weight->idx];
 +        iql_loaded_tensor_bytes[weight->idx] += n_size;
          size_done += n_size;
      }
- 
+
 @@ -1689,8 +1708,31 @@ bool llama_model_loader::load_all_data(
          if (progress_callback) {
              // Even though the model is done loading, we still honor
@@ -224,10 +329,10 @@ index 28f8bb7..fad59d6 100644
 +                size_data,
 +                use_mmap ? 1 : 0);
      }
- 
+
      return true;
 diff --git a/src/llama-model-loader.h b/src/llama-model-loader.h
-index c476026..b495fe7 100644
+index c476026d3e510ad03d3e6f0d619ecea7fc95319c..b495fe733fd6a64a41a1eff92c10ea4fe15805bb 100644
 --- a/src/llama-model-loader.h
 +++ b/src/llama-model-loader.h
 @@ -102,6 +102,8 @@ struct llama_model_loader {
@@ -236,11 +341,11 @@ index c476026..b495fe7 100644
      std::vector<std::pair<size_t, size_t>> mmaps_used;
 +    std::vector<size_t> iql_loaded_tensor_counts;
 +    std::vector<size_t> iql_loaded_tensor_bytes;
- 
+
      // define a comparator for the buft -> ctx map to ensure that the order is well-defined:
      struct ggml_backend_buft_comparator {
 diff --git a/tools/mtmd/clip.cpp b/tools/mtmd/clip.cpp
-index dbd0708..addf7ae 100644
+index dbd07081bf73f336a17bd3b8d8359830128c424b..77abad10845bff3b0ef32ce98b0b0e43a46f7b87 100644
 --- a/tools/mtmd/clip.cpp
 +++ b/tools/mtmd/clip.cpp
 @@ -2882,13 +2882,17 @@ struct clip_model_loader {
@@ -283,8 +388,24 @@ index dbd0708..addf7ae 100644
              } else {
                  LOG_DBG("%s: no_alloc is set, skipping tensor data loading (%zu tensors)\n", __func__, tensors_to_load.size());
              }
+@@ -3235,6 +3246,7 @@ struct clip_init_result clip_init(const char * fname, struct clip_context_params
+         if (loader.has_vision) {
+             ctx_vision = new clip_ctx(ctx_params);
+             loader.load_hparams(ctx_vision->model, CLIP_MODALITY_VISION);
++            ggml_backend_sched_set_owner(ctx_vision->sched.get(), GGML_BACKEND_SCHED_OWNER_VISION);
+             loader.load_tensors(*ctx_vision);
+             loader.init_ctx(*ctx_vision);
+             if (ctx_params.warmup) {
+@@ -3249,6 +3261,7 @@ struct clip_init_result clip_init(const char * fname, struct clip_context_params
+         if (loader.has_audio && !skip_audio) {
+             ctx_audio = new clip_ctx(ctx_params);
+             loader.load_hparams(ctx_audio->model, CLIP_MODALITY_AUDIO);
++            ggml_backend_sched_set_owner(ctx_audio->sched.get(), GGML_BACKEND_SCHED_OWNER_AUDIO);
+             loader.load_tensors(*ctx_audio);
+             loader.init_ctx(*ctx_audio);
+             if (ctx_params.warmup) {
 diff --git a/tools/mtmd/mtmd.cpp b/tools/mtmd/mtmd.cpp
-index 3e81e44..85f25f2 100644
+index 3e81e44143fa635e56e0a757ce1ba33d34d107e4..85f25f2aaa07537894ad3c35c258b937d3f4b84b 100644
 --- a/tools/mtmd/mtmd.cpp
 +++ b/tools/mtmd/mtmd.cpp
 @@ -384,6 +384,18 @@ struct mtmd_context {
@@ -304,15 +425,15 @@ index 3e81e44..85f25f2 100644
 +                audio_is_inkling ? "inkling" : "other",
 +                n_embd_clip);
      }
- 
+
      void init_vision() {
 diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
-index 7564ad4..58b90cc 100644
+index 7564ad4e9cfb8e77d610e90c7530121214a4c483..58b90ccbecd60cb0784810224d79e70e4152b521 100644
 --- a/tools/server/server-context.cpp
 +++ b/tools/server/server-context.cpp
-@@ -18,7 +18,10 @@
+@@ -18,9 +18,12 @@
  #include "mtmd-helper.h"
- 
+
  #include <algorithm>
 +#include <charconv>
 +#include <cmath>
@@ -321,6 +442,8 @@ index 7564ad4..58b90cc 100644
  #include <exception>
 +#include <string_view>
  #include <memory>
+ #include <filesystem>
+ #include <utility>
 @@ -1961,6 +1964,117 @@ private:
                  });
              }
@@ -440,11 +563,15 @@ index 7564ad4..58b90cc 100644
              const size_t max_probs = cur.size();
              const size_t n_probs = std::min(max_probs, n_probs_request);
 diff --git a/tools/server/server.cpp b/tools/server/server.cpp
-index 20effbb..9be8c02 100644
+index 20effbb14851b201118843bf14fa5bc51de1e304..9be8c02497080fa57ad9460084c2337a1997f89b 100644
 --- a/tools/server/server.cpp
 +++ b/tools/server/server.cpp
-@@ -88,2 +88,4 @@
+@@ -86,6 +86,8 @@ static server_http_context::handler_t ex_wrapper(server_http_context::handler_t
+ }
+
  int llama_server(int argc, char ** argv) {
 +    common_log_set_verbosity_thold(LOG_LEVEL_TRACE);
 +
      std::setlocale(LC_NUMERIC, "C");
+
+     // own arguments required by this example

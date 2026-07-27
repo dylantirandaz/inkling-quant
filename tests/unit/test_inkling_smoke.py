@@ -31,6 +31,7 @@ from inkling_quant_lab.gguf.inkling_smoke import (
     LLAMA_SERVER_AUDIT_LOG_VERBOSITY,
     MAX_BACKEND_FAILURE_LINE_BYTES,
     MAX_BACKEND_FAILURE_RECORDS,
+    OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
     PINNED_CUDA_IMAGE,
     PINNED_CUDA_IMAGE_DIGEST,
     PINNED_CUDA_PLATFORM,
@@ -350,7 +351,7 @@ def test_reference_loader_rejects_noncanonical_json(tmp_path: Path) -> None:
 def test_checked_smoke_config_binds_runtime_hardware_probes_and_claims() -> None:
     config = load_inkling_smoke_config(CONFIG_PATH)
 
-    assert config.schema_version == "inkling-smoke-config-v2"
+    assert config.schema_version == "inkling-smoke-config-v3"
     assert config.verified_export_reference_sha256 == (EXPECTED_VERIFIED_EXPORT_REFERENCE_SHA256)
     assert config.runtime.image.image == PINNED_CUDA_IMAGE
     assert config.runtime.image.digest == PINNED_CUDA_IMAGE_DIGEST
@@ -392,6 +393,17 @@ def test_checked_smoke_patch_bytes_match_the_pinned_digest() -> None:
     patch_path = PROJECT_ROOT / INSTRUMENTATION_PATCH_RELATIVE_PATH
 
     assert hashlib.sha256(patch_path.read_bytes()).hexdigest() == (INSTRUMENTATION_PATCH_SHA256)
+
+
+def test_owner_tagged_patch_remains_valid_historical_schema_v3_evidence() -> None:
+    raw = _config_mapping()
+    runtime = raw["runtime"]
+    assert isinstance(runtime, dict)
+    runtime["instrumentation_patch_sha256"] = OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256
+
+    config = InklingSmokeConfig.model_validate(raw)
+
+    assert config.runtime.instrumentation_patch_sha256 == OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256
 
 
 def test_cuda_driver_linkage_parser_requires_one_non_stub_absolute_path() -> None:
@@ -1344,6 +1356,442 @@ def test_backend_failure_diagnostic_bounds_benign_graph_identity_state() -> None
     assert diagnostic.cpu_node_marker_count == 0
     assert diagnostic.records_truncated is False
     assert diagnostic.cpu_model_graph_fallback_observed is False
+
+
+def _backend_failure_graph_marker_v2(
+    graph_uid: int,
+    *,
+    graph_owner: str = "text",
+    cpu: int = 1,
+    gpu: int = 11,
+) -> bytes:
+    compute = cpu + gpu
+    return (
+        f"IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid={graph_uid} "
+        f"graph_owner={graph_owner} "
+        "phase=post_assignment_pre_split scope=non_view_compute "
+        f"compute={compute} gpu={gpu} cpu={cpu} accel=0 other=0 unassigned=0\n"
+    ).encode()
+
+
+def _backend_failure_cpu_marker_v2(
+    graph_uid: int,
+    *,
+    graph_owner: str = "text",
+    backend_index: int = 2,
+    device_type: str = "cpu",
+    ordinal: int = 7,
+    op: str = "MUL_MAT",
+    node_name: bytes = b"model.layers.0.secret_node",
+) -> bytes:
+    return (
+        f"IQL_SMOKE_CPU_NODE_V2 graph_uid={graph_uid} "
+        f"graph_owner={graph_owner} backend_index={backend_index} "
+        f"device_type={device_type} ordinal={ordinal} op={op} "
+        f"name_len={len(node_name)} name_hex={node_name.hex()}\n"
+    ).encode()
+
+
+def _backend_failure_identity_marker_v2(
+    graph_uid: int,
+    *,
+    graph_owner: str = "text",
+    backend_index: int,
+    backend_name: str,
+    device_type: str,
+    compute: int,
+) -> bytes:
+    return (
+        f"IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid={graph_uid} "
+        f"graph_owner={graph_owner} backend_index={backend_index} "
+        f"backend_name={backend_name} device_name={backend_name} "
+        f"device_type={device_type} compute={compute}\n"
+    ).encode()
+
+
+def _backend_audit_v2_log() -> str:
+    return "\n".join(
+        (
+            "IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid=1 graph_owner=text "
+            "backend_index=0 backend_name=CUDA0 device_name=CUDA0 "
+            "device_type=gpu compute=7",
+            "IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid=1 graph_owner=text "
+            "backend_index=1 backend_name=CUDA1 device_name=CUDA1 "
+            "device_type=gpu compute=5",
+            "IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid=1 graph_owner=text "
+            "phase=post_assignment_pre_split scope=non_view_compute "
+            "compute=12 gpu=12 cpu=0 accel=0 other=0 unassigned=0",
+            "IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid=2 graph_owner=vision "
+            "backend_index=0 backend_name=CUDA0 device_name=CUDA0 "
+            "device_type=gpu compute=8",
+            "IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid=2 graph_owner=vision "
+            "phase=post_assignment_pre_split scope=non_view_compute "
+            "compute=8 gpu=8 cpu=0 accel=0 other=0 unassigned=0",
+            "IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid=3 graph_owner=audio "
+            "backend_index=0 backend_name=CUDA0 device_name=CUDA0 "
+            "device_type=gpu compute=6",
+            "IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid=3 graph_owner=audio "
+            "phase=post_assignment_pre_split scope=non_view_compute "
+            "compute=6 gpu=6 cpu=0 accel=0 other=0 unassigned=0",
+        )
+    )
+
+
+def test_backend_audit_v2_accepts_clean_text_vision_and_audio_graphs() -> None:
+    evidence = inkling_smoke.parse_backend_audit_evidence_v2(_backend_audit_v2_log())
+
+    assert evidence.schema_version == "inkling-backend-audit-v2"
+    assert evidence.observed_graphs == 3
+    assert evidence.compute_operations == evidence.gpu_operations == 26
+    assert tuple(row.graph_owner for row in evidence.graphs) == (
+        "text",
+        "vision",
+        "audio",
+    )
+    assert tuple(row.graph_owner for row in evidence.identities) == (
+        "text",
+        "text",
+        "vision",
+        "audio",
+    )
+    assert evidence.no_cpu_model_graph_fallback is True
+
+
+def test_backend_audit_v2_rejects_mixed_version_one_markers() -> None:
+    log_text = (
+        _backend_audit_v2_log() + "\nIQL_SMOKE_CPU_NODE_V1 graph_uid=99 ordinal=1 "
+        "op=MUL_MAT name=private_node"
+    )
+
+    with pytest.raises(ValueError):
+        inkling_smoke.parse_backend_audit_evidence_v2(log_text)
+
+
+@pytest.mark.parametrize(
+    "log_text",
+    (
+        _backend_audit_v2_log().replace(
+            "compute=12 gpu=12 cpu=0 accel=0 other=0 unassigned=0",
+            "compute=12 gpu=12 cpu=0 accel=0 other=0 unassigned=0 trailing=1",
+            1,
+        ),
+        _backend_audit_v2_log().replace(
+            "device_type=gpu compute=7",
+            "device_type=gpu compute=7 trailing=1",
+            1,
+        ),
+        _backend_audit_v2_log().replace("\n", " ", 1),
+    ),
+    ids=("graph-trailing-suffix", "identity-trailing-suffix", "two-markers-one-line"),
+)
+def test_backend_audit_v2_rejects_noncanonical_marker_lines(log_text: str) -> None:
+    with pytest.raises(ValueError):
+        inkling_smoke.parse_backend_audit_evidence_v2(log_text)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "match"),
+    (
+        (
+            "graph_uid=2 graph_owner=vision",
+            "graph_uid=2 graph_owner=unknown",
+            "unknown",
+        ),
+        (
+            "graph_uid=2 graph_owner=vision backend_index=0",
+            "graph_uid=2 graph_owner=audio backend_index=0",
+            "owner",
+        ),
+    ),
+    ids=("unknown-owner", "graph-identity-owner-mismatch"),
+)
+def test_backend_audit_v2_rejects_unknown_or_mismatched_graph_owner(
+    old: str,
+    new: str,
+    match: str,
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        inkling_smoke.parse_backend_audit_evidence_v2(_backend_audit_v2_log().replace(old, new, 1))
+
+
+def test_backend_failure_v2_decodes_lowercase_hex_and_redacts_node_name() -> None:
+    node_name = b"private node:\x00\nIQL_SMOKE_BACKEND_GRAPH_V2"
+    accumulator = inkling_smoke.BackendFailureDiagnosticAccumulatorV2()
+    accumulator.observe_line(b"ggml: " + _backend_failure_cpu_marker_v2(19, node_name=node_name))
+    accumulator.observe_line(
+        _backend_failure_identity_marker_v2(
+            19,
+            backend_index=0,
+            backend_name="CUDA0",
+            device_type="gpu",
+            compute=11,
+        )
+    )
+    accumulator.observe_line(
+        _backend_failure_identity_marker_v2(
+            19,
+            backend_index=2,
+            backend_name="CPU",
+            device_type="cpu",
+            compute=1,
+        )
+    )
+    accumulator.observe_line(b"ggml: " + _backend_failure_graph_marker_v2(19))
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is False
+    assert isinstance(diagnostic, inkling_smoke.BackendFailureDiagnosticV2)
+    assert diagnostic.cpu_model_graph_fallback_observed is True
+    assert isinstance(
+        diagnostic.affected_graphs[0],
+        inkling_smoke.BackendFailureGraphDiagnosticV2,
+    )
+    assert isinstance(
+        diagnostic.cpu_node_samples[0],
+        inkling_smoke.BackendFailureCpuNodeDiagnosticV2,
+    )
+    proof = diagnostic.first_cpu_placement_proof
+    assert isinstance(proof, inkling_smoke.BackendCpuPlacementProofV1)
+    assert proof.graph_uid == 19
+    assert proof.graph_owner == "text"
+    assert proof.backend_index == 2
+    assert proof.device_type == "cpu"
+    assert proof.ordinal == 7
+    assert proof.op == "MUL_MAT"
+    assert proof.node_name_size_bytes == len(node_name)
+    assert proof.node_name_sha256 == hashlib.sha256(node_name).hexdigest()
+    assert proof.node_name_recorded is False
+    assert proof.graph_corroborated is True
+    serialized = diagnostic.model_dump_json()
+    assert "private node" not in serialized
+    assert "IQL_SMOKE_BACKEND_GRAPH_V2" not in serialized
+    assert node_name.hex() not in serialized
+    assert "IQL_SMOKE_CPU_NODE_V2" not in serialized
+
+
+@pytest.mark.parametrize(
+    "line",
+    (
+        (
+            b"IQL_SMOKE_CPU_NODE_V2 graph_uid=1 graph_owner=text "
+            b"backend_index=2 device_type=cpu ordinal=7 op=MUL_MAT "
+            b"name_len=2 name_hex=zzzz\n"
+        ),
+        (
+            b"IQL_SMOKE_CPU_NODE_V2 graph_uid=1 graph_owner=text "
+            b"backend_index=2 device_type=cpu ordinal=7 op=MUL_MAT "
+            b"name_len=2 name_hex=ABCD\n"
+        ),
+        (
+            b"IQL_SMOKE_CPU_NODE_V2 graph_uid=1 graph_owner=text "
+            b"backend_index=2 device_type=cpu ordinal=7 op=MUL_MAT "
+            b"name_len=3 name_hex=6162\n"
+        ),
+    ),
+    ids=("non-hex", "uppercase-hex", "length-mismatch"),
+)
+def test_backend_failure_v2_rejects_malformed_name_hex(line: bytes) -> None:
+    accumulator = inkling_smoke.BackendFailureDiagnosticAccumulatorV2()
+    accumulator.observe_line(line)
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is True
+    assert diagnostic.cpu_model_graph_fallback_observed is False
+    assert diagnostic.first_cpu_placement_proof is None
+
+
+def test_backend_failure_v2_keeps_first_cpu_proof_after_malformed_suffix() -> None:
+    accumulator = inkling_smoke.BackendFailureDiagnosticAccumulatorV2()
+    accumulator.observe_line(_backend_failure_cpu_marker_v2(1, node_name=b"first"))
+    accumulator.observe_line(_backend_failure_graph_marker_v2(1))
+    accumulator.observe_line(b"IQL_SMOKE_CPU_NODE_V2 graph_uid=2 graph_owner=text malformed=1\n")
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is True
+    assert diagnostic.cpu_model_graph_fallback_observed is True
+    assert diagnostic.first_cpu_placement_proof is not None
+    assert diagnostic.first_cpu_placement_proof.graph_uid == 1
+    assert (
+        diagnostic.first_cpu_placement_proof.node_name_sha256
+        == hashlib.sha256(b"first").hexdigest()
+    )
+
+
+def test_backend_failure_v2_keeps_first_cpu_proof_after_record_truncation() -> None:
+    accumulator = inkling_smoke.BackendFailureDiagnosticAccumulatorV2()
+    accumulator.observe_line(_backend_failure_cpu_marker_v2(1, node_name=b"first"))
+    accumulator.observe_line(
+        _backend_failure_identity_marker_v2(
+            1,
+            backend_index=0,
+            backend_name="CUDA0",
+            device_type="gpu",
+            compute=11,
+        )
+    )
+    accumulator.observe_line(
+        _backend_failure_identity_marker_v2(
+            1,
+            backend_index=2,
+            backend_name="CPU",
+            device_type="cpu",
+            compute=1,
+        )
+    )
+    accumulator.observe_line(_backend_failure_graph_marker_v2(1))
+    for graph_uid in range(2, MAX_BACKEND_FAILURE_RECORDS + 3):
+        accumulator.observe_line(
+            _backend_failure_cpu_marker_v2(
+                graph_uid,
+                ordinal=graph_uid,
+                node_name=f"node-{graph_uid}".encode(),
+            )
+        )
+        accumulator.observe_line(
+            _backend_failure_identity_marker_v2(
+                graph_uid,
+                backend_index=0,
+                backend_name="CUDA0",
+                device_type="gpu",
+                compute=11,
+            )
+        )
+        accumulator.observe_line(
+            _backend_failure_identity_marker_v2(
+                graph_uid,
+                backend_index=2,
+                backend_name="CPU",
+                device_type="cpu",
+                compute=1,
+            )
+        )
+        accumulator.observe_line(_backend_failure_graph_marker_v2(graph_uid))
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is False
+    assert diagnostic.records_truncated is True
+    assert diagnostic.cpu_model_graph_fallback_observed is True
+    assert diagnostic.first_cpu_placement_proof is not None
+    assert diagnostic.first_cpu_placement_proof.graph_uid == 1
+    assert (
+        diagnostic.first_cpu_placement_proof.node_name_sha256
+        == hashlib.sha256(b"first").hexdigest()
+    )
+
+
+def test_backend_failure_v2_finds_valid_cpu_proof_after_malformed_prefix() -> None:
+    accumulator = inkling_smoke.BackendFailureDiagnosticAccumulatorV2()
+    accumulator.observe_line(
+        b"IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid=0 graph_owner=unknown malformed=1\n"
+    )
+    accumulator.observe_line(_backend_failure_cpu_marker_v2(23, node_name=b"later"))
+    accumulator.observe_line(_backend_failure_graph_marker_v2(23))
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is True
+    assert diagnostic.cpu_model_graph_fallback_observed is True
+    assert diagnostic.first_cpu_placement_proof is not None
+    assert diagnostic.first_cpu_placement_proof.graph_uid == 23
+    assert diagnostic.first_cpu_placement_proof.graph_corroborated is True
+
+
+@pytest.mark.parametrize(
+    "marker",
+    inkling_smoke.BACKEND_FAILURE_PROTOCOL_CONTAMINATION_TOKENS_V2,
+    ids=("legacy-graph", "legacy-cpu-node", "legacy-identity"),
+)
+def test_backend_failure_v2_rejects_legacy_protocol_markers(marker: bytes) -> None:
+    accumulator = inkling_smoke.BackendFailureDiagnosticAccumulatorV2()
+    accumulator.observe_line(marker + b" ignored=1\n")
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is True
+    assert diagnostic.graph_marker_count == 0
+    assert diagnostic.identity_marker_count == 0
+    assert diagnostic.cpu_node_marker_count == 0
+    assert diagnostic.cpu_model_graph_fallback_observed is False
+    assert diagnostic.first_cpu_placement_proof is None
+
+
+def test_backend_failure_v2_keeps_cpu_proof_after_legacy_protocol_marker() -> None:
+    accumulator = inkling_smoke.BackendFailureDiagnosticAccumulatorV2()
+    accumulator.observe_line(_backend_failure_cpu_marker_v2(31, node_name=b"proof"))
+    accumulator.observe_line(
+        _backend_failure_identity_marker_v2(
+            31,
+            backend_index=0,
+            backend_name="CUDA0",
+            device_type="gpu",
+            compute=11,
+        )
+    )
+    accumulator.observe_line(
+        _backend_failure_identity_marker_v2(
+            31,
+            backend_index=2,
+            backend_name="CPU",
+            device_type="cpu",
+            compute=1,
+        )
+    )
+    accumulator.observe_line(_backend_failure_graph_marker_v2(31))
+    accumulator.observe_line(b"IQL_SMOKE_CPU_NODE_V1 graph_uid=31 ignored=1\n")
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is True
+    assert diagnostic.cpu_model_graph_fallback_observed is True
+    assert diagnostic.first_cpu_placement_proof is not None
+    assert diagnostic.first_cpu_placement_proof.graph_uid == 31
+    assert diagnostic.first_cpu_placement_proof.graph_corroborated is True
+
+
+def test_backend_failure_v2_keeps_uncorroborated_self_contained_cpu_proof() -> None:
+    accumulator = inkling_smoke.BackendFailureDiagnosticAccumulatorV2()
+    accumulator.observe_line(_backend_failure_cpu_marker_v2(29, node_name=b"proof"))
+
+    diagnostic, malformed = accumulator.finish()
+
+    assert malformed is True
+    assert diagnostic.cpu_model_graph_fallback_observed is True
+    assert diagnostic.first_cpu_placement_proof is not None
+    assert diagnostic.first_cpu_placement_proof.graph_uid == 29
+    assert diagnostic.first_cpu_placement_proof.graph_corroborated is False
+
+
+def test_owner_tagged_patch_contracts_all_scheduler_graphs_and_v2_markers() -> None:
+    patch_text = (PROJECT_ROOT / INSTRUMENTATION_PATCH_RELATIVE_PATH).read_text()
+    added_text = "\n".join(
+        line[1:]
+        for line in patch_text.splitlines()
+        if line.startswith("+") and not line.startswith("+++")
+    )
+
+    assert "diff --git a/ggml/include/ggml-backend.h" in patch_text
+    assert "diff --git a/src/llama-context.cpp" in patch_text
+    assert "GGML_BACKEND_SCHED_OWNER_UNKNOWN" in added_text
+    assert "GGML_BACKEND_SCHED_OWNER_TEXT" in added_text
+    assert "GGML_BACKEND_SCHED_OWNER_VISION" in added_text
+    assert "GGML_BACKEND_SCHED_OWNER_AUDIO" in added_text
+    assert added_text.count("ggml_backend_sched_set_owner") >= 4
+    assert "sched->iql_owner = GGML_BACKEND_SCHED_OWNER_UNKNOWN;" in added_text
+    assert "IQL_SMOKE_BACKEND_GRAPH_V2" in added_text
+    assert "IQL_SMOKE_BACKEND_IDENTITY_V2" in added_text
+    assert "IQL_SMOKE_CPU_NODE_V2" in added_text
+    assert "graph_owner=" in added_text
+    assert "backend_index=" in added_text
+    assert "device_type=" in added_text
+    assert "name_len=" in added_text
+    assert "name_hex=" in added_text
+    assert "IQL_SMOKE_BACKEND_GRAPH_V1" not in added_text
+    assert "IQL_SMOKE_BACKEND_IDENTITY_V1" not in added_text
+    assert "IQL_SMOKE_CPU_NODE_V1" not in added_text
 
 
 def test_backend_audit_requires_compute_on_both_cuda_devices() -> None:
