@@ -43,7 +43,7 @@ PINNED_LLAMA_CPP_COMMIT: Final = "a015409e6c27b84f60d688823d4c0126a11571fd"
 PINNED_VOCAB_SIZE: Final = 201_024
 PINNED_UNPADDED_VOCAB_SIZE: Final = 200_058
 PINNED_PADDED_VOCAB_SIZE: Final = PINNED_VOCAB_SIZE - PINNED_UNPADDED_VOCAB_SIZE
-INSTRUMENTATION_SCHEMA_VERSION: Final = "inkling-llama-smoke-instrumentation-v2"
+INSTRUMENTATION_SCHEMA_VERSION: Final = "inkling-llama-smoke-instrumentation-v3"
 INSTRUMENTATION_PATCH_RELATIVE_PATH: Final = "patches/inkling-smoke-a015409.patch"
 HISTORICAL_INSTRUMENTATION_PATCH_SHA256: Final = (
     "b276d12a4af96c803b71fee6f7be91c230b0fb30b6be04637f61f33d07b10ecf"
@@ -51,8 +51,11 @@ HISTORICAL_INSTRUMENTATION_PATCH_SHA256: Final = (
 LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256: Final = (
     "301023aea3a19533710e122fbbd55378bf19c2562bd885fa85b58f9d4ea110cb"
 )
-INSTRUMENTATION_PATCH_SHA256: Final = (
+PRE_OWNER_INSTRUMENTATION_PATCH_SHA256: Final = (
     "0f824d7a77b0e98816e6d62f982b010caada15f8a93a20343d5cc0d129bcca20"
+)
+INSTRUMENTATION_PATCH_SHA256: Final = (
+    "a5510130b39c2f2073320e44973f5414a69d8e7d38e525bac0bb2dde60a1d31b"
 )
 
 SUBJECT_RUN_ID: Final = "inkling-q3km-86b4d430-a015409e-ffd466dd93-8083cf41e1"
@@ -155,6 +158,28 @@ _CPU_NODE_RE: Final = re.compile(
     rf"{_CPU_NODE_MARKER} graph_uid=([0-9]+) ordinal=(-?[0-9]+) "
     r"op=([^\s]+) name=([^\s]*)"
 )
+_BACKEND_GRAPH_MARKER_V2: Final = "IQL_SMOKE_BACKEND_GRAPH_V2"
+_BACKEND_GRAPH_RE_V2: Final = re.compile(
+    rf"{_BACKEND_GRAPH_MARKER_V2} graph_uid=([0-9]+) "
+    r"graph_owner=(text|vision|audio|unknown) "
+    r"phase=(post_assignment_pre_split) scope=(non_view_compute) "
+    r"compute=([0-9]+) gpu=([0-9]+) cpu=([0-9]+) accel=([0-9]+) "
+    r"other=([0-9]+) unassigned=([0-9]+)"
+)
+_BACKEND_IDENTITY_MARKER_V2: Final = "IQL_SMOKE_BACKEND_IDENTITY_V2"
+_BACKEND_IDENTITY_RE_V2: Final = re.compile(
+    rf"{_BACKEND_IDENTITY_MARKER_V2} graph_uid=([0-9]+) "
+    r"graph_owner=(text|vision|audio|unknown) backend_index=(-?[0-9]+) "
+    r"backend_name=([^\s]+) device_name=([^\s]+) "
+    r"device_type=(cpu|gpu|igpu|accel|meta|unassigned) compute=([0-9]+)"
+)
+_CPU_NODE_MARKER_V2: Final = "IQL_SMOKE_CPU_NODE_V2"
+_CPU_NODE_RE_V2: Final = re.compile(
+    rf"{_CPU_NODE_MARKER_V2} graph_uid=([0-9]+) "
+    r"graph_owner=(text|vision|audio|unknown) backend_index=(-?[0-9]+) "
+    r"device_type=(cpu|gpu|igpu|accel|meta|unassigned) ordinal=(-?[0-9]+) "
+    r"op=([^\s]+) name_len=([0-9]+) name_hex=([0-9a-f]*)"
+)
 MAX_BACKEND_FAILURE_RECORDS: Final = 64
 MAX_BACKEND_FAILURE_LINE_BYTES: Final = 4_096
 MAX_BACKEND_FAILURE_OP_BYTES: Final = 64
@@ -162,6 +187,16 @@ _MAX_BACKEND_FAILURE_GRAPH_IDENTITIES: Final = 8_192
 BACKEND_FAILURE_MARKER_TOKENS: Final[tuple[bytes, bytes]] = (
     _BACKEND_GRAPH_MARKER.encode("ascii"),
     _CPU_NODE_MARKER.encode("ascii"),
+)
+BACKEND_FAILURE_MARKER_TOKENS_V2: Final[tuple[bytes, bytes, bytes]] = (
+    _BACKEND_GRAPH_MARKER_V2.encode("ascii"),
+    _CPU_NODE_MARKER_V2.encode("ascii"),
+    _BACKEND_IDENTITY_MARKER_V2.encode("ascii"),
+)
+BACKEND_FAILURE_PROTOCOL_CONTAMINATION_TOKENS_V2: Final[tuple[bytes, bytes, bytes]] = (
+    _BACKEND_GRAPH_MARKER.encode("ascii"),
+    _CPU_NODE_MARKER.encode("ascii"),
+    _BACKEND_IDENTITY_MARKER.encode("ascii"),
 )
 
 
@@ -183,6 +218,25 @@ _BACKEND_FAILURE_GRAPH_LINE_RE: Final = re.compile(
 _BACKEND_FAILURE_CPU_NODE_LINE_RE: Final = re.compile(
     rb"IQL_SMOKE_CPU_NODE_V1 graph_uid=([0-9]+) ordinal=(-?[0-9]+) "
     rb"op=([^\s]+) name=([^\s]*)"
+)
+_BACKEND_FAILURE_GRAPH_LINE_RE_V2: Final = re.compile(
+    rb"IQL_SMOKE_BACKEND_GRAPH_V2 graph_uid=([0-9]+) "
+    rb"graph_owner=(text|vision|audio|unknown) "
+    rb"phase=(post_assignment_pre_split) scope=(non_view_compute) "
+    rb"compute=([0-9]+) gpu=([0-9]+) cpu=([0-9]+) accel=([0-9]+) "
+    rb"other=([0-9]+) unassigned=([0-9]+)"
+)
+_BACKEND_FAILURE_CPU_NODE_LINE_RE_V2: Final = re.compile(
+    rb"IQL_SMOKE_CPU_NODE_V2 graph_uid=([0-9]+) "
+    rb"graph_owner=(text|vision|audio|unknown) backend_index=(-?[0-9]+) "
+    rb"device_type=(cpu|gpu|igpu|accel|meta|unassigned) ordinal=(-?[0-9]+) "
+    rb"op=([^\s]+) name_len=([0-9]+) name_hex=([0-9a-f]*)"
+)
+_BACKEND_FAILURE_IDENTITY_LINE_RE_V2: Final = re.compile(
+    rb"IQL_SMOKE_BACKEND_IDENTITY_V2 graph_uid=([0-9]+) "
+    rb"graph_owner=(text|vision|audio|unknown) backend_index=(-?[0-9]+) "
+    rb"backend_name=([^\s]+) device_name=([^\s]+) "
+    rb"device_type=(cpu|gpu|igpu|accel|meta|unassigned) compute=([0-9]+)"
 )
 _FIRST_SHARD_LOAD_RE: Final = re.compile(
     r"llama_model_loader: loaded meta data with [^\n]* from ([^\s]+)"
@@ -405,12 +459,14 @@ class SmokeRuntimeConfig(StrictFrozenModel):
     instrumentation_schema_version: Literal[
         "inkling-llama-smoke-instrumentation-v1",
         "inkling-llama-smoke-instrumentation-v2",
+        "inkling-llama-smoke-instrumentation-v3",
     ]
     instrumentation_patch_path: Literal["patches/inkling-smoke-a015409.patch"]
     instrumentation_patch_sha256: Literal[
         "b276d12a4af96c803b71fee6f7be91c230b0fb30b6be04637f61f33d07b10ecf",
         "301023aea3a19533710e122fbbd55378bf19c2562bd885fa85b58f9d4ea110cb",
         "0f824d7a77b0e98816e6d62f982b010caada15f8a93a20343d5cc0d129bcca20",
+        "a5510130b39c2f2073320e44973f5414a69d8e7d38e525bac0bb2dde60a1d31b",
     ]
     image: SmokeCudaImageConfig
     build_targets: tuple[str, ...]
@@ -431,18 +487,21 @@ class SmokeRuntimeConfig(StrictFrozenModel):
             raise ValueError("smoke build targets must equal the checked executable set")
         if self.cmake_definitions != _EXPECTED_CMAKE_DEFINITIONS:
             raise ValueError("smoke CMake definitions must target B300 compute capability 10.3")
-        legacy_patch_hashes = {
+        version_one_patch_hashes = {
             HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
             LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
         }
-        if self.instrumentation_patch_sha256 in legacy_patch_hashes:
+        if self.instrumentation_patch_sha256 in version_one_patch_hashes:
             if self.instrumentation_schema_version != "inkling-llama-smoke-instrumentation-v1":
-                raise ValueError("legacy instrumentation patches require schema version 1")
+                raise ValueError("version 1 instrumentation patches require schema version 1")
+        elif self.instrumentation_patch_sha256 == PRE_OWNER_INSTRUMENTATION_PATCH_SHA256:
+            if self.instrumentation_schema_version != "inkling-llama-smoke-instrumentation-v2":
+                raise ValueError("pre-owner instrumentation patch requires schema version 2")
         elif (
             self.instrumentation_patch_sha256 != INSTRUMENTATION_PATCH_SHA256
             or self.instrumentation_schema_version != INSTRUMENTATION_SCHEMA_VERSION
         ):
-            raise ValueError("current instrumentation patch requires schema version 2")
+            raise ValueError("current instrumentation patch requires schema version 3")
         return self
 
 
@@ -563,7 +622,11 @@ class SmokeOutputVocabularyConfig(StrictFrozenModel):
 class InklingSmokeConfig(StrictFrozenModel):
     """Checked pure-data plan for the first real Inkling inference smoke test."""
 
-    schema_version: Literal["inkling-smoke-config-v1", "inkling-smoke-config-v2"]
+    schema_version: Literal[
+        "inkling-smoke-config-v1",
+        "inkling-smoke-config-v2",
+        "inkling-smoke-config-v3",
+    ]
     verified_export_reference_path: Literal[
         "configs/experiments/inkling_q3_k_m_verified_export.json"
     ]
@@ -587,11 +650,18 @@ class InklingSmokeConfig(StrictFrozenModel):
                 "inkling-llama-smoke-instrumentation-v1"
             ):
                 raise ValueError("smoke config version 1 requires instrumentation version 1")
-        else:
+        elif self.schema_version == "inkling-smoke-config-v2":
             if self.output_vocabulary is None:
                 raise ValueError("smoke config version 2 requires output vocabulary")
-            if self.runtime.instrumentation_schema_version != INSTRUMENTATION_SCHEMA_VERSION:
+            if self.runtime.instrumentation_schema_version != (
+                "inkling-llama-smoke-instrumentation-v2"
+            ):
                 raise ValueError("smoke config version 2 requires instrumentation version 2")
+        else:
+            if self.output_vocabulary is None:
+                raise ValueError("smoke config version 3 requires output vocabulary")
+            if self.runtime.instrumentation_schema_version != INSTRUMENTATION_SCHEMA_VERSION:
+                raise ValueError("smoke config version 3 requires instrumentation version 3")
         expected_probe_identity = (
             ("text_greedy_v1", "text"),
             ("image_greedy_v1", "image"),
@@ -1074,6 +1144,162 @@ class BackendAuditEvidence(StrictFrozenModel):
         return self
 
 
+BackendGraphOwnerV2: TypeAlias = Literal["text", "vision", "audio", "unknown"]
+
+
+class BackendGraphAuditRowV2(StrictFrozenModel):
+    """One owner-tagged scheduler graph after backend assignment."""
+
+    graph_uid: int = Field(gt=0)
+    graph_owner: BackendGraphOwnerV2
+    phase: Literal["post_assignment_pre_split"]
+    scope: Literal["non_view_compute"]
+    compute: int = Field(gt=0)
+    gpu: int = Field(gt=0)
+    cpu: Literal[0]
+    accel: int = Field(ge=0)
+    other: Literal[0]
+    unassigned: Literal[0]
+
+    @model_validator(mode="after")
+    def exact_assignment(self) -> BackendGraphAuditRowV2:
+        if self.compute != self.gpu + self.cpu + self.accel + self.other + self.unassigned:
+            raise ValueError("backend graph category counts do not equal its compute count")
+        if self.compute != self.gpu + self.accel:
+            raise ValueError("backend graph contains a non-accelerated compute operation")
+        return self
+
+
+class BackendIdentityAuditRowV2(StrictFrozenModel):
+    """One owner-tagged backend identity used by one audited graph."""
+
+    graph_uid: int = Field(gt=0)
+    graph_owner: BackendGraphOwnerV2
+    backend_index: int = Field(ge=0)
+    backend_name: str = Field(min_length=1)
+    device_name: str = Field(min_length=1)
+    device_type: Literal["cpu", "gpu", "igpu", "accel", "meta", "unassigned"]
+    compute: int = Field(gt=0)
+
+    @field_validator("backend_name", "device_name")
+    @classmethod
+    def marker_identifier_is_canonical(cls, value: str) -> str:
+        if "\x00" in value or any(character.isspace() for character in value):
+            raise ValueError("backend marker identifiers must be non-whitespace text")
+        return value
+
+
+class BackendAuditEvidenceV2(StrictFrozenModel):
+    """Complete owner-tagged placement evidence from all inference schedulers."""
+
+    schema_version: Literal["inkling-backend-audit-v2"] = "inkling-backend-audit-v2"
+    observed_graphs: int = Field(gt=0)
+    compute_operations: int = Field(gt=0)
+    gpu_operations: int = Field(gt=0)
+    accelerator_operations: int = Field(ge=0)
+    cpu_operations: Literal[0]
+    other_operations: Literal[0]
+    unassigned_operations: Literal[0]
+    graphs: tuple[BackendGraphAuditRowV2, ...]
+    identities: tuple[BackendIdentityAuditRowV2, ...]
+    all_compute_operations_accelerated: Literal[True] = True
+    no_cpu_model_graph_fallback: Literal[True] = True
+
+    @model_validator(mode="after")
+    def exact_accelerator_placement(self) -> BackendAuditEvidenceV2:
+        if self.observed_graphs != len(self.graphs):
+            raise ValueError("backend graph count differs from its graph records")
+        graph_uids = tuple(row.graph_uid for row in self.graphs)
+        if len(graph_uids) != len(set(graph_uids)):
+            raise ValueError("backend audit contains duplicate graph identities")
+        if any(row.graph_owner == "unknown" for row in self.graphs):
+            raise ValueError("backend audit contains an unknown graph owner")
+        if {row.graph_owner for row in self.graphs} != {"text", "vision", "audio"}:
+            raise ValueError("backend audit does not cover text, vision, and audio graph owners")
+
+        identity_keys = tuple((row.graph_uid, row.backend_index) for row in self.identities)
+        if len(identity_keys) != len(set(identity_keys)):
+            raise ValueError("backend audit contains duplicate backend identities")
+        if set(row.graph_uid for row in self.identities) != set(graph_uids):
+            raise ValueError("backend identities do not cover the exact graph set")
+        if any(row.graph_owner == "unknown" for row in self.identities):
+            raise ValueError("backend identity contains an unknown graph owner")
+        if any(row.device_type != "gpu" for row in self.identities):
+            raise ValueError("backend audit used a non-CUDA accelerator")
+
+        cuda0_identity = (0, "CUDA0", "CUDA0")
+        expected_cuda_identities = {
+            cuda0_identity,
+            (1, "CUDA1", "CUDA1"),
+        }
+        observed_dual_cuda_graph = False
+        category_totals = {
+            "gpu": 0,
+            "cpu": 0,
+            "accel": 0,
+            "other": 0,
+            "unassigned": 0,
+        }
+        for graph in self.graphs:
+            graph_identities = tuple(
+                row for row in self.identities if row.graph_uid == graph.graph_uid
+            )
+            if any(row.graph_owner != graph.graph_owner for row in graph_identities):
+                raise ValueError("backend graph and identity owner fields differ")
+            observed_cuda_identities = {
+                (row.backend_index, row.backend_name, row.device_name) for row in graph_identities
+            }
+            if (
+                len(graph_identities) != len(observed_cuda_identities)
+                or not observed_cuda_identities.issubset(expected_cuda_identities)
+                or cuda0_identity not in observed_cuda_identities
+            ):
+                raise ValueError(
+                    "backend graph does not prove the exact CUDA index and device identities"
+                )
+            observed_dual_cuda_graph |= observed_cuda_identities == expected_cuda_identities
+            if sum(row.compute for row in graph_identities) != graph.compute:
+                raise ValueError("backend identity counts do not equal graph compute count")
+            observed = {name: 0 for name in category_totals}
+            for identity in graph_identities:
+                category = {
+                    "gpu": "gpu",
+                    "igpu": "gpu",
+                    "accel": "accel",
+                    "cpu": "cpu",
+                    "meta": "other",
+                    "unassigned": "unassigned",
+                }[identity.device_type]
+                observed[category] += identity.compute
+                category_totals[category] += identity.compute
+            expected = {
+                "gpu": graph.gpu,
+                "cpu": graph.cpu,
+                "accel": graph.accel,
+                "other": graph.other,
+                "unassigned": graph.unassigned,
+            }
+            if observed != expected:
+                raise ValueError("backend identities disagree with graph category counts")
+
+        aggregate = {
+            "gpu": self.gpu_operations,
+            "cpu": self.cpu_operations,
+            "accel": self.accelerator_operations,
+            "other": self.other_operations,
+            "unassigned": self.unassigned_operations,
+        }
+        if category_totals != aggregate:
+            raise ValueError("backend aggregate counts differ from graph evidence")
+        if sum(graph.compute for graph in self.graphs) != self.compute_operations:
+            raise ValueError("backend aggregate compute count differs from graph evidence")
+        if self.gpu_operations + self.accelerator_operations != self.compute_operations:
+            raise ValueError("backend audit observed a non-accelerated compute operation")
+        if not observed_dual_cuda_graph:
+            raise ValueError("backend audit does not prove one exact dual-CUDA graph")
+        return self
+
+
 class BackendCpuPlacementError(ValueError):
     """A valid runtime marker proves that a model graph operation used the CPU."""
 
@@ -1364,6 +1590,583 @@ class BackendFailureDiagnosticAccumulator:
         return diagnostic, self._malformed
 
 
+class BackendFailureGraphDiagnosticV2(StrictFrozenModel):
+    """Sanitized counters for one owner-tagged graph that used the CPU."""
+
+    graph_uid: StrictInt = Field(gt=0)
+    graph_owner: Literal["text", "vision", "audio"]
+    phase: Literal["post_assignment_pre_split"]
+    scope: Literal["non_view_compute"]
+    compute: StrictInt = Field(gt=0)
+    gpu: StrictInt = Field(ge=0)
+    cpu: StrictInt = Field(gt=0)
+    accel: StrictInt = Field(ge=0)
+    other: StrictInt = Field(ge=0)
+    unassigned: StrictInt = Field(ge=0)
+
+    @model_validator(mode="after")
+    def exact_category_count(self) -> BackendFailureGraphDiagnosticV2:
+        if self.compute != self.gpu + self.cpu + self.accel + self.other + self.unassigned:
+            raise ValueError("backend failure graph counters do not equal its compute count")
+        return self
+
+
+class BackendFailureCpuNodeDiagnosticV2(StrictFrozenModel):
+    """One self-contained CPU operation with its node name removed."""
+
+    graph_uid: StrictInt = Field(gt=0)
+    graph_owner: Literal["text", "vision", "audio"]
+    backend_index: StrictInt = Field(ge=0)
+    device_type: Literal["cpu"]
+    ordinal: StrictInt = Field(ge=0)
+    op: str = Field(
+        min_length=1,
+        max_length=MAX_BACKEND_FAILURE_OP_BYTES,
+        pattern=r"^[A-Za-z0-9_.:+/\-]+$",
+    )
+    node_name_size_bytes: StrictInt = Field(ge=0, le=MAX_BACKEND_FAILURE_LINE_BYTES)
+    node_name_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    node_name_recorded: _RequiredFalse
+
+
+class BackendCpuPlacementProofV1(StrictFrozenModel):
+    """The first valid self-contained proof that a model operation used the CPU."""
+
+    schema_version: Literal["inkling-smoke-backend-cpu-placement-proof-v1"] = (
+        "inkling-smoke-backend-cpu-placement-proof-v1"
+    )
+    graph_uid: StrictInt = Field(gt=0)
+    graph_owner: Literal["text", "vision", "audio"]
+    backend_index: StrictInt = Field(ge=0)
+    device_type: Literal["cpu"]
+    ordinal: StrictInt = Field(ge=0)
+    op: str = Field(
+        min_length=1,
+        max_length=MAX_BACKEND_FAILURE_OP_BYTES,
+        pattern=r"^[A-Za-z0-9_.:+/\-]+$",
+    )
+    node_name_size_bytes: StrictInt = Field(ge=0, le=MAX_BACKEND_FAILURE_LINE_BYTES)
+    node_name_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    node_name_recorded: _RequiredFalse
+    graph_corroborated: StrictBool
+
+
+class BackendFailureDiagnosticV2(StrictFrozenModel):
+    """Bounded owner-tagged diagnostics that keep the first positive CPU proof."""
+
+    schema_version: Literal["inkling-smoke-backend-failure-v2"] = "inkling-smoke-backend-failure-v2"
+    cpu_model_graph_fallback_observed: StrictBool
+    graph_marker_count: StrictInt = Field(ge=0)
+    identity_marker_count: StrictInt = Field(ge=0)
+    affected_graph_marker_count: StrictInt = Field(ge=0)
+    cpu_node_marker_count: StrictInt = Field(ge=0)
+    affected_graphs: tuple[BackendFailureGraphDiagnosticV2, ...] = Field(
+        max_length=MAX_BACKEND_FAILURE_RECORDS
+    )
+    cpu_node_samples: tuple[BackendFailureCpuNodeDiagnosticV2, ...] = Field(
+        max_length=MAX_BACKEND_FAILURE_RECORDS
+    )
+    first_cpu_placement_proof: BackendCpuPlacementProofV1 | None
+    records_truncated: StrictBool
+    raw_marker_lines_recorded: _RequiredFalse
+    raw_node_names_recorded: _RequiredFalse
+
+    @model_validator(mode="after")
+    def exact_sanitized_relationships(self) -> BackendFailureDiagnosticV2:
+        graph_keys = tuple((row.graph_uid, row.graph_owner) for row in self.affected_graphs)
+        if len(graph_keys) != len(set(graph_keys)):
+            raise ValueError("backend failure diagnostic contains duplicate graph identities")
+        sample_keys = tuple(
+            (row.graph_uid, row.graph_owner, row.ordinal) for row in self.cpu_node_samples
+        )
+        if len(sample_keys) != len(set(sample_keys)):
+            raise ValueError("backend failure diagnostic contains duplicate CPU-node identities")
+        if self.affected_graph_marker_count > self.graph_marker_count:
+            raise ValueError("affected backend graph count exceeds the total graph count")
+        if self.graph_marker_count < len(self.affected_graphs):
+            raise ValueError("backend failure graph count is smaller than its retained records")
+        if self.affected_graph_marker_count < len(self.affected_graphs):
+            raise ValueError("affected backend graph count is smaller than its retained records")
+        if self.cpu_node_marker_count < len(self.cpu_node_samples):
+            raise ValueError("backend failure CPU-node count is smaller than its retained samples")
+        expected_truncation = (
+            self.affected_graph_marker_count > MAX_BACKEND_FAILURE_RECORDS
+            or self.cpu_node_marker_count > MAX_BACKEND_FAILURE_RECORDS
+        )
+        if self.records_truncated != expected_truncation:
+            raise ValueError(
+                "backend diagnostic records_truncated differs from retained-record counts"
+            )
+
+        proof = self.first_cpu_placement_proof
+        if self.cpu_model_graph_fallback_observed != (proof is not None):
+            raise ValueError("backend CPU fallback result differs from its first CPU proof")
+        if proof is None:
+            return self
+        if not self.cpu_node_samples:
+            raise ValueError("first CPU proof lacks its retained sanitized sample")
+        first_sample = self.cpu_node_samples[0]
+        shared_fields = (
+            "graph_uid",
+            "graph_owner",
+            "backend_index",
+            "device_type",
+            "ordinal",
+            "op",
+            "node_name_size_bytes",
+            "node_name_sha256",
+            "node_name_recorded",
+        )
+        if any(getattr(proof, field) != getattr(first_sample, field) for field in shared_fields):
+            raise ValueError("first CPU proof differs from its first retained sample")
+        corroborating_graph = next(
+            (
+                graph
+                for graph in self.affected_graphs
+                if (graph.graph_uid, graph.graph_owner) == (proof.graph_uid, proof.graph_owner)
+            ),
+            None,
+        )
+        if proof.graph_corroborated != (corroborating_graph is not None):
+            raise ValueError("first CPU proof graph corroboration differs from graph evidence")
+        return self
+
+
+class BackendFailureDiagnosticAccumulatorV2:
+    """Scan V2 markers and keep the first valid CPU proof monotonically."""
+
+    def __init__(self) -> None:
+        self._malformed = False
+        self._graph_marker_count = 0
+        self._identity_marker_count = 0
+        self._affected_graph_marker_count = 0
+        self._cpu_node_marker_count = 0
+        self._seen_graph_uids: set[int] = set()
+        self._graph_rows: dict[int, tuple[str, int, int, int, int, int]] = {}
+        self._seen_identity_keys: set[tuple[int, int]] = set()
+        self._identity_owners: dict[int, str] = {}
+        self._identity_category_counts: dict[int, dict[str, int]] = {}
+        self._identity_devices: dict[tuple[int, int], tuple[str, str]] = {}
+        self._cpu_owners: dict[int, str] = {}
+        self._cpu_backends: dict[tuple[int, int], str] = {}
+        self._seen_cpu_node_keys: set[tuple[int, str, int]] = set()
+        self._affected_graphs: list[BackendFailureGraphDiagnosticV2] = []
+        self._cpu_node_samples: list[BackendFailureCpuNodeDiagnosticV2] = []
+        self._first_cpu_placement_proof: BackendCpuPlacementProofV1 | None = None
+
+    def mark_malformed(self) -> None:
+        """Mark the full scan as inconclusive without deleting positive proof."""
+
+        self._malformed = True
+
+    def observe_protocol_contamination(self, *, marker_count: int) -> None:
+        """Reject legacy markers without adding them to V2 evidence counts."""
+
+        if type(marker_count) is not int or marker_count <= 0:
+            raise ValueError("protocol contamination marker count must be a positive integer")
+        self.mark_malformed()
+
+    def observe_unparsed_marker_counts(
+        self,
+        *,
+        graph_marker_count: int,
+        cpu_node_marker_count: int,
+        identity_marker_count: int = 0,
+    ) -> None:
+        """Count markers in an overlong line without retaining the line."""
+
+        counts = (graph_marker_count, cpu_node_marker_count, identity_marker_count)
+        if any(type(count) is not int or count < 0 for count in counts):
+            raise TypeError("unparsed backend marker counts must be nonnegative integers")
+        if graph_marker_count + cpu_node_marker_count + identity_marker_count == 0:
+            raise ValueError("unparsed backend marker counts must contain one marker")
+        self._graph_marker_count += graph_marker_count
+        self._cpu_node_marker_count += cpu_node_marker_count
+        self._identity_marker_count += identity_marker_count
+        self.mark_malformed()
+
+    def observe_line(self, line: bytes) -> None:
+        """Consume one complete V2 line and retain only fixed safe fields."""
+
+        if not isinstance(line, bytes):
+            raise TypeError("backend failure diagnostic lines must be bytes")
+        graph_tokens = line.count(BACKEND_FAILURE_MARKER_TOKENS_V2[0])
+        cpu_tokens = line.count(BACKEND_FAILURE_MARKER_TOKENS_V2[1])
+        identity_tokens = line.count(BACKEND_FAILURE_MARKER_TOKENS_V2[2])
+        contamination_tokens = sum(
+            line.count(marker) for marker in BACKEND_FAILURE_PROTOCOL_CONTAMINATION_TOKENS_V2
+        )
+        self._graph_marker_count += graph_tokens
+        self._cpu_node_marker_count += cpu_tokens
+        self._identity_marker_count += identity_tokens
+        marker_tokens = graph_tokens + cpu_tokens + identity_tokens
+        if contamination_tokens:
+            self.observe_protocol_contamination(marker_count=contamination_tokens)
+        if marker_tokens == 0:
+            return
+        if (
+            len(line) > MAX_BACKEND_FAILURE_LINE_BYTES
+            or marker_tokens + contamination_tokens != 1
+            or b"\n" in line[:-1]
+            or b"\r" in line
+        ):
+            self.mark_malformed()
+            return
+
+        complete_line = line[:-1] if line.endswith(b"\n") else line
+        if graph_tokens:
+            marker_start = complete_line.find(BACKEND_FAILURE_MARKER_TOKENS_V2[0])
+            match = _BACKEND_FAILURE_GRAPH_LINE_RE_V2.fullmatch(complete_line[marker_start:])
+            if match is None:
+                self.mark_malformed()
+                return
+            self._observe_graph_match(match.groups())
+            return
+        if cpu_tokens:
+            marker_start = complete_line.find(BACKEND_FAILURE_MARKER_TOKENS_V2[1])
+            match = _BACKEND_FAILURE_CPU_NODE_LINE_RE_V2.fullmatch(complete_line[marker_start:])
+            if match is None:
+                self.mark_malformed()
+                return
+            self._observe_cpu_node_match(match.groups())
+            return
+        marker_start = complete_line.find(BACKEND_FAILURE_MARKER_TOKENS_V2[2])
+        match = _BACKEND_FAILURE_IDENTITY_LINE_RE_V2.fullmatch(complete_line[marker_start:])
+        if match is None:
+            self.mark_malformed()
+            return
+        self._observe_identity_match(match.groups())
+
+    def _observe_graph_match(self, groups: tuple[bytes, ...]) -> None:
+        try:
+            (
+                graph_uid_raw,
+                graph_owner_raw,
+                phase_raw,
+                scope_raw,
+                compute_raw,
+                gpu_raw,
+                cpu_raw,
+                accel_raw,
+                other_raw,
+                unassigned_raw,
+            ) = groups
+            graph_uid = int(graph_uid_raw)
+            graph_owner = graph_owner_raw.decode("ascii")
+            compute = int(compute_raw)
+            gpu = int(gpu_raw)
+            cpu = int(cpu_raw)
+            accel = int(accel_raw)
+            other = int(other_raw)
+            unassigned = int(unassigned_raw)
+            if (
+                graph_uid <= 0
+                or graph_owner == "unknown"
+                or compute <= 0
+                or compute != gpu + cpu + accel + other + unassigned
+            ):
+                raise ValueError("backend failure graph counters or owner are invalid")
+            if cpu > 0:
+                self._affected_graph_marker_count += 1
+            if graph_uid in self._seen_graph_uids:
+                self.mark_malformed()
+                return
+            if len(self._seen_graph_uids) >= _MAX_BACKEND_FAILURE_GRAPH_IDENTITIES:
+                self.mark_malformed()
+                return
+            self._seen_graph_uids.add(graph_uid)
+            self._graph_rows[graph_uid] = (
+                graph_owner,
+                gpu,
+                cpu,
+                accel,
+                other,
+                unassigned,
+            )
+            identity_owner = self._identity_owners.get(graph_uid)
+            if identity_owner is not None and identity_owner != graph_owner:
+                self.mark_malformed()
+            cpu_owner = self._cpu_owners.get(graph_uid)
+            if cpu_owner is not None and cpu_owner != graph_owner:
+                self.mark_malformed()
+            if cpu == 0:
+                return
+            graph = BackendFailureGraphDiagnosticV2(
+                graph_uid=graph_uid,
+                graph_owner=graph_owner,
+                phase=phase_raw.decode("ascii"),
+                scope=scope_raw.decode("ascii"),
+                compute=compute,
+                gpu=gpu,
+                cpu=cpu,
+                accel=accel,
+                other=other,
+                unassigned=unassigned,
+            )
+        except (UnicodeDecodeError, ValidationError, ValueError):
+            self.mark_malformed()
+            return
+        self._retain_affected_graph(graph)
+        proof = self._first_cpu_placement_proof
+        if proof is not None and proof.graph_uid == graph_uid:
+            if proof.graph_owner != graph.graph_owner:
+                self.mark_malformed()
+                return
+            self._first_cpu_placement_proof = proof.model_copy(update={"graph_corroborated": True})
+
+    def _retain_affected_graph(self, graph: BackendFailureGraphDiagnosticV2) -> None:
+        if len(self._affected_graphs) < MAX_BACKEND_FAILURE_RECORDS:
+            self._affected_graphs.append(graph)
+            return
+        proof = self._first_cpu_placement_proof
+        if (
+            proof is not None
+            and (proof.graph_uid, proof.graph_owner) == (graph.graph_uid, graph.graph_owner)
+            and all(
+                (row.graph_uid, row.graph_owner) != (graph.graph_uid, graph.graph_owner)
+                for row in self._affected_graphs
+            )
+        ):
+            self._affected_graphs[-1] = graph
+
+    def _observe_cpu_node_match(self, groups: tuple[bytes, ...]) -> None:
+        try:
+            (
+                graph_uid_raw,
+                graph_owner_raw,
+                backend_index_raw,
+                device_type_raw,
+                ordinal_raw,
+                op_raw,
+                name_len_raw,
+                name_hex,
+            ) = groups
+            graph_uid = int(graph_uid_raw)
+            graph_owner = graph_owner_raw.decode("ascii")
+            backend_index = int(backend_index_raw)
+            device_type = device_type_raw.decode("ascii")
+            ordinal = int(ordinal_raw)
+            name_len = int(name_len_raw)
+            if (
+                graph_uid <= 0
+                or graph_owner == "unknown"
+                or backend_index < 0
+                or device_type != "cpu"
+                or ordinal < 0
+                or name_len > MAX_BACKEND_FAILURE_LINE_BYTES
+                or len(name_hex) != name_len * 2
+            ):
+                raise ValueError("backend CPU operation identity is invalid")
+            node_name = bytes.fromhex(name_hex.decode("ascii"))
+            if len(node_name) != name_len:
+                raise ValueError("backend CPU operation name length is invalid")
+            key = (graph_uid, graph_owner, ordinal)
+            if key in self._seen_cpu_node_keys:
+                self.mark_malformed()
+                return
+            if len(self._seen_cpu_node_keys) >= _MAX_BACKEND_FAILURE_GRAPH_IDENTITIES:
+                self.mark_malformed()
+                return
+            self._seen_cpu_node_keys.add(key)
+            sample = BackendFailureCpuNodeDiagnosticV2(
+                graph_uid=graph_uid,
+                graph_owner=graph_owner,
+                backend_index=backend_index,
+                device_type=device_type,
+                ordinal=ordinal,
+                op=op_raw.decode("ascii"),
+                node_name_size_bytes=len(node_name),
+                node_name_sha256=hashlib.sha256(node_name).hexdigest(),
+                node_name_recorded=False,
+            )
+        except (UnicodeDecodeError, ValidationError, ValueError):
+            self.mark_malformed()
+            return
+        if len(self._cpu_node_samples) < MAX_BACKEND_FAILURE_RECORDS:
+            self._cpu_node_samples.append(sample)
+        if self._first_cpu_placement_proof is None:
+            self._first_cpu_placement_proof = BackendCpuPlacementProofV1(
+                **sample.model_dump(mode="python"),
+                graph_corroborated=False,
+            )
+            matching_graph = next(
+                (
+                    graph
+                    for graph in self._affected_graphs
+                    if (graph.graph_uid, graph.graph_owner)
+                    == (sample.graph_uid, sample.graph_owner)
+                ),
+                None,
+            )
+            if matching_graph is not None:
+                self._first_cpu_placement_proof = self._first_cpu_placement_proof.model_copy(
+                    update={"graph_corroborated": True}
+                )
+        graph_row = self._graph_rows.get(graph_uid)
+        if graph_row is not None and graph_row[0] != graph_owner:
+            self.mark_malformed()
+        identity_owner = self._identity_owners.get(graph_uid)
+        if identity_owner is not None and identity_owner != graph_owner:
+            self.mark_malformed()
+        existing_cpu_owner = self._cpu_owners.setdefault(graph_uid, graph_owner)
+        if existing_cpu_owner != graph_owner:
+            self.mark_malformed()
+        cpu_backend_key = (graph_uid, backend_index)
+        existing_cpu_backend_owner = self._cpu_backends.setdefault(cpu_backend_key, graph_owner)
+        if existing_cpu_backend_owner != graph_owner:
+            self.mark_malformed()
+        identity_device = self._identity_devices.get(cpu_backend_key)
+        if identity_device is not None and identity_device != (graph_owner, "cpu"):
+            self.mark_malformed()
+
+    def _observe_identity_match(self, groups: tuple[bytes, ...]) -> None:
+        try:
+            (
+                graph_uid_raw,
+                graph_owner_raw,
+                backend_index_raw,
+                _backend_name,
+                _device_name,
+                device_type_raw,
+                compute_raw,
+            ) = groups
+            graph_uid = int(graph_uid_raw)
+            graph_owner = graph_owner_raw.decode("ascii")
+            backend_index = int(backend_index_raw)
+            device_type = device_type_raw.decode("ascii")
+            compute = int(compute_raw)
+            if graph_uid <= 0 or graph_owner == "unknown" or backend_index < 0 or compute <= 0:
+                raise ValueError("backend identity placement fields are invalid")
+            key = (graph_uid, backend_index)
+            if key in self._seen_identity_keys:
+                self.mark_malformed()
+                return
+            if len(self._seen_identity_keys) >= _MAX_BACKEND_FAILURE_GRAPH_IDENTITIES:
+                self.mark_malformed()
+                return
+            category = {
+                "gpu": "gpu",
+                "igpu": "gpu",
+                "accel": "accel",
+                "cpu": "cpu",
+                "meta": "other",
+                "unassigned": "unassigned",
+            }[device_type]
+        except (KeyError, UnicodeDecodeError, ValueError):
+            self.mark_malformed()
+            return
+
+        self._seen_identity_keys.add(key)
+        existing_identity_owner = self._identity_owners.setdefault(graph_uid, graph_owner)
+        if existing_identity_owner != graph_owner:
+            self.mark_malformed()
+        graph_row = self._graph_rows.get(graph_uid)
+        if graph_row is not None and graph_row[0] != graph_owner:
+            self.mark_malformed()
+        cpu_owner = self._cpu_owners.get(graph_uid)
+        if cpu_owner is not None and cpu_owner != graph_owner:
+            self.mark_malformed()
+
+        category_counts = self._identity_category_counts.setdefault(
+            graph_uid,
+            {"gpu": 0, "cpu": 0, "accel": 0, "other": 0, "unassigned": 0},
+        )
+        category_counts[category] += compute
+        self._identity_devices[key] = (graph_owner, device_type)
+        cpu_backend_owner = self._cpu_backends.get(key)
+        if cpu_backend_owner is not None and (
+            cpu_backend_owner != graph_owner or device_type != "cpu"
+        ):
+            self.mark_malformed()
+
+    def finish(self) -> tuple[BackendFailureDiagnosticV2, bool]:
+        """Return bounded evidence without clearing any valid first CPU proof."""
+
+        proof = self._first_cpu_placement_proof
+        affected_graphs = tuple(self._affected_graphs)
+        if proof is not None and proof.graph_corroborated:
+            matching_graph = next(
+                (
+                    graph
+                    for graph in affected_graphs
+                    if (graph.graph_uid, graph.graph_owner) == (proof.graph_uid, proof.graph_owner)
+                ),
+                None,
+            )
+            if matching_graph is None:
+                self.mark_malformed()
+                proof = proof.model_copy(update={"graph_corroborated": False})
+
+        records_truncated = (
+            self._affected_graph_marker_count > MAX_BACKEND_FAILURE_RECORDS
+            or self._cpu_node_marker_count > MAX_BACKEND_FAILURE_RECORDS
+        )
+        if records_truncated and proof is None:
+            self.mark_malformed()
+
+        observed_any_marker = (
+            self._graph_marker_count + self._identity_marker_count + self._cpu_node_marker_count > 0
+        )
+        if observed_any_marker:
+            if set(self._graph_rows) != set(self._identity_owners):
+                self.mark_malformed()
+            for graph_uid, graph_row in self._graph_rows.items():
+                (
+                    graph_owner,
+                    gpu,
+                    cpu,
+                    accel,
+                    other,
+                    unassigned,
+                ) = graph_row
+                if self._identity_owners.get(graph_uid) != graph_owner:
+                    self.mark_malformed()
+                expected_counts = {
+                    "gpu": gpu,
+                    "cpu": cpu,
+                    "accel": accel,
+                    "other": other,
+                    "unassigned": unassigned,
+                }
+                if self._identity_category_counts.get(graph_uid) != expected_counts:
+                    self.mark_malformed()
+            if not set(self._cpu_owners).issubset(self._graph_rows):
+                self.mark_malformed()
+            for key, cpu_owner in self._cpu_backends.items():
+                if self._identity_devices.get(key) != (cpu_owner, "cpu"):
+                    self.mark_malformed()
+        if not records_truncated:
+            graph_by_key = {
+                (graph.graph_uid, graph.graph_owner): graph for graph in affected_graphs
+            }
+            samples_by_key: dict[tuple[int, str], int] = {}
+            for sample in self._cpu_node_samples:
+                sample_key = (sample.graph_uid, sample.graph_owner)
+                samples_by_key[sample_key] = samples_by_key.get(sample_key, 0) + 1
+            if set(graph_by_key) != set(samples_by_key):
+                self.mark_malformed()
+            for graph_key, graph in graph_by_key.items():
+                if samples_by_key.get(graph_key, 0) != min(graph.cpu, 8):
+                    self.mark_malformed()
+        if proof is not None and not proof.graph_corroborated:
+            self.mark_malformed()
+
+        diagnostic = BackendFailureDiagnosticV2(
+            cpu_model_graph_fallback_observed=proof is not None,
+            graph_marker_count=self._graph_marker_count,
+            identity_marker_count=self._identity_marker_count,
+            affected_graph_marker_count=self._affected_graph_marker_count,
+            cpu_node_marker_count=self._cpu_node_marker_count,
+            affected_graphs=affected_graphs,
+            cpu_node_samples=tuple(self._cpu_node_samples),
+            first_cpu_placement_proof=proof,
+            records_truncated=records_truncated,
+            raw_marker_lines_recorded=False,
+            raw_node_names_recorded=False,
+        )
+        return diagnostic, self._malformed
+
+
 class TextShardLoadEvidence(StrictFrozenModel):
     """Exact split metadata and tensor inventory seen by the text loader."""
 
@@ -1584,6 +2387,109 @@ def parse_backend_audit_evidence(log_text: str) -> BackendAuditEvidence:
         )
     )
     return BackendAuditEvidence(
+        observed_graphs=len(graphs),
+        compute_operations=sum(row.compute for row in graphs),
+        gpu_operations=sum(row.gpu for row in graphs),
+        accelerator_operations=sum(row.accel for row in graphs),
+        cpu_operations=sum(row.cpu for row in graphs),
+        other_operations=sum(row.other for row in graphs),
+        unassigned_operations=sum(row.unassigned for row in graphs),
+        graphs=graphs,
+        identities=identities,
+    )
+
+
+def parse_backend_audit_evidence_v2(log_text: str) -> BackendAuditEvidenceV2:
+    """Parse owner-tagged placement markers and require a complete GPU-only scan."""
+
+    historical_markers = (
+        _BACKEND_GRAPH_MARKER,
+        _BACKEND_IDENTITY_MARKER,
+        _CPU_NODE_MARKER,
+    )
+    if any(marker in log_text for marker in historical_markers):
+        raise ValueError("backend audit version 2 rejects version 1 markers")
+
+    marker_patterns = (
+        (_BACKEND_GRAPH_MARKER_V2, _BACKEND_GRAPH_RE_V2, "graph"),
+        (_BACKEND_IDENTITY_MARKER_V2, _BACKEND_IDENTITY_RE_V2, "identity"),
+        (_CPU_NODE_MARKER_V2, _CPU_NODE_RE_V2, "CPU-node"),
+    )
+    graph_matches: list[tuple[str, ...]] = []
+    identity_matches: list[tuple[str, ...]] = []
+    cpu_matches: list[tuple[str, ...]] = []
+    match_destinations = {
+        "graph": graph_matches,
+        "identity": identity_matches,
+        "CPU-node": cpu_matches,
+    }
+    for line in log_text.split("\n"):
+        marker_counts = tuple(line.count(marker) for marker, _pattern, _label in marker_patterns)
+        total_markers = sum(marker_counts)
+        if total_markers == 0:
+            continue
+        if total_markers != 1:
+            raise ValueError("backend audit line must contain exactly one version 2 marker")
+        marker_index = marker_counts.index(1)
+        marker, pattern, label = marker_patterns[marker_index]
+        marker_start = line.find(marker)
+        match = pattern.fullmatch(line[marker_start:])
+        if match is None:
+            raise ValueError(f"backend {label} audit contains a malformed marker")
+        match_destinations[label].append(match.groups())
+
+    if cpu_matches:
+        raise BackendCpuPlacementError("backend audit observed a CPU model graph operation")
+    if not graph_matches or not identity_matches:
+        raise ValueError("backend audit contains no graph markers")
+
+    graphs = tuple(
+        BackendGraphAuditRowV2(
+            graph_uid=int(graph_uid),
+            graph_owner=graph_owner,
+            phase=phase,
+            scope=scope,
+            compute=int(compute),
+            gpu=int(gpu),
+            cpu=int(cpu),
+            accel=int(accel),
+            other=int(other),
+            unassigned=int(unassigned),
+        )
+        for (
+            graph_uid,
+            graph_owner,
+            phase,
+            scope,
+            compute,
+            gpu,
+            cpu,
+            accel,
+            other,
+            unassigned,
+        ) in tuple(graph_matches)
+    )
+    identities = tuple(
+        BackendIdentityAuditRowV2(
+            graph_uid=int(graph_uid),
+            graph_owner=graph_owner,
+            backend_index=int(backend_index),
+            backend_name=backend_name,
+            device_name=device_name,
+            device_type=device_type,
+            compute=int(compute),
+        )
+        for (
+            graph_uid,
+            graph_owner,
+            backend_index,
+            backend_name,
+            device_name,
+            device_type,
+            compute,
+        ) in tuple(identity_matches)
+    )
+    return BackendAuditEvidenceV2(
         observed_graphs=len(graphs),
         compute_operations=sum(row.compute for row in graphs),
         gpu_operations=sum(row.gpu for row in graphs),
@@ -2408,6 +3314,8 @@ __all__ = [
     "B300_CMAKE_ARCHITECTURE",
     "B300_COMPUTE_CAPABILITY",
     "BACKEND_FAILURE_MARKER_TOKENS",
+    "BACKEND_FAILURE_MARKER_TOKENS_V2",
+    "BACKEND_FAILURE_PROTOCOL_CONTAMINATION_TOKENS_V2",
     "CUDA_DRIVER_STUB_RPATH_LINK_DEFINITION",
     "EXPECTED_FIRST_Q3_MOUNT_PATH",
     "EXPECTED_PROJECTOR_BYTES",
@@ -2432,6 +3340,7 @@ __all__ = [
     "PINNED_PADDED_VOCAB_SIZE",
     "PINNED_UNPADDED_VOCAB_SIZE",
     "PINNED_VOCAB_SIZE",
+    "PRE_OWNER_INSTRUMENTATION_PATCH_SHA256",
     "SMOKE_CONFIG_RELATIVE_PATH",
     "SUBJECT_CONFIG_HASH",
     "SUBJECT_CONTROL_PLANE_SHA256",
@@ -2442,13 +3351,21 @@ __all__ = [
     "VERIFIED_EXPORT_REFERENCE_RELATIVE_PATH",
     "ArtifactLoadEvidence",
     "BackendAuditEvidence",
+    "BackendAuditEvidenceV2",
     "BackendCpuPlacementError",
+    "BackendCpuPlacementProofV1",
     "BackendFailureCpuNodeDiagnostic",
+    "BackendFailureCpuNodeDiagnosticV2",
     "BackendFailureDiagnostic",
     "BackendFailureDiagnosticAccumulator",
+    "BackendFailureDiagnosticAccumulatorV2",
+    "BackendFailureDiagnosticV2",
     "BackendFailureGraphDiagnostic",
+    "BackendFailureGraphDiagnosticV2",
     "BackendGraphAuditRow",
+    "BackendGraphAuditRowV2",
     "BackendIdentityAuditRow",
+    "BackendIdentityAuditRowV2",
     "CudaDriverGpuEvidence",
     "CudaDriverPeerLinkEvidence",
     "CudaDriverPeerTopologyEvidence",
@@ -2474,6 +3391,7 @@ __all__ = [
     "load_verified_export_reference",
     "parse_artifact_load_evidence",
     "parse_backend_audit_evidence",
+    "parse_backend_audit_evidence_v2",
     "parse_cuda_driver_linkage",
     "parse_loader_offload_evidence",
     "parse_nvidia_smi_csv",

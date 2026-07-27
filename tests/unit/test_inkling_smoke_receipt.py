@@ -10,8 +10,8 @@ from pydantic import ValidationError
 
 from inkling_quant_lab.gguf.inkling_smoke import (
     HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
-    INSTRUMENTATION_SCHEMA_VERSION,
     LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
+    PRE_OWNER_INSTRUMENTATION_PATCH_SHA256,
     load_inkling_smoke_config,
     load_verified_export_reference,
 )
@@ -133,6 +133,41 @@ def _legacy_current_receipt_context() -> tuple[
         LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
         15_179,
     )
+
+
+def _pre_owner_receipt_context() -> tuple[
+    Any,
+    Any,
+    SmokeControlPlaneProvenance,
+    str,
+]:
+    current_config, reference, current_control_plane, _run_id = _receipt_context()
+    config_payload = current_config.model_dump(mode="json")
+    config_payload["schema_version"] = "inkling-smoke-config-v2"
+    config_payload["runtime"]["instrumentation_schema_version"] = (
+        "inkling-llama-smoke-instrumentation-v2"
+    )
+    config_payload["runtime"]["instrumentation_patch_sha256"] = (
+        PRE_OWNER_INSTRUMENTATION_PATCH_SHA256
+    )
+    config = type(current_config).model_validate(config_payload)
+    files = tuple(
+        item.model_copy(
+            update={
+                "sha256": PRE_OWNER_INSTRUMENTATION_PATCH_SHA256,
+                "size_bytes": 19_143,
+            }
+        )
+        if item.path == "patches/inkling-smoke-a015409.patch"
+        else item
+        for item in current_control_plane.files
+    )
+    control_plane = SmokeControlPlaneProvenance(
+        file_count=len(files),
+        files=files,
+        tree_sha256=smoke_control_plane_tree_sha256(files),
+    )
+    return config, reference, control_plane, smoke_run_id(config, control_plane.tree_sha256)
 
 
 def _gpu_topology(
@@ -698,7 +733,7 @@ def _valid_v5_receipt() -> tuple[
     str,
 ]:
     receipt, _legacy_config, reference, _legacy_control_plane, _run_id = _valid_v4_receipt()
-    config, current_reference, control_plane, run_id = _receipt_context()
+    config, current_reference, control_plane, run_id = _pre_owner_receipt_context()
     assert current_reference == reference
     assert config.output_vocabulary is not None
     output_vocabulary = config.output_vocabulary
@@ -878,7 +913,9 @@ def test_complete_v5_terminal_receipt_binds_padded_vocabulary_evidence() -> None
     )
 
     assert observed.schema_version == "inkling-smoke-terminal-v5"
-    assert observed.runtime.instrumentation_schema_version == INSTRUMENTATION_SCHEMA_VERSION
+    assert (
+        observed.runtime.instrumentation_schema_version == "inkling-llama-smoke-instrumentation-v2"
+    )
     raw_logit_audit = observed.server.raw_logit_audit
     assert isinstance(raw_logit_audit, SmokeRawLogitAuditV2)
     assert raw_logit_audit.vocab_size == 201_024

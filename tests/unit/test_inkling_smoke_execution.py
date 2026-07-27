@@ -13,6 +13,9 @@ from inkling_quant_lab.gguf.inkling_smoke import (
     HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
     LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
     MAX_BACKEND_FAILURE_RECORDS,
+    PRE_OWNER_INSTRUMENTATION_PATCH_SHA256,
+    BackendCpuPlacementProofV1,
+    BackendFailureDiagnosticV2,
     load_inkling_smoke_config,
     load_verified_export_reference,
 )
@@ -25,10 +28,13 @@ from inkling_quant_lab.gguf.inkling_smoke_execution import (
     SmokeFailureReceiptV4,
     SmokeFailureReceiptV5,
     SmokeFailureReceiptV6,
+    SmokeFailureReceiptV7,
     SmokeHostEvidence,
     SmokeLaunchAcknowledgement,
     SmokeLaunchDeploymentIdentity,
     SmokeServerLogFailureEvidence,
+    SmokeServerLogFailureEvidenceV2,
+    SmokeSuccessReceiptV7,
     canonical_python_package_inventory,
     immutable_source_tree_identity,
     parse_cgroup_cpu_quota_millicores,
@@ -49,6 +55,7 @@ from inkling_quant_lab.gguf.inkling_smoke_execution import (
     validate_deployed_smoke_control_plane,
     validate_smoke_failure_receipt,
     validate_smoke_launch_acknowledgement,
+    validate_smoke_terminal_receipt,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -132,6 +139,100 @@ def _backend_failure_diagnostic(*, cpu_fallback: bool) -> dict[str, Any]:
     }
 
 
+def _backend_failure_diagnostic_v2(
+    *,
+    cpu_fallback: bool,
+    graph_owner: str = "text",
+    records_truncated: bool = False,
+) -> dict[str, Any]:
+    if not cpu_fallback:
+        return {
+            "schema_version": "inkling-smoke-backend-failure-v2",
+            "cpu_model_graph_fallback_observed": False,
+            "graph_marker_count": 0,
+            "identity_marker_count": 0,
+            "affected_graph_marker_count": 0,
+            "cpu_node_marker_count": 0,
+            "affected_graphs": [],
+            "cpu_node_samples": [],
+            "first_cpu_placement_proof": None,
+            "records_truncated": False,
+            "raw_marker_lines_recorded": False,
+            "raw_node_names_recorded": False,
+        }
+
+    affected_count = MAX_BACKEND_FAILURE_RECORDS + 1 if records_truncated else 1
+    graph = {
+        "graph_uid": 7,
+        "graph_owner": graph_owner,
+        "phase": "post_assignment_pre_split",
+        "scope": "non_view_compute",
+        "compute": 2,
+        "gpu": 1,
+        "cpu": 1,
+        "accel": 0,
+        "other": 0,
+        "unassigned": 0,
+    }
+    node = {
+        "graph_uid": 7,
+        "graph_owner": graph_owner,
+        "backend_index": 2,
+        "device_type": "cpu",
+        "ordinal": 11,
+        "op": "MUL_MAT",
+        "node_name_size_bytes": 18,
+        "node_name_sha256": "a" * 64,
+        "node_name_recorded": False,
+    }
+    proof = {
+        "schema_version": "inkling-smoke-backend-cpu-placement-proof-v1",
+        **node,
+        "graph_corroborated": True,
+    }
+    return {
+        "schema_version": "inkling-smoke-backend-failure-v2",
+        "cpu_model_graph_fallback_observed": True,
+        "graph_marker_count": affected_count,
+        "identity_marker_count": affected_count * 2,
+        "affected_graph_marker_count": affected_count,
+        "cpu_node_marker_count": affected_count,
+        "affected_graphs": [graph],
+        "cpu_node_samples": [node],
+        "first_cpu_placement_proof": proof,
+        "records_truncated": records_truncated,
+        "raw_marker_lines_recorded": False,
+        "raw_node_names_recorded": False,
+    }
+
+
+def _server_log_failure_evidence_v2(
+    *,
+    cpu_fallback: bool,
+    scan_integrity: str = "complete",
+    records_truncated: bool = False,
+) -> dict[str, Any]:
+    return {
+        "schema_version": "inkling-smoke-server-log-failure-v2",
+        "present": True,
+        "size_bytes": 123,
+        "sha256": "0" * 64,
+        "raw_log_recorded": False,
+        "scan_integrity": scan_integrity,
+        "safe_failure_signals": {
+            "out_of_memory_observed": False,
+            "no_usable_gpu_observed": False,
+            "model_load_failure_observed": False,
+            "projector_load_failure_observed": False,
+            "unsupported_architecture_observed": False,
+        },
+        "backend_diagnostic": _backend_failure_diagnostic_v2(
+            cpu_fallback=cpu_fallback,
+            records_truncated=records_truncated,
+        ),
+    }
+
+
 def _backend_diagnostic_with_graph_without_cpu_marker() -> dict[str, Any]:
     diagnostic = _backend_failure_diagnostic(cpu_fallback=True)
     diagnostic["cpu_model_graph_fallback_observed"] = False
@@ -155,6 +256,9 @@ def _failure_receipt(
     *,
     called_process_error: bool = False,
     backend_cpu_placement_error: bool = False,
+    backend_cpu_log_evidence: bool | None = None,
+    server_log_scan_integrity: str = "complete",
+    server_log_records_truncated: bool = False,
     historical_context: bool | None = None,
 ) -> tuple[dict[str, Any], Any, Any, Any, str, str]:
     if called_process_error and backend_cpu_placement_error:
@@ -189,6 +293,35 @@ def _failure_receipt(
                 update={
                     "sha256": patch_sha256,
                     "size_bytes": patch_size_bytes,
+                }
+            )
+            if item.path == "patches/inkling-smoke-a015409.patch"
+            else item
+            for item in control_plane.files
+        )
+        control_plane = SmokeControlPlaneProvenance(
+            file_count=len(files),
+            files=files,
+            tree_sha256=smoke_control_plane_tree_sha256(files),
+        )
+    elif historical_context is None and schema_version in {
+        "inkling-smoke-terminal-v5",
+        "inkling-smoke-terminal-v6",
+    }:
+        config_payload = config.model_dump(mode="json")
+        config_payload["schema_version"] = "inkling-smoke-config-v2"
+        config_payload["runtime"]["instrumentation_schema_version"] = (
+            "inkling-llama-smoke-instrumentation-v2"
+        )
+        config_payload["runtime"]["instrumentation_patch_sha256"] = (
+            PRE_OWNER_INSTRUMENTATION_PATCH_SHA256
+        )
+        config = type(config).model_validate(config_payload)
+        files = tuple(
+            item.model_copy(
+                update={
+                    "sha256": PRE_OWNER_INSTRUMENTATION_PATCH_SHA256,
+                    "size_bytes": 19_143,
                 }
             )
             if item.path == "patches/inkling-smoke-a015409.patch"
@@ -241,6 +374,7 @@ def _failure_receipt(
         "inkling-smoke-terminal-v4",
         "inkling-smoke-terminal-v5",
         "inkling-smoke-terminal-v6",
+        "inkling-smoke-terminal-v7",
     }:
         receipt["invocation"] = {
             "schema_version": "inkling-smoke-invocation-v3",
@@ -274,6 +408,7 @@ def _failure_receipt(
         "inkling-smoke-terminal-v4",
         "inkling-smoke-terminal-v5",
         "inkling-smoke-terminal-v6",
+        "inkling-smoke-terminal-v7",
     }:
         receipt["safe_subprocess_failure"] = (
             {
@@ -305,6 +440,26 @@ def _failure_receipt(
                 cpu_fallback=backend_cpu_placement_error
             ),
         }
+    elif schema_version == "inkling-smoke-terminal-v7":
+        cpu_log_evidence = (
+            backend_cpu_placement_error
+            if backend_cpu_log_evidence is None
+            else backend_cpu_log_evidence
+        )
+        receipt["server_log_evidence"] = _server_log_failure_evidence_v2(
+            cpu_fallback=cpu_log_evidence,
+            scan_integrity=server_log_scan_integrity,
+            records_truncated=server_log_records_truncated,
+        )
+        receipt["cpu_placement_evidence_relation"] = (
+            "matched"
+            if backend_cpu_placement_error and cpu_log_evidence
+            else (
+                "exception_only"
+                if backend_cpu_placement_error
+                else ("log_only" if cpu_log_evidence else "none")
+            )
+        )
     receipt["receipt_sha256"] = smoke_terminal_receipt_sha256(receipt)
     return (
         receipt,
@@ -314,6 +469,65 @@ def _failure_receipt(
         run_id,
         launch_intent_sha256,
     )
+
+
+def _success_receipt_v7() -> tuple[dict[str, Any], Any, Any, Any, str]:
+    from tests.unit.test_inkling_smoke_receipt import _valid_v5_receipt
+
+    receipt, _pre_owner_config, reference, _pre_owner_control_plane, _run_id = _valid_v5_receipt()
+    config = load_inkling_smoke_config(CONFIG_PATH)
+    control_plane = smoke_control_plane_provenance(PROJECT_ROOT)
+    run_id = smoke_run_id(config, control_plane.tree_sha256)
+    receipt["schema_version"] = "inkling-smoke-terminal-v7"
+    receipt["run_id"] = run_id
+    receipt["smoke_config_hash"] = config.config_hash()
+    receipt["control_plane_sha256"] = control_plane.tree_sha256
+    receipt["control_plane_file_count"] = control_plane.file_count
+    receipt["invocation"]["run_id"] = run_id
+    receipt["invocation"]["smoke_config_hash"] = config.config_hash()
+    receipt["invocation"]["control_plane_sha256"] = control_plane.tree_sha256
+    receipt["invocation"]["attempt_registry_key"] = f"{run_id}:smoke_test"
+    receipt["runtime"]["instrumentation_schema_version"] = (
+        config.runtime.instrumentation_schema_version
+    )
+    receipt["runtime"]["instrumentation_patch_sha256"] = config.runtime.instrumentation_patch_sha256
+    base_source_blobs = {
+        "ggml/include/ggml-backend.h": "2924fdbe9884df40abf505fd89d277f5281a835b",
+        "ggml/src/ggml-backend.cpp": "87615921c09be5ef8c4996faa70fb3f49c385031",
+        "src/llama-context.cpp": "3a469bc90bd90fbdf3d924afa696d4b61fcd1d00",
+        "src/llama-model-loader.cpp": "28f8bb7934bbc807a08dc13ad58724ec77281903",
+        "src/llama-model-loader.h": "c476026d3e510ad03d3e6f0d619ecea7fc95319c",
+        "tools/mtmd/clip.cpp": "dbd07081bf73f336a17bd3b8d8359830128c424b",
+        "tools/mtmd/mtmd.cpp": "3e81e44143fa635e56e0a757ce1ba33d34d107e4",
+        "tools/server/server-context.cpp": "7564ad4e9cfb8e77d610e90c7530121214a4c483",
+        "tools/server/server.cpp": "20effbb14851b201118843bf14fa5bc51de1e304",
+    }
+    receipt["runtime"]["patched_source_paths"] = sorted(base_source_blobs)
+    receipt["runtime"]["base_source_blob_ids"] = [
+        {"path": path, "git_blob_id": git_blob_id}
+        for path, git_blob_id in sorted(base_source_blobs.items())
+    ]
+    backend_audit = receipt["server"]["backend_audit"]
+    base_graph = backend_audit["graphs"][0]
+    base_identities = backend_audit["identities"]
+    backend_audit["schema_version"] = "inkling-backend-audit-v2"
+    backend_audit["graphs"] = []
+    backend_audit["identities"] = []
+    for graph_uid, graph_owner in enumerate(("text", "vision", "audio"), start=1):
+        graph = copy.deepcopy(base_graph)
+        graph["graph_uid"] = graph_uid
+        graph["graph_owner"] = graph_owner
+        backend_audit["graphs"].append(graph)
+        for base_identity in base_identities:
+            identity = copy.deepcopy(base_identity)
+            identity["graph_uid"] = graph_uid
+            identity["graph_owner"] = graph_owner
+            backend_audit["identities"].append(identity)
+    backend_audit["observed_graphs"] = 3
+    backend_audit["compute_operations"] = 300
+    backend_audit["gpu_operations"] = 300
+    receipt["receipt_sha256"] = smoke_terminal_receipt_sha256(receipt)
+    return receipt, config, reference, control_plane, run_id
 
 
 def _temporary_control_tree(root: Path) -> None:
@@ -566,6 +780,28 @@ def test_terminal_failure_receipt_v6_uses_a_distinct_stable_hash_domain() -> Non
         smoke_terminal_receipt_sha256(payload)
 
 
+def test_terminal_receipt_v7_uses_one_distinct_stable_hash_domain() -> None:
+    success_payload: dict[str, object] = {
+        "schema_version": "inkling-smoke-terminal-v7",
+        "status": "passed",
+        "run_id": "run-one",
+        "token_ids": [1, 2, 3],
+    }
+    failure_payload: dict[str, object] = {
+        "schema_version": "inkling-smoke-terminal-v7",
+        "status": "failed",
+        "run_id": "run-one",
+        "failure_phase": "stop_server",
+    }
+
+    success_digest = smoke_terminal_receipt_sha256(success_payload)
+    failure_digest = smoke_terminal_receipt_sha256(failure_payload)
+
+    assert success_digest == "13d653c62058aa2c6188ecb2b71715c095f96fb027e4bfdcde5ae7cde7140fc2"
+    assert failure_digest == "6e3f212295eeb14766802dc8afcb3813f79d26ffdd9413a712f3423fdb3d87a7"
+    assert success_digest != failure_digest
+
+
 def test_terminal_receipt_hash_preserves_legacy_v2_failure_verification() -> None:
     legacy_failure = {
         "schema_version": "inkling-smoke-terminal-v2",
@@ -592,6 +828,54 @@ def test_exact_historical_v2_failure_receipt_remains_valid() -> None:
     observed = SmokeFailureReceiptV2.model_validate_json(raw)
     assert observed.receipt_sha256 == payload["receipt_sha256"]
     assert observed.input_id == "in-01KY5YWSRQG1AR8BEWRJ2A797D:1784759084850-0"
+
+
+def test_success_receipt_v7_validates_exact_graph_owner_coverage() -> None:
+    receipt, config, reference, control_plane, run_id = _success_receipt_v7()
+
+    observed = validate_smoke_terminal_receipt(
+        receipt,
+        config=config,
+        reference=reference,
+        control_plane=control_plane,
+        run_id=run_id,
+    )
+
+    assert isinstance(observed, SmokeSuccessReceiptV7)
+    assert observed.schema_version == "inkling-smoke-terminal-v7"
+    assert observed.server.backend_audit.schema_version == "inkling-backend-audit-v2"
+    assert {graph.graph_owner for graph in observed.server.backend_audit.graphs} == {
+        "text",
+        "vision",
+        "audio",
+    }
+    graph_owners = {
+        graph.graph_uid: graph.graph_owner for graph in observed.server.backend_audit.graphs
+    }
+    assert all(
+        identity.graph_owner == graph_owners[identity.graph_uid]
+        for identity in observed.server.backend_audit.identities
+    )
+
+
+def test_success_receipt_v7_rejects_missing_graph_owner_coverage() -> None:
+    receipt, config, reference, control_plane, run_id = _success_receipt_v7()
+    backend_audit = receipt["server"]["backend_audit"]
+    for row in (*backend_audit["graphs"], *backend_audit["identities"]):
+        if row["graph_owner"] == "audio":
+            row["graph_owner"] = "vision"
+    receipt["receipt_sha256"] = smoke_terminal_receipt_sha256(receipt)
+
+    with pytest.raises(ValueError, match="schema is invalid") as error:
+        validate_smoke_terminal_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+        )
+
+    assert "text, vision, and audio" in str(error.value.__cause__)
 
 
 @pytest.mark.parametrize(
@@ -1001,6 +1285,186 @@ def test_failure_receipt_v6_requires_nested_server_log_equality(mutate: Any) -> 
         )
 
     assert "top-level receipt" in str(error.value.__cause__)
+
+
+@pytest.mark.parametrize(
+    (
+        "backend_cpu_placement_error",
+        "backend_cpu_log_evidence",
+        "expected_relation",
+    ),
+    (
+        (True, True, "matched"),
+        (True, False, "exception_only"),
+        (False, True, "log_only"),
+        (False, False, "none"),
+    ),
+)
+def test_failure_receipt_v7_validates_derived_cpu_placement_evidence_relation(
+    backend_cpu_placement_error: bool,
+    backend_cpu_log_evidence: bool,
+    expected_relation: str,
+) -> None:
+    (
+        receipt,
+        config,
+        reference,
+        control_plane,
+        run_id,
+        launch_intent_sha256,
+    ) = _failure_receipt(
+        "inkling-smoke-terminal-v7",
+        backend_cpu_placement_error=backend_cpu_placement_error,
+        backend_cpu_log_evidence=backend_cpu_log_evidence,
+    )
+
+    observed = validate_smoke_failure_receipt(
+        receipt,
+        config=config,
+        reference=reference,
+        control_plane=control_plane,
+        run_id=run_id,
+        launch_intent_sha256=launch_intent_sha256,
+    )
+
+    assert isinstance(observed, SmokeFailureReceiptV7)
+    assert observed.cpu_placement_evidence_relation == expected_relation
+    proof = observed.server_log_evidence.backend_diagnostic.first_cpu_placement_proof
+    assert (proof is not None) is backend_cpu_log_evidence
+    if proof is not None:
+        assert isinstance(proof, BackendCpuPlacementProofV1)
+        assert proof.graph_owner == "text"
+        assert proof.graph_corroborated is True
+
+
+def test_failure_receipt_v7_rejects_tampered_cpu_placement_evidence_relation() -> None:
+    (
+        receipt,
+        config,
+        reference,
+        control_plane,
+        run_id,
+        launch_intent_sha256,
+    ) = _failure_receipt(
+        "inkling-smoke-terminal-v7",
+        backend_cpu_placement_error=True,
+        backend_cpu_log_evidence=True,
+    )
+    receipt["cpu_placement_evidence_relation"] = "exception_only"
+    receipt["receipt_sha256"] = smoke_terminal_receipt_sha256(receipt)
+
+    with pytest.raises(ValueError, match="schema is invalid") as error:
+        validate_smoke_failure_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+            launch_intent_sha256=launch_intent_sha256,
+        )
+
+    assert "CPU placement evidence relation" in str(error.value.__cause__)
+
+
+@pytest.mark.parametrize("scan_integrity", ("malformed", "missing"))
+def test_failure_receipt_v7_serializes_cpu_exception_without_log_proof(
+    scan_integrity: str,
+) -> None:
+    (
+        receipt,
+        config,
+        reference,
+        control_plane,
+        run_id,
+        launch_intent_sha256,
+    ) = _failure_receipt(
+        "inkling-smoke-terminal-v7",
+        backend_cpu_placement_error=True,
+        backend_cpu_log_evidence=False,
+        server_log_scan_integrity=("malformed" if scan_integrity == "malformed" else "complete"),
+    )
+    if scan_integrity == "missing":
+        server_log_evidence = receipt["server_log_evidence"]
+        server_log_evidence.update(
+            {
+                "present": False,
+                "size_bytes": 0,
+                "sha256": EMPTY_SHA256,
+                "scan_integrity": "missing",
+            }
+        )
+        receipt["server_log_sha256"] = EMPTY_SHA256
+    receipt["receipt_sha256"] = smoke_terminal_receipt_sha256(receipt)
+
+    observed = validate_smoke_failure_receipt(
+        receipt,
+        config=config,
+        reference=reference,
+        control_plane=control_plane,
+        run_id=run_id,
+        launch_intent_sha256=launch_intent_sha256,
+    )
+
+    assert isinstance(observed, SmokeFailureReceiptV7)
+    assert observed.cpu_placement_evidence_relation == "exception_only"
+    assert observed.server_log_evidence.scan_integrity == scan_integrity
+    assert observed.server_log_evidence.backend_diagnostic.first_cpu_placement_proof is None
+
+
+@pytest.mark.parametrize(
+    ("scan_integrity", "records_truncated"),
+    (("malformed", False), ("complete", True)),
+)
+def test_server_log_failure_evidence_v2_preserves_positive_bounded_proof(
+    scan_integrity: str,
+    records_truncated: bool,
+) -> None:
+    observed = SmokeServerLogFailureEvidenceV2.model_validate(
+        _server_log_failure_evidence_v2(
+            cpu_fallback=True,
+            scan_integrity=scan_integrity,
+            records_truncated=records_truncated,
+        )
+    )
+
+    diagnostic = observed.backend_diagnostic
+    assert isinstance(diagnostic, BackendFailureDiagnosticV2)
+    assert diagnostic.cpu_model_graph_fallback_observed is True
+    assert diagnostic.records_truncated is records_truncated
+    assert diagnostic.first_cpu_placement_proof is not None
+    assert diagnostic.first_cpu_placement_proof.graph_owner == "text"
+    assert diagnostic.first_cpu_placement_proof.graph_uid == 7
+    assert diagnostic.first_cpu_placement_proof.graph_corroborated is True
+
+
+def test_server_log_failure_evidence_v2_accepts_malformed_truncated_no_proof() -> None:
+    payload = _server_log_failure_evidence_v2(
+        cpu_fallback=False,
+        scan_integrity="malformed",
+    )
+    diagnostic = payload["backend_diagnostic"]
+    diagnostic.update(
+        {
+            "graph_marker_count": MAX_BACKEND_FAILURE_RECORDS + 1,
+            "affected_graph_marker_count": MAX_BACKEND_FAILURE_RECORDS + 1,
+            "records_truncated": True,
+        }
+    )
+
+    observed = SmokeServerLogFailureEvidenceV2.model_validate(payload)
+
+    assert observed.scan_integrity == "malformed"
+    assert observed.backend_diagnostic.records_truncated is True
+    assert observed.backend_diagnostic.cpu_model_graph_fallback_observed is False
+    assert observed.backend_diagnostic.first_cpu_placement_proof is None
+
+
+def test_backend_failure_diagnostic_v2_rejects_owner_mismatched_proof() -> None:
+    payload = _backend_failure_diagnostic_v2(cpu_fallback=True)
+    payload["first_cpu_placement_proof"]["graph_owner"] = "audio"
+
+    with pytest.raises(ValidationError, match="proof"):
+        BackendFailureDiagnosticV2.model_validate(payload)
 
 
 def test_server_log_failure_evidence_distinguishes_missing_and_present_empty_logs() -> None:
