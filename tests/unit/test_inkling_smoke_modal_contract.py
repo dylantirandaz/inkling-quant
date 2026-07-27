@@ -58,6 +58,130 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RUNNER_PATH = PROJECT_ROOT / "scripts/smoke_inkling_modal.py"
 MANAGER_PATH = PROJECT_ROOT / "scripts/manage_inkling_smoke_modal.py"
 _DEFAULT_CHILDREN = object()
+EXPECTED_SOURCE_BLOB_PINS = (
+    (
+        "ggml/include/ggml-backend.h",
+        "2924fdbe9884df40abf505fd89d277f5281a835b",
+    ),
+    (
+        "ggml/src/ggml-backend.cpp",
+        "87615921c09be5ef8c4996faa70fb3f49c385031",
+    ),
+    (
+        "ggml/src/ggml-cuda/common.cuh",
+        "290dc4aff259cb78a9a477dea27920fecf398c4a",
+    ),
+    (
+        "ggml/src/ggml-cuda/convert.cu",
+        "f04a2d5a2cc89a8efe816f56205db0d9629cbb7a",
+    ),
+    (
+        "ggml/src/ggml-cuda/dequantize.cuh",
+        "9ae1342fc0efc85e2fb50af42745f820177fd983",
+    ),
+    (
+        "ggml/src/ggml-cuda/getrows.cu",
+        "0e15707093fc6b150e620e67d503d37b0139cbdd",
+    ),
+    (
+        "ggml/src/ggml-cuda/ggml-cuda.cu",
+        "b2b868eb977dd9a29daf47600f36d46f9ec3bb53",
+    ),
+    (
+        "src/llama-context.cpp",
+        "3a469bc90bd90fbdf3d924afa696d4b61fcd1d00",
+    ),
+    (
+        "src/llama-model-loader.cpp",
+        "28f8bb7934bbc807a08dc13ad58724ec77281903",
+    ),
+    (
+        "src/llama-model-loader.h",
+        "c476026d3e510ad03d3e6f0d619ecea7fc95319c",
+    ),
+    (
+        "src/llama-model.cpp",
+        "b431e2bd59bb1414ce036c78df0cd6206794acac",
+    ),
+    (
+        "tools/mtmd/clip.cpp",
+        "dbd07081bf73f336a17bd3b8d8359830128c424b",
+    ),
+    (
+        "tools/mtmd/mtmd.cpp",
+        "3e81e44143fa635e56e0a757ce1ba33d34d107e4",
+    ),
+    (
+        "tools/server/server-context.cpp",
+        "7564ad4e9cfb8e77d610e90c7530121214a4c483",
+    ),
+    (
+        "tools/server/server.cpp",
+        "20effbb14851b201118843bf14fa5bc51de1e304",
+    ),
+)
+EXPECTED_PATCHED_SOURCE_BLOB_PINS = (
+    (
+        "ggml/include/ggml-backend.h",
+        "9b8787c8bbd2d89378c63fc22d440920ab257298",
+    ),
+    (
+        "ggml/src/ggml-backend.cpp",
+        "6d7bb28d0426b7a6f36766ec35eed8eeb50e7f0d",
+    ),
+    (
+        "ggml/src/ggml-cuda/common.cuh",
+        "85bf81201eacd780e7da64f3839263a8e5ce8897",
+    ),
+    (
+        "ggml/src/ggml-cuda/convert.cu",
+        "17b5e40ddfa69797463caef9998da49d5931b3e0",
+    ),
+    (
+        "ggml/src/ggml-cuda/dequantize.cuh",
+        "5f4db1939356c0f7a8caa6fe68bef3f46bbfb719",
+    ),
+    (
+        "ggml/src/ggml-cuda/getrows.cu",
+        "808ab1a61beb4e1a9f89f4c39f875624aceda9b4",
+    ),
+    (
+        "ggml/src/ggml-cuda/ggml-cuda.cu",
+        "3ac4fd35159cd3777c685033c0784bdd5220ee9f",
+    ),
+    (
+        "src/llama-context.cpp",
+        "389f04f4c56e8200fd028c680bf5f454792efee8",
+    ),
+    (
+        "src/llama-model-loader.cpp",
+        "fad59d654dfe84b2c778c7f85a84c7408c55c264",
+    ),
+    (
+        "src/llama-model-loader.h",
+        "b495fe733fd6a64a41a1eff92c10ea4fe15805bb",
+    ),
+    (
+        "src/llama-model.cpp",
+        "aa987c30178bdec3eacc459f07f1fa2bc0a4a2f2",
+    ),
+    (
+        "tools/mtmd/clip.cpp",
+        "77abad10845bff3b0ef32ce98b0b0e43a46f7b87",
+    ),
+    (
+        "tools/mtmd/mtmd.cpp",
+        "85f25f2aaa07537894ad3c35c258b937d3f4b84b",
+    ),
+    (
+        "tools/server/server-context.cpp",
+        "58b90ccbecd60cb0784810224d79e70e4152b521",
+    ),
+    (
+        "tools/server/server.cpp",
+        "9be8c02497080fa57ad9460084c2337a1997f89b",
+    ),
+)
 
 
 def _module(path: Path) -> ast.Module:
@@ -790,12 +914,21 @@ def test_smoke_runner_exposes_one_exact_paid_function() -> None:
 def test_smoke_runner_build_and_mount_contract_is_closed() -> None:
     module = _module(RUNNER_PATH)
     source = RUNNER_PATH.read_text(encoding="utf-8")
+    source_blob_pins = _assignment_literal(module, "SOURCE_BLOB_PINS")
+    patched_source_blob_pins = _assignment_literal(module, "PATCHED_SOURCE_BLOB_PINS")
 
     assert _assignment_literal(module, "BUILD_TARGETS") == (
         "llama-cli",
         "llama-server",
         "llama-bench",
         "llama-perplexity",
+    )
+    assert source_blob_pins == EXPECTED_SOURCE_BLOB_PINS
+    assert patched_source_blob_pins == EXPECTED_PATCHED_SOURCE_BLOB_PINS
+    assert len(source_blob_pins) == 15
+    assert len(patched_source_blob_pins) == 15
+    assert tuple(path for path, _blob_id in source_blob_pins) == tuple(
+        path for path, _blob_id in patched_source_blob_pins
     )
     assert ".with_mount_options(\n    read_only=True," in source
     assert '"PYTHONDONTWRITEBYTECODE": "1"' in source
@@ -806,6 +939,8 @@ def test_smoke_runner_build_and_mount_contract_is_closed() -> None:
     assert "SOURCE_CONTRACT_ASSERTIONS" in source
     assert "PATCHED_SOURCE_BLOB_PINS" in source
     assert "Post-patch source inventory must exactly match its base-source inventory" in source
+    assert "patched_diff_sha256 != INSTRUMENTATION_PATCHED_DIFF_SHA256" in source
+    assert "Patched llama.cpp diff differs from its exact source contract" in source
     assert LLAMA_SERVER_AUDIT_LOG_VERBOSITY == 4
     assert '("common/log.h", "#define LOG_LEVEL_TRACE  4")' in source
     assert '("common/log.cpp", "case GGML_LOG_LEVEL_INFO:  return LOG_LEVEL_TRACE;")' in source
@@ -856,6 +991,11 @@ def test_smoke_runner_binds_trace_verbosity_for_required_info_evidence() -> None
     assert "str(DEFAULT_CONFIG.runtime.log_verbosity)" in command_source
     assert ast.literal_eval(command_elements[1]) == "--log-verbosity"
     assert ast.unparse(command_elements[2]) == "str(DEFAULT_CONFIG.runtime.log_verbosity)"
+    assert '"--override-tensor"' not in command_source
+    assert not any(
+        isinstance(element, ast.Constant) and element.value == "--override-tensor"
+        for element in command_elements
+    )
     patch = (PROJECT_ROOT / "patches/inkling-smoke-a015409.patch").read_text(encoding="utf-8")
     assert "diff --git a/tools/server/server.cpp b/tools/server/server.cpp" in patch
     assert (
@@ -2469,19 +2609,30 @@ def test_safe_subprocess_failure_rejects_untrusted_failure_shapes(
         safe_failure(error)
 
 
-def test_record_failure_uses_terminal_v7_sanitized_failure_evidence() -> None:
+def test_record_failure_uses_terminal_v8_sanitized_failure_evidence() -> None:
     source = RUNNER_PATH.read_text(encoding="utf-8")
     start = source.index("def _record_failure(")
     end = source.index("\n\n@app.function(", start)
     function_source = source[start:end]
 
-    assert '"schema_version": "inkling-smoke-terminal-v7"' in function_source
+    assert '"schema_version": "inkling-smoke-terminal-v8"' in function_source
     assert '"safe_subprocess_failure": _safe_subprocess_failure(error)' in function_source
     assert '"server_log_evidence": server_log_evidence' in function_source
     assert '"server_log_sha256": server_log_evidence["sha256"]' in function_source
     assert '"safe_failure_signals": server_log_evidence["safe_failure_signals"]' in function_source
     assert '"cpu_placement_evidence_relation":' in function_source
     assert '"subprocess_failure":' not in function_source
+
+
+def test_smoke_runner_emits_terminal_v8_success_receipt() -> None:
+    source = RUNNER_PATH.read_text(encoding="utf-8")
+    smoke_start = source.index("def smoke_test(")
+    success_start = source.index('        phase = "publish_success"', smoke_start)
+    receipt_hash = source.index('        receipt["receipt_sha256"]', success_start)
+    success_receipt_source = source[success_start:receipt_hash]
+
+    assert success_receipt_source.count('"schema_version": "inkling-smoke-terminal-v8"') == 1
+    assert '"schema_version": "inkling-smoke-terminal-v7"' not in success_receipt_source
 
 
 def test_cgroup_inventory_recheck_rejects_post_rehash_drift() -> None:
@@ -3544,6 +3695,7 @@ def test_terminal_validation_rejects_noncanonical_record_terminators(
         ("inkling-smoke-terminal-v5", True, True, False),
         ("inkling-smoke-terminal-v6", True, True, True),
         ("inkling-smoke-terminal-v7", True, True, True),
+        ("inkling-smoke-terminal-v8", True, True, True),
     ),
 )
 def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostics(
@@ -3654,6 +3806,7 @@ def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostic
         "inkling-smoke-terminal-v5",
         "inkling-smoke-terminal-v6",
         "inkling-smoke-terminal-v7",
+        "inkling-smoke-terminal-v8",
     }:
         receipt_fields["invocation"] = invocation
     if schema_version in {
@@ -3661,14 +3814,19 @@ def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostic
         "inkling-smoke-terminal-v5",
         "inkling-smoke-terminal-v6",
         "inkling-smoke-terminal-v7",
+        "inkling-smoke-terminal-v8",
     }:
         receipt_fields["safe_subprocess_failure"] = safe_diagnostic
     if schema_version in {
         "inkling-smoke-terminal-v6",
         "inkling-smoke-terminal-v7",
+        "inkling-smoke-terminal-v8",
     }:
         receipt_fields["server_log_evidence"] = server_log_evidence
-    if schema_version == "inkling-smoke-terminal-v7":
+    if schema_version in {
+        "inkling-smoke-terminal-v7",
+        "inkling-smoke-terminal-v8",
+    }:
         receipt_fields["cpu_placement_evidence_relation"] = "matched"
     receipt = SimpleNamespace(**receipt_fields)
     acceptance_validations: list[object] = []
@@ -3785,7 +3943,10 @@ def test_manager_validates_failure_invocations_and_projects_only_safe_diagnostic
                 "raw_node_names_recorded": False,
             },
         }
-    if schema_version == "inkling-smoke-terminal-v7":
+    if schema_version in {
+        "inkling-smoke-terminal-v7",
+        "inkling-smoke-terminal-v8",
+    }:
         expected_record["cpu_placement_evidence_relation"] = "matched"
     assert records == [expected_record]
     serialized = json.dumps(records, sort_keys=True)
@@ -4223,6 +4384,7 @@ def test_manager_fails_closed_on_attempt_claim_and_terminal_receipts() -> None:
     assert '"inkling-smoke-terminal-v5"' in failure_source
     assert '"inkling-smoke-terminal-v6"' in failure_source
     assert '"inkling-smoke-terminal-v7"' in failure_source
+    assert '"inkling-smoke-terminal-v8"' in failure_source
     assert "_safe_subprocess_failure_record(" in failure_source
     assert "_safe_server_log_failure_record(" in failure_source
     assert '"cpu_placement_evidence_relation"' in failure_source

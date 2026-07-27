@@ -11,6 +11,9 @@ from pydantic import ValidationError
 from inkling_quant_lab.exceptions import ConfigurationError
 from inkling_quant_lab.gguf.inkling_smoke import (
     HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
+    INITIALIZED_OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
+    INSTRUMENTATION_PATCH_SHA256,
+    INSTRUMENTATION_PATCHED_DIFF_SHA256,
     LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
     MAX_BACKEND_FAILURE_RECORDS,
     OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
@@ -30,12 +33,14 @@ from inkling_quant_lab.gguf.inkling_smoke_execution import (
     SmokeFailureReceiptV5,
     SmokeFailureReceiptV6,
     SmokeFailureReceiptV7,
+    SmokeFailureReceiptV8,
     SmokeHostEvidence,
     SmokeLaunchAcknowledgement,
     SmokeLaunchDeploymentIdentity,
     SmokeServerLogFailureEvidence,
     SmokeServerLogFailureEvidenceV2,
     SmokeSuccessReceiptV7,
+    SmokeSuccessReceiptV8,
     canonical_python_package_inventory,
     immutable_source_tree_identity,
     parse_cgroup_cpu_quota_millicores,
@@ -334,6 +339,32 @@ def _failure_receipt(
             files=files,
             tree_sha256=smoke_control_plane_tree_sha256(files),
         )
+    elif historical_context is None and schema_version == "inkling-smoke-terminal-v7":
+        config_payload = config.model_dump(mode="json")
+        config_payload["schema_version"] = "inkling-smoke-config-v3"
+        config_payload["runtime"]["instrumentation_schema_version"] = (
+            "inkling-llama-smoke-instrumentation-v3"
+        )
+        config_payload["runtime"]["instrumentation_patch_sha256"] = (
+            OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256
+        )
+        config = type(config).model_validate(config_payload)
+        files = tuple(
+            item.model_copy(
+                update={
+                    "sha256": OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
+                    "size_bytes": 25_073,
+                }
+            )
+            if item.path == "patches/inkling-smoke-a015409.patch"
+            else item
+            for item in control_plane.files
+        )
+        control_plane = SmokeControlPlaneProvenance(
+            file_count=len(files),
+            files=files,
+            tree_sha256=smoke_control_plane_tree_sha256(files),
+        )
     run_id = smoke_run_id(config, control_plane.tree_sha256)
     launch_intent_sha256 = "1" * 64
     receipt: dict[str, Any] = {
@@ -376,6 +407,7 @@ def _failure_receipt(
         "inkling-smoke-terminal-v5",
         "inkling-smoke-terminal-v6",
         "inkling-smoke-terminal-v7",
+        "inkling-smoke-terminal-v8",
     }:
         receipt["invocation"] = {
             "schema_version": "inkling-smoke-invocation-v3",
@@ -410,6 +442,7 @@ def _failure_receipt(
         "inkling-smoke-terminal-v5",
         "inkling-smoke-terminal-v6",
         "inkling-smoke-terminal-v7",
+        "inkling-smoke-terminal-v8",
     }:
         receipt["safe_subprocess_failure"] = (
             {
@@ -441,7 +474,10 @@ def _failure_receipt(
                 cpu_fallback=backend_cpu_placement_error
             ),
         }
-    elif schema_version == "inkling-smoke-terminal-v7":
+    elif schema_version in {
+        "inkling-smoke-terminal-v7",
+        "inkling-smoke-terminal-v8",
+    }:
         cpu_log_evidence = (
             backend_cpu_placement_error
             if backend_cpu_log_evidence is None
@@ -504,63 +540,48 @@ def _owner_tagged_v7_context(
     )
 
 
-def _success_receipt_v7() -> tuple[dict[str, Any], Any, Any, Any, str]:
-    from tests.unit.test_inkling_smoke_receipt import _valid_v5_receipt
-
-    receipt, _pre_owner_config, reference, _pre_owner_control_plane, _run_id = _valid_v5_receipt()
-    config = load_inkling_smoke_config(CONFIG_PATH)
-    control_plane = smoke_control_plane_provenance(PROJECT_ROOT)
-    run_id = smoke_run_id(config, control_plane.tree_sha256)
-    receipt["schema_version"] = "inkling-smoke-terminal-v7"
-    receipt["run_id"] = run_id
-    receipt["smoke_config_hash"] = config.config_hash()
-    receipt["control_plane_sha256"] = control_plane.tree_sha256
-    receipt["control_plane_file_count"] = control_plane.file_count
-    receipt["invocation"]["run_id"] = run_id
-    receipt["invocation"]["smoke_config_hash"] = config.config_hash()
-    receipt["invocation"]["control_plane_sha256"] = control_plane.tree_sha256
-    receipt["invocation"]["attempt_registry_key"] = f"{run_id}:smoke_test"
-    receipt["runtime"]["instrumentation_schema_version"] = (
-        config.runtime.instrumentation_schema_version
+def _initialized_owner_tagged_v7_context(
+    config: Any,
+    control_plane: SmokeControlPlaneProvenance,
+) -> tuple[Any, SmokeControlPlaneProvenance, str]:
+    config_payload = config.model_dump(mode="json")
+    config_payload["runtime"]["instrumentation_patch_sha256"] = (
+        INITIALIZED_OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256
     )
-    receipt["runtime"]["instrumentation_patch_sha256"] = config.runtime.instrumentation_patch_sha256
-    base_source_blobs = {
-        "ggml/include/ggml-backend.h": "2924fdbe9884df40abf505fd89d277f5281a835b",
-        "ggml/src/ggml-backend.cpp": "87615921c09be5ef8c4996faa70fb3f49c385031",
-        "src/llama-context.cpp": "3a469bc90bd90fbdf3d924afa696d4b61fcd1d00",
-        "src/llama-model-loader.cpp": "28f8bb7934bbc807a08dc13ad58724ec77281903",
-        "src/llama-model-loader.h": "c476026d3e510ad03d3e6f0d619ecea7fc95319c",
-        "tools/mtmd/clip.cpp": "dbd07081bf73f336a17bd3b8d8359830128c424b",
-        "tools/mtmd/mtmd.cpp": "3e81e44143fa635e56e0a757ce1ba33d34d107e4",
-        "tools/server/server-context.cpp": "7564ad4e9cfb8e77d610e90c7530121214a4c483",
-        "tools/server/server.cpp": "20effbb14851b201118843bf14fa5bc51de1e304",
-    }
-    receipt["runtime"]["patched_source_paths"] = sorted(base_source_blobs)
-    receipt["runtime"]["base_source_blob_ids"] = [
-        {"path": path, "git_blob_id": git_blob_id}
-        for path, git_blob_id in sorted(base_source_blobs.items())
-    ]
-    backend_audit = receipt["server"]["backend_audit"]
-    base_graph = backend_audit["graphs"][0]
-    base_identities = backend_audit["identities"]
-    backend_audit["schema_version"] = "inkling-backend-audit-v2"
-    backend_audit["graphs"] = []
-    backend_audit["identities"] = []
-    for graph_uid, graph_owner in enumerate(("text", "vision", "audio"), start=1):
-        graph = copy.deepcopy(base_graph)
-        graph["graph_uid"] = graph_uid
-        graph["graph_owner"] = graph_owner
-        backend_audit["graphs"].append(graph)
-        for base_identity in base_identities:
-            identity = copy.deepcopy(base_identity)
-            identity["graph_uid"] = graph_uid
-            identity["graph_owner"] = graph_owner
-            backend_audit["identities"].append(identity)
-    backend_audit["observed_graphs"] = 3
-    backend_audit["compute_operations"] = 300
-    backend_audit["gpu_operations"] = 300
-    receipt["receipt_sha256"] = smoke_terminal_receipt_sha256(receipt)
-    return receipt, config, reference, control_plane, run_id
+    initialized_config = type(config).model_validate(config_payload)
+    files = tuple(
+        item.model_copy(
+            update={
+                "sha256": INITIALIZED_OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
+                "size_bytes": 26_160,
+            }
+        )
+        if item.path == "patches/inkling-smoke-a015409.patch"
+        else item
+        for item in control_plane.files
+    )
+    initialized_control_plane = SmokeControlPlaneProvenance(
+        file_count=len(files),
+        files=files,
+        tree_sha256=smoke_control_plane_tree_sha256(files),
+    )
+    return (
+        initialized_config,
+        initialized_control_plane,
+        smoke_run_id(initialized_config, initialized_control_plane.tree_sha256),
+    )
+
+
+def _success_receipt_v7() -> tuple[dict[str, Any], Any, Any, Any, str]:
+    from tests.unit.test_inkling_smoke_receipt import _valid_v7_receipt
+
+    return _valid_v7_receipt()
+
+
+def _success_receipt_v8() -> tuple[dict[str, Any], Any, Any, Any, str]:
+    from tests.unit.test_inkling_smoke_receipt import _valid_v8_receipt
+
+    return _valid_v8_receipt()
 
 
 def _temporary_control_tree(root: Path) -> None:
@@ -835,6 +856,28 @@ def test_terminal_receipt_v7_uses_one_distinct_stable_hash_domain() -> None:
     assert success_digest != failure_digest
 
 
+def test_terminal_receipt_v8_uses_one_distinct_stable_hash_domain() -> None:
+    success_payload: dict[str, object] = {
+        "schema_version": "inkling-smoke-terminal-v8",
+        "status": "passed",
+        "run_id": "run-one",
+        "token_ids": [1, 2, 3],
+    }
+    failure_payload: dict[str, object] = {
+        "schema_version": "inkling-smoke-terminal-v8",
+        "status": "failed",
+        "run_id": "run-one",
+        "failure_phase": "stop_server",
+    }
+
+    success_digest = smoke_terminal_receipt_sha256(success_payload)
+    failure_digest = smoke_terminal_receipt_sha256(failure_payload)
+
+    assert success_digest == "89d83ec6a1d8415d68a1024fa83e33adf3d6a7e092b749436345a0929a053a7f"
+    assert failure_digest == "c4abcff4ed71964f6b91706772f7b42648992c695bfc4e6380f4324bbb063c83"
+    assert success_digest != failure_digest
+
+
 def test_terminal_receipt_hash_preserves_legacy_v2_failure_verification() -> None:
     legacy_failure = {
         "schema_version": "inkling-smoke-terminal-v2",
@@ -876,6 +919,10 @@ def test_success_receipt_v7_validates_exact_graph_owner_coverage() -> None:
 
     assert isinstance(observed, SmokeSuccessReceiptV7)
     assert observed.schema_version == "inkling-smoke-terminal-v7"
+    assert config.schema_version == "inkling-smoke-config-v3"
+    assert (
+        observed.runtime.instrumentation_patch_sha256 == OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256
+    )
     assert observed.server.backend_audit.schema_version == "inkling-backend-audit-v2"
     assert {graph.graph_owner for graph in observed.server.backend_audit.graphs} == {
         "text",
@@ -938,6 +985,26 @@ def test_success_receipt_v7_rejects_missing_graph_owner_coverage() -> None:
     assert "text, vision, and audio" in str(error.value.__cause__)
 
 
+def test_success_receipt_v8_parses_without_tensor_override() -> None:
+    receipt, config, reference, control_plane, run_id = _success_receipt_v8()
+
+    observed = validate_smoke_terminal_receipt(
+        receipt,
+        config=config,
+        reference=reference,
+        control_plane=control_plane,
+        run_id=run_id,
+    )
+
+    assert isinstance(observed, SmokeSuccessReceiptV8)
+    assert observed.schema_version == "inkling-smoke-terminal-v8"
+    assert config.schema_version == "inkling-smoke-config-v4"
+    assert observed.runtime.instrumentation_patch_sha256 == INSTRUMENTATION_PATCH_SHA256
+    assert observed.runtime.patched_diff_sha256 == INSTRUMENTATION_PATCHED_DIFF_SHA256
+    assert len(observed.runtime.patched_source_paths) == 15
+    assert "--override-tensor" not in observed.server.command
+
+
 @pytest.mark.parametrize(
     ("schema_version", "expected_type"),
     (
@@ -946,6 +1013,8 @@ def test_success_receipt_v7_rejects_missing_graph_owner_coverage() -> None:
         ("inkling-smoke-terminal-v4", SmokeFailureReceiptV4),
         ("inkling-smoke-terminal-v5", SmokeFailureReceiptV5),
         ("inkling-smoke-terminal-v6", SmokeFailureReceiptV6),
+        ("inkling-smoke-terminal-v7", SmokeFailureReceiptV7),
+        ("inkling-smoke-terminal-v8", SmokeFailureReceiptV8),
     ),
 )
 def test_failure_receipt_validates_exact_launch_and_outcome_path(
@@ -956,6 +1025,8 @@ def test_failure_receipt_validates_exact_launch_and_outcome_path(
         | type[SmokeFailureReceiptV4]
         | type[SmokeFailureReceiptV5]
         | type[SmokeFailureReceiptV6]
+        | type[SmokeFailureReceiptV7]
+        | type[SmokeFailureReceiptV8]
     ),
 ) -> None:
     receipt, config, reference, control_plane, run_id, launch_intent_sha256 = _failure_receipt(
@@ -984,6 +1055,8 @@ def test_failure_receipt_validates_exact_launch_and_outcome_path(
             | SmokeFailureReceiptV4
             | SmokeFailureReceiptV5
             | SmokeFailureReceiptV6
+            | SmokeFailureReceiptV7
+            | SmokeFailureReceiptV8
         ),
     ):
         assert observed.invocation.attempt_claim_sha256 == "6" * 64
@@ -1001,6 +1074,35 @@ def test_current_failure_receipt_rejects_a_rehashed_schema_downgrade(
         schema_version,
         historical_context=False,
     )
+
+    with pytest.raises(ValueError, match="schema differs from its instrumentation patch"):
+        validate_smoke_failure_receipt(
+            receipt,
+            config=config,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+            launch_intent_sha256=launch_intent_sha256,
+        )
+
+
+@pytest.mark.parametrize(
+    ("source_schema_version", "target_schema_version"),
+    (
+        ("inkling-smoke-terminal-v8", "inkling-smoke-terminal-v7"),
+        ("inkling-smoke-terminal-v7", "inkling-smoke-terminal-v8"),
+    ),
+    ids=("v8-to-v7", "v7-to-v8"),
+)
+def test_failure_receipt_rejects_rehashed_v7_v8_schema_swap(
+    source_schema_version: str,
+    target_schema_version: str,
+) -> None:
+    receipt, config, reference, control_plane, run_id, launch_intent_sha256 = _failure_receipt(
+        source_schema_version
+    )
+    receipt["schema_version"] = target_schema_version
+    receipt["receipt_sha256"] = smoke_terminal_receipt_sha256(receipt)
 
     with pytest.raises(ValueError, match="schema differs from its instrumentation patch"):
         validate_smoke_failure_receipt(
@@ -1348,6 +1450,13 @@ def test_failure_receipt_v6_requires_nested_server_log_equality(mutate: Any) -> 
 
 
 @pytest.mark.parametrize(
+    ("schema_version", "expected_type"),
+    (
+        ("inkling-smoke-terminal-v7", SmokeFailureReceiptV7),
+        ("inkling-smoke-terminal-v8", SmokeFailureReceiptV8),
+    ),
+)
+@pytest.mark.parametrize(
     (
         "backend_cpu_placement_error",
         "backend_cpu_log_evidence",
@@ -1360,7 +1469,9 @@ def test_failure_receipt_v6_requires_nested_server_log_equality(mutate: Any) -> 
         (False, False, "none"),
     ),
 )
-def test_failure_receipt_v7_validates_derived_cpu_placement_evidence_relation(
+def test_failure_receipt_v7_v8_validates_derived_cpu_placement_evidence_relation(
+    schema_version: str,
+    expected_type: type[SmokeFailureReceiptV7] | type[SmokeFailureReceiptV8],
     backend_cpu_placement_error: bool,
     backend_cpu_log_evidence: bool,
     expected_relation: str,
@@ -1373,7 +1484,7 @@ def test_failure_receipt_v7_validates_derived_cpu_placement_evidence_relation(
         run_id,
         launch_intent_sha256,
     ) = _failure_receipt(
-        "inkling-smoke-terminal-v7",
+        schema_version,
         backend_cpu_placement_error=backend_cpu_placement_error,
         backend_cpu_log_evidence=backend_cpu_log_evidence,
     )
@@ -1387,7 +1498,7 @@ def test_failure_receipt_v7_validates_derived_cpu_placement_evidence_relation(
         launch_intent_sha256=launch_intent_sha256,
     )
 
-    assert isinstance(observed, SmokeFailureReceiptV7)
+    assert isinstance(observed, expected_type)
     assert observed.cpu_placement_evidence_relation == expected_relation
     proof = observed.server_log_evidence.backend_diagnostic.first_cpu_placement_proof
     assert (proof is not None) is backend_cpu_log_evidence
@@ -1423,7 +1534,7 @@ def test_failure_receipt_v7_keeps_pre_initialization_patch_evidence_readable() -
     assert observed.schema_version == "inkling-smoke-terminal-v7"
 
 
-def test_failure_receipt_v7_rejects_tampered_cpu_placement_evidence_relation() -> None:
+def test_failure_receipt_v8_parses_current_active_cuda_contract() -> None:
     (
         receipt,
         config,
@@ -1432,7 +1543,73 @@ def test_failure_receipt_v7_rejects_tampered_cpu_placement_evidence_relation() -
         run_id,
         launch_intent_sha256,
     ) = _failure_receipt(
-        "inkling-smoke-terminal-v7",
+        "inkling-smoke-terminal-v8",
+        backend_cpu_placement_error=True,
+        backend_cpu_log_evidence=True,
+    )
+
+    observed = validate_smoke_failure_receipt(
+        receipt,
+        config=config,
+        reference=reference,
+        control_plane=control_plane,
+        run_id=run_id,
+        launch_intent_sha256=launch_intent_sha256,
+    )
+
+    assert isinstance(observed, SmokeFailureReceiptV8)
+    assert config.schema_version == "inkling-smoke-config-v4"
+    assert config.runtime.instrumentation_patch_sha256 == INSTRUMENTATION_PATCH_SHA256
+    assert observed.cpu_placement_evidence_relation == "matched"
+
+
+def test_failure_receipt_v7_accepts_initialized_owner_patch() -> None:
+    (
+        receipt,
+        config,
+        reference,
+        control_plane,
+        _run_id,
+        launch_intent_sha256,
+    ) = _failure_receipt("inkling-smoke-terminal-v7")
+    config, control_plane, run_id = _initialized_owner_tagged_v7_context(config, control_plane)
+    receipt["run_id"] = run_id
+    receipt["smoke_config_hash"] = config.config_hash()
+    receipt["control_plane_sha256"] = control_plane.tree_sha256
+    receipt["invocation"]["run_id"] = run_id
+    receipt["invocation"]["smoke_config_hash"] = config.config_hash()
+    receipt["invocation"]["control_plane_sha256"] = control_plane.tree_sha256
+    receipt["invocation"]["attempt_registry_key"] = f"{run_id}:smoke_test"
+    receipt["receipt_sha256"] = smoke_terminal_receipt_sha256(receipt)
+
+    observed = validate_smoke_failure_receipt(
+        receipt,
+        config=config,
+        reference=reference,
+        control_plane=control_plane,
+        run_id=run_id,
+        launch_intent_sha256=launch_intent_sha256,
+    )
+
+    assert isinstance(observed, SmokeFailureReceiptV7)
+
+
+@pytest.mark.parametrize(
+    "schema_version",
+    ("inkling-smoke-terminal-v7", "inkling-smoke-terminal-v8"),
+)
+def test_failure_receipt_v7_v8_rejects_tampered_cpu_placement_evidence_relation(
+    schema_version: str,
+) -> None:
+    (
+        receipt,
+        config,
+        reference,
+        control_plane,
+        run_id,
+        launch_intent_sha256,
+    ) = _failure_receipt(
+        schema_version,
         backend_cpu_placement_error=True,
         backend_cpu_log_evidence=True,
     )

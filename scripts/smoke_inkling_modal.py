@@ -60,6 +60,7 @@ from inkling_quant_lab.gguf.inkling_smoke import (  # noqa: E402
     BACKEND_FAILURE_PROTOCOL_CONTAMINATION_TOKENS_V2,
     CUDA_DRIVER_STUB_RPATH_LINK_DEFINITION,
     INSTRUMENTATION_PATCH_RELATIVE_PATH,
+    INSTRUMENTATION_PATCHED_DIFF_SHA256,
     PINNED_CUDA_IMAGE,
     PINNED_CUDA_IMAGE_DIGEST,
     PINNED_LLAMA_CPP_COMMIT,
@@ -199,6 +200,26 @@ SOURCE_BLOB_PINS: Final = (
         "87615921c09be5ef8c4996faa70fb3f49c385031",
     ),
     (
+        "ggml/src/ggml-cuda/common.cuh",
+        "290dc4aff259cb78a9a477dea27920fecf398c4a",
+    ),
+    (
+        "ggml/src/ggml-cuda/convert.cu",
+        "f04a2d5a2cc89a8efe816f56205db0d9629cbb7a",
+    ),
+    (
+        "ggml/src/ggml-cuda/dequantize.cuh",
+        "9ae1342fc0efc85e2fb50af42745f820177fd983",
+    ),
+    (
+        "ggml/src/ggml-cuda/getrows.cu",
+        "0e15707093fc6b150e620e67d503d37b0139cbdd",
+    ),
+    (
+        "ggml/src/ggml-cuda/ggml-cuda.cu",
+        "b2b868eb977dd9a29daf47600f36d46f9ec3bb53",
+    ),
+    (
         "src/llama-context.cpp",
         "3a469bc90bd90fbdf3d924afa696d4b61fcd1d00",
     ),
@@ -209,6 +230,10 @@ SOURCE_BLOB_PINS: Final = (
     (
         "src/llama-model-loader.h",
         "c476026d3e510ad03d3e6f0d619ecea7fc95319c",
+    ),
+    (
+        "src/llama-model.cpp",
+        "b431e2bd59bb1414ce036c78df0cd6206794acac",
     ),
     ("tools/mtmd/clip.cpp", "dbd07081bf73f336a17bd3b8d8359830128c424b"),
     ("tools/mtmd/mtmd.cpp", "3e81e44143fa635e56e0a757ce1ba33d34d107e4"),
@@ -247,7 +272,27 @@ PATCHED_SOURCE_BLOB_PINS: Final = (
     ),
     (
         "ggml/src/ggml-backend.cpp",
-        "4c9eeb8d1486914c4a675eb0c40c53cd20dd13f0",
+        "6d7bb28d0426b7a6f36766ec35eed8eeb50e7f0d",
+    ),
+    (
+        "ggml/src/ggml-cuda/common.cuh",
+        "85bf81201eacd780e7da64f3839263a8e5ce8897",
+    ),
+    (
+        "ggml/src/ggml-cuda/convert.cu",
+        "17b5e40ddfa69797463caef9998da49d5931b3e0",
+    ),
+    (
+        "ggml/src/ggml-cuda/dequantize.cuh",
+        "5f4db1939356c0f7a8caa6fe68bef3f46bbfb719",
+    ),
+    (
+        "ggml/src/ggml-cuda/getrows.cu",
+        "808ab1a61beb4e1a9f89f4c39f875624aceda9b4",
+    ),
+    (
+        "ggml/src/ggml-cuda/ggml-cuda.cu",
+        "3ac4fd35159cd3777c685033c0784bdd5220ee9f",
     ),
     (
         "src/llama-context.cpp",
@@ -260,6 +305,10 @@ PATCHED_SOURCE_BLOB_PINS: Final = (
     (
         "src/llama-model-loader.h",
         "b495fe733fd6a64a41a1eff92c10ea4fe15805bb",
+    ),
+    (
+        "src/llama-model.cpp",
+        "aa987c30178bdec3eacc459f07f1fa2bc0a4a2f2",
     ),
     (
         "tools/mtmd/clip.cpp",
@@ -1313,6 +1362,8 @@ def _runtime_toolchain_evidence() -> dict[str, Any]:
         shell=False,
     ).stdout
     patched_diff_sha256 = hashlib.sha256(patched_diff).hexdigest()
+    if patched_diff_sha256 != INSTRUMENTATION_PATCHED_DIFF_SHA256:
+        raise RuntimeError("Patched llama.cpp diff differs from its exact source contract")
     build_diff_sha256 = (
         (LLAMA_CPP_DIR / ".iql-patched-diff.sha256")
         .read_text(encoding="utf-8")
@@ -2585,7 +2636,7 @@ def _record_failure(
     )
     server_log_evidence = _failure_server_log_evidence()
     receipt: dict[str, Any] = {
-        "schema_version": "inkling-smoke-terminal-v7",
+        "schema_version": "inkling-smoke-terminal-v8",
         "status": "failed",
         "stage": SMOKE_STAGE,
         "run_id": run_root.name,
@@ -2834,7 +2885,7 @@ def smoke_test(
         artifact_load = parse_artifact_load_evidence(log_text)
         phase = "publish_success"
         receipt: dict[str, Any] = {
-            "schema_version": "inkling-smoke-terminal-v7",
+            "schema_version": "inkling-smoke-terminal-v8",
             "status": "passed",
             "stage": SMOKE_STAGE,
             "run_id": run_id,

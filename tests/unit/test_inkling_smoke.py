@@ -25,6 +25,7 @@ from inkling_quant_lab.gguf.inkling_smoke import (
     EXPECTED_Q3_SHARD_COUNT,
     EXPECTED_Q3_TOTAL_BYTES,
     EXPECTED_VERIFIED_EXPORT_REFERENCE_SHA256,
+    INITIALIZED_OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
     INSTRUMENTATION_PATCH_RELATIVE_PATH,
     INSTRUMENTATION_PATCH_SHA256,
     INSTRUMENTATION_SCHEMA_VERSION,
@@ -80,6 +81,8 @@ GPU_UUID_1_UPPER_HEX = "GPU-FFFFFFFF-1111-2222-3333-444444444444"
 INKLING_VOCAB_SIZE = 201_024
 INKLING_UNPADDED_VOCAB_SIZE = 200_058
 INKLING_PADDED_VOCAB_SIZE = INKLING_VOCAB_SIZE - INKLING_UNPADDED_VOCAB_SIZE
+OWNER_TAGGED_V3_PATCH_SHA256 = "a5510130b39c2f2073320e44973f5414a69d8e7d38e525bac0bb2dde60a1d31b"
+CORRECTED_V4_PATCH_SHA256 = "83eb5a1340c4951096d4f0d48c18ace41b182c9802babfea8eec7ff47cc1aa72"
 
 
 class _FakeCudaFunction:
@@ -351,11 +354,13 @@ def test_reference_loader_rejects_noncanonical_json(tmp_path: Path) -> None:
 def test_checked_smoke_config_binds_runtime_hardware_probes_and_claims() -> None:
     config = load_inkling_smoke_config(CONFIG_PATH)
 
-    assert config.schema_version == "inkling-smoke-config-v3"
+    assert config.schema_version == "inkling-smoke-config-v4"
     assert config.verified_export_reference_sha256 == (EXPECTED_VERIFIED_EXPORT_REFERENCE_SHA256)
     assert config.runtime.image.image == PINNED_CUDA_IMAGE
     assert config.runtime.image.digest == PINNED_CUDA_IMAGE_DIGEST
     assert config.runtime.image.platform == PINNED_CUDA_PLATFORM
+    assert INSTRUMENTATION_SCHEMA_VERSION == "inkling-llama-smoke-instrumentation-v4"
+    assert INSTRUMENTATION_PATCH_SHA256 == CORRECTED_V4_PATCH_SHA256
     assert config.runtime.instrumentation_schema_version == INSTRUMENTATION_SCHEMA_VERSION
     assert config.runtime.instrumentation_patch_path == INSTRUMENTATION_PATCH_RELATIVE_PATH
     assert config.runtime.instrumentation_patch_sha256 == INSTRUMENTATION_PATCH_SHA256
@@ -389,16 +394,96 @@ def test_checked_smoke_config_binds_runtime_hardware_probes_and_claims() -> None
     assert len(config.config_hash()) == 64
 
 
+def test_historical_v3_config_remains_bound_to_owner_tagged_v3_patch() -> None:
+    raw = _config_mapping()
+    raw["schema_version"] = "inkling-smoke-config-v3"
+    runtime = raw["runtime"]
+    assert isinstance(runtime, dict)
+    runtime["instrumentation_schema_version"] = "inkling-llama-smoke-instrumentation-v3"
+    runtime["instrumentation_patch_sha256"] = OWNER_TAGGED_V3_PATCH_SHA256
+
+    config = InklingSmokeConfig.model_validate(raw)
+
+    assert config.schema_version == "inkling-smoke-config-v3"
+    assert config.runtime.instrumentation_schema_version == "inkling-llama-smoke-instrumentation-v3"
+    assert config.runtime.instrumentation_patch_sha256 == OWNER_TAGGED_V3_PATCH_SHA256
+
+
+def test_initialized_v3_config_remains_bound_to_owner_tagged_v3_patch() -> None:
+    raw = _config_mapping()
+    raw["schema_version"] = "inkling-smoke-config-v3"
+    runtime = raw["runtime"]
+    assert isinstance(runtime, dict)
+    runtime["instrumentation_schema_version"] = "inkling-llama-smoke-instrumentation-v3"
+    runtime["instrumentation_patch_sha256"] = INITIALIZED_OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256
+
+    config = InklingSmokeConfig.model_validate(raw)
+
+    assert config.schema_version == "inkling-smoke-config-v3"
+    assert (
+        config.runtime.instrumentation_patch_sha256
+        == INITIALIZED_OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "config_schema_version",
+        "instrumentation_schema_version",
+        "instrumentation_patch_sha256",
+    ),
+    (
+        (
+            "inkling-smoke-config-v3",
+            "inkling-llama-smoke-instrumentation-v4",
+            CORRECTED_V4_PATCH_SHA256,
+        ),
+        (
+            "inkling-smoke-config-v3",
+            "inkling-llama-smoke-instrumentation-v3",
+            CORRECTED_V4_PATCH_SHA256,
+        ),
+        (
+            "inkling-smoke-config-v4",
+            "inkling-llama-smoke-instrumentation-v3",
+            OWNER_TAGGED_V3_PATCH_SHA256,
+        ),
+        (
+            "inkling-smoke-config-v4",
+            "inkling-llama-smoke-instrumentation-v4",
+            OWNER_TAGGED_V3_PATCH_SHA256,
+        ),
+    ),
+)
+def test_smoke_config_rejects_cross_version_instrumentation_bindings(
+    config_schema_version: str,
+    instrumentation_schema_version: str,
+    instrumentation_patch_sha256: str,
+) -> None:
+    raw = _config_mapping()
+    raw["schema_version"] = config_schema_version
+    runtime = raw["runtime"]
+    assert isinstance(runtime, dict)
+    runtime["instrumentation_schema_version"] = instrumentation_schema_version
+    runtime["instrumentation_patch_sha256"] = instrumentation_patch_sha256
+
+    with pytest.raises(ValidationError):
+        InklingSmokeConfig.model_validate(raw)
+
+
 def test_checked_smoke_patch_bytes_match_the_pinned_digest() -> None:
     patch_path = PROJECT_ROOT / INSTRUMENTATION_PATCH_RELATIVE_PATH
 
-    assert hashlib.sha256(patch_path.read_bytes()).hexdigest() == (INSTRUMENTATION_PATCH_SHA256)
+    assert hashlib.sha256(patch_path.read_bytes()).hexdigest() == (CORRECTED_V4_PATCH_SHA256)
+    assert patch_path.stat().st_size == 47_777
 
 
 def test_owner_tagged_patch_remains_valid_historical_schema_v3_evidence() -> None:
     raw = _config_mapping()
+    raw["schema_version"] = "inkling-smoke-config-v3"
     runtime = raw["runtime"]
     assert isinstance(runtime, dict)
+    runtime["instrumentation_schema_version"] = "inkling-llama-smoke-instrumentation-v3"
     runtime["instrumentation_patch_sha256"] = OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256
 
     config = InklingSmokeConfig.model_validate(raw)
@@ -1792,6 +1877,60 @@ def test_owner_tagged_patch_contracts_all_scheduler_graphs_and_v2_markers() -> N
     assert "IQL_SMOKE_BACKEND_GRAPH_V1" not in added_text
     assert "IQL_SMOKE_BACKEND_IDENTITY_V1" not in added_text
     assert "IQL_SMOKE_CPU_NODE_V1" not in added_text
+
+
+def test_v4_patch_supports_exact_cuda_embedding_and_audit_contract() -> None:
+    patch_text = (PROJECT_ROOT / INSTRUMENTATION_PATCH_RELATIVE_PATH).read_text()
+    added_text = "\n".join(
+        line[1:]
+        for line in patch_text.splitlines()
+        if line.startswith("+") and not line.startswith("+++")
+    )
+
+    expected_paths = (
+        "ggml/src/ggml-cuda/common.cuh",
+        "ggml/src/ggml-cuda/convert.cu",
+        "ggml/src/ggml-cuda/dequantize.cuh",
+        "ggml/src/ggml-cuda/getrows.cu",
+        "ggml/src/ggml-cuda/ggml-cuda.cu",
+        "src/llama-model.cpp",
+    )
+    for path in expected_paths:
+        assert f"diff --git a/{path} b/{path}" in patch_text
+
+    assert "(node->flags & GGML_TENSOR_FLAG_COMPUTE) == 0" in added_text
+    audit_source = added_text[added_text.index("static void ggml_backend_sched_iql_audit") :]
+    inactive_guard = audit_source.index("(node->flags & GGML_TENSOR_FLAG_COMPUTE) == 0")
+    inactive_continue = audit_source.index("continue;", inactive_guard)
+    compute_count = audit_source.index("++compute_count;")
+    backend_lookup = audit_source.index("tensor_backend_id(node)")
+    cpu_count = audit_source.index("++cpu_count;")
+    cpu_marker = audit_source.index('"IQL_SMOKE_CPU_NODE_V2')
+    assert (
+        inactive_guard < inactive_continue < compute_count < backend_lookup < cpu_count < cpu_marker
+    )
+    assert "k_get_rows_kq" in added_text
+    assert "dequantize_kq_t" in added_text
+
+    expected_dispatches = (
+        "get_rows_cuda_kq<64, dst_t, dequantize_q2_K<dst_t>>",
+        "get_rows_cuda_kq<64, dst_t, dequantize_q3_K<dst_t>>",
+        "get_rows_cuda_kq<32, dst_t, dequantize_q4_K<dst_t>>",
+        "get_rows_cuda_kq<64, dst_t, dequantize_q5_K<dst_t>>",
+        "get_rows_cuda_kq<64, dst_t, dequantize_q6_K<dst_t>>",
+    )
+    for dispatch in expected_dispatches:
+        assert dispatch in added_text
+
+    for quantization_type in ("Q2_K", "Q3_K", "Q4_K", "Q5_K", "Q6_K"):
+        assert added_text.count(f"case GGML_TYPE_{quantization_type}:") >= 2
+
+    assert "arch == LLM_ARCH_INKLING" in added_text
+    assert "!devices.empty()" in added_text
+    assert "n_gpu_layers > n_layer_all" in added_text
+    assert "pimpl->dev_input = get_layer_buft_list(0);" in added_text
+    assert "pimpl->dev_input = { cpu_dev, &pimpl->cpu_buft_list };" in added_text
+    assert "--override-tensor" not in patch_text
 
 
 def test_backend_audit_requires_compute_on_both_cuda_devices() -> None:

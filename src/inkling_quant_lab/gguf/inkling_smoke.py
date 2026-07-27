@@ -43,8 +43,9 @@ PINNED_LLAMA_CPP_COMMIT: Final = "a015409e6c27b84f60d688823d4c0126a11571fd"
 PINNED_VOCAB_SIZE: Final = 201_024
 PINNED_UNPADDED_VOCAB_SIZE: Final = 200_058
 PINNED_PADDED_VOCAB_SIZE: Final = PINNED_VOCAB_SIZE - PINNED_UNPADDED_VOCAB_SIZE
-INSTRUMENTATION_SCHEMA_VERSION: Final = "inkling-llama-smoke-instrumentation-v3"
+INSTRUMENTATION_SCHEMA_VERSION: Final = "inkling-llama-smoke-instrumentation-v4"
 INSTRUMENTATION_PATCH_RELATIVE_PATH: Final = "patches/inkling-smoke-a015409.patch"
+PINNED_CUDA_GET_ROWS_K_QUANT_UPSTREAM_COMMIT: Final = "a29b346fcd90ea366e91ea3f75573cd11ac7a850"
 HISTORICAL_INSTRUMENTATION_PATCH_SHA256: Final = (
     "b276d12a4af96c803b71fee6f7be91c230b0fb30b6be04637f61f33d07b10ecf"
 )
@@ -57,8 +58,14 @@ PRE_OWNER_INSTRUMENTATION_PATCH_SHA256: Final = (
 OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256: Final = (
     "a5510130b39c2f2073320e44973f5414a69d8e7d38e525bac0bb2dde60a1d31b"
 )
-INSTRUMENTATION_PATCH_SHA256: Final = (
+INITIALIZED_OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256: Final = (
     "0d6219df99d6bb4cd89b3cf931a2b6d953f9a6a3b9fb88f718975f810d90447b"
+)
+INSTRUMENTATION_PATCH_SHA256: Final = (
+    "83eb5a1340c4951096d4f0d48c18ace41b182c9802babfea8eec7ff47cc1aa72"
+)
+INSTRUMENTATION_PATCHED_DIFF_SHA256: Final = (
+    "f9bd7ed63e0caa66c061dbd3dc270503ae43032d7c26d2fee9aad18292504908"
 )
 
 SUBJECT_RUN_ID: Final = "inkling-q3km-86b4d430-a015409e-ffd466dd93-8083cf41e1"
@@ -463,6 +470,7 @@ class SmokeRuntimeConfig(StrictFrozenModel):
         "inkling-llama-smoke-instrumentation-v1",
         "inkling-llama-smoke-instrumentation-v2",
         "inkling-llama-smoke-instrumentation-v3",
+        "inkling-llama-smoke-instrumentation-v4",
     ]
     instrumentation_patch_path: Literal["patches/inkling-smoke-a015409.patch"]
     instrumentation_patch_sha256: Literal[
@@ -471,6 +479,7 @@ class SmokeRuntimeConfig(StrictFrozenModel):
         "0f824d7a77b0e98816e6d62f982b010caada15f8a93a20343d5cc0d129bcca20",
         "a5510130b39c2f2073320e44973f5414a69d8e7d38e525bac0bb2dde60a1d31b",
         "0d6219df99d6bb4cd89b3cf931a2b6d953f9a6a3b9fb88f718975f810d90447b",
+        "83eb5a1340c4951096d4f0d48c18ace41b182c9802babfea8eec7ff47cc1aa72",
     ]
     image: SmokeCudaImageConfig
     build_targets: tuple[str, ...]
@@ -501,15 +510,17 @@ class SmokeRuntimeConfig(StrictFrozenModel):
         elif self.instrumentation_patch_sha256 == PRE_OWNER_INSTRUMENTATION_PATCH_SHA256:
             if self.instrumentation_schema_version != "inkling-llama-smoke-instrumentation-v2":
                 raise ValueError("pre-owner instrumentation patch requires schema version 2")
-        elif (
-            self.instrumentation_patch_sha256
-            not in {
-                OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
-                INSTRUMENTATION_PATCH_SHA256,
-            }
-            or self.instrumentation_schema_version != INSTRUMENTATION_SCHEMA_VERSION
-        ):
-            raise ValueError("current instrumentation patch requires schema version 3")
+        elif self.instrumentation_patch_sha256 in {
+            OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
+            INITIALIZED_OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
+        }:
+            if self.instrumentation_schema_version != "inkling-llama-smoke-instrumentation-v3":
+                raise ValueError("owner-tagged instrumentation patch requires schema version 3")
+        elif self.instrumentation_patch_sha256 == INSTRUMENTATION_PATCH_SHA256:
+            if self.instrumentation_schema_version != INSTRUMENTATION_SCHEMA_VERSION:
+                raise ValueError("current instrumentation patch requires schema version 4")
+        else:
+            raise ValueError("instrumentation patch SHA-256 is unsupported")
         return self
 
 
@@ -634,6 +645,7 @@ class InklingSmokeConfig(StrictFrozenModel):
         "inkling-smoke-config-v1",
         "inkling-smoke-config-v2",
         "inkling-smoke-config-v3",
+        "inkling-smoke-config-v4",
     ]
     verified_export_reference_path: Literal[
         "configs/experiments/inkling_q3_k_m_verified_export.json"
@@ -665,11 +677,18 @@ class InklingSmokeConfig(StrictFrozenModel):
                 "inkling-llama-smoke-instrumentation-v2"
             ):
                 raise ValueError("smoke config version 2 requires instrumentation version 2")
-        else:
+        elif self.schema_version == "inkling-smoke-config-v3":
             if self.output_vocabulary is None:
                 raise ValueError("smoke config version 3 requires output vocabulary")
-            if self.runtime.instrumentation_schema_version != INSTRUMENTATION_SCHEMA_VERSION:
+            if self.runtime.instrumentation_schema_version != (
+                "inkling-llama-smoke-instrumentation-v3"
+            ):
                 raise ValueError("smoke config version 3 requires instrumentation version 3")
+        else:
+            if self.output_vocabulary is None:
+                raise ValueError("smoke config version 4 requires output vocabulary")
+            if self.runtime.instrumentation_schema_version != INSTRUMENTATION_SCHEMA_VERSION:
+                raise ValueError("smoke config version 4 requires instrumentation version 4")
         expected_probe_identity = (
             ("text_greedy_v1", "text"),
             ("image_greedy_v1", "image"),
@@ -3334,6 +3353,8 @@ __all__ = [
     "EXPECTED_Q3_SHARD_COUNT",
     "EXPECTED_Q3_TOTAL_BYTES",
     "EXPECTED_VERIFIED_EXPORT_REFERENCE_SHA256",
+    "INITIALIZED_OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256",
+    "INSTRUMENTATION_PATCHED_DIFF_SHA256",
     "INSTRUMENTATION_PATCH_RELATIVE_PATH",
     "INSTRUMENTATION_PATCH_SHA256",
     "INSTRUMENTATION_SCHEMA_VERSION",
@@ -3343,6 +3364,7 @@ __all__ = [
     "MAX_BACKEND_FAILURE_OP_BYTES",
     "MAX_BACKEND_FAILURE_RECORDS",
     "OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256",
+    "PINNED_CUDA_GET_ROWS_K_QUANT_UPSTREAM_COMMIT",
     "PINNED_CUDA_IMAGE",
     "PINNED_CUDA_IMAGE_DIGEST",
     "PINNED_CUDA_PLATFORM",
