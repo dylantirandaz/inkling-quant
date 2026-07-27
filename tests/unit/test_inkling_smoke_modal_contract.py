@@ -182,6 +182,12 @@ EXPECTED_PATCHED_SOURCE_BLOB_PINS = (
         "9be8c02497080fa57ad9460084c2337a1997f89b",
     ),
 )
+EXPECTED_PATCHED_DIFF_GIT_OPTIONS = (
+    "--binary",
+    "--abbrev=8",
+    "--no-ext-diff",
+    "--no-textconv",
+)
 
 
 def _module(path: Path) -> ast.Module:
@@ -916,6 +922,7 @@ def test_smoke_runner_build_and_mount_contract_is_closed() -> None:
     source = RUNNER_PATH.read_text(encoding="utf-8")
     source_blob_pins = _assignment_literal(module, "SOURCE_BLOB_PINS")
     patched_source_blob_pins = _assignment_literal(module, "PATCHED_SOURCE_BLOB_PINS")
+    patched_diff_git_options = _assignment_literal(module, "PATCHED_DIFF_GIT_OPTIONS")
 
     assert _assignment_literal(module, "BUILD_TARGETS") == (
         "llama-cli",
@@ -925,6 +932,11 @@ def test_smoke_runner_build_and_mount_contract_is_closed() -> None:
     )
     assert source_blob_pins == EXPECTED_SOURCE_BLOB_PINS
     assert patched_source_blob_pins == EXPECTED_PATCHED_SOURCE_BLOB_PINS
+    assert patched_diff_git_options == EXPECTED_PATCHED_DIFF_GIT_OPTIONS
+    assert (
+        inkling_smoke.INSTRUMENTATION_PATCHED_DIFF_SHA256
+        == "f9bd7ed63e0caa66c061dbd3dc270503ae43032d7c26d2fee9aad18292504908"
+    )
     assert len(source_blob_pins) == 15
     assert len(patched_source_blob_pins) == 15
     assert tuple(path for path, _blob_id in source_blob_pins) == tuple(
@@ -958,6 +970,16 @@ def test_smoke_runner_build_and_mount_contract_is_closed() -> None:
     assert "9be8c02497080fa57ad9460084c2337a1997f89b" in source
     assert ".iql-smoke-patch.sha256" in source
     assert ".iql-patched-diff.sha256" in source
+    assert source.count("_patched_diff_command(LLAMA_CPP_DIR)") == 3
+    build_diff_offset = source.index(
+        "_patched_diff_command(LLAMA_CPP_DIR)",
+        source.index("smoke_image = smoke_image.run_commands("),
+    )
+    build_diff_check_offset = source.index(
+        "Build-time patched llama.cpp diff differs from its exact source contract"
+    )
+    cuda_build_offset = source.index("cmake -S {LLAMA_CPP_DIR}")
+    assert build_diff_offset < build_diff_check_offset < cuda_build_offset
     assert ".iql-llama-server-help.txt" in source
     assert "CUDA_DRIVER_STUB" in source
     assert 'f"-D{CUDA_DRIVER_STUB_RPATH_LINK_DEFINITION}"' in source
@@ -970,6 +992,86 @@ def test_smoke_runner_build_and_mount_contract_is_closed() -> None:
     assert "test ! -e {CUDA_DRIVER_LINK_DIR}" in source
     assert "parse_cuda_driver_linkage" in source
     assert "Runtime CUDA driver resolved to the build stub" in source
+
+
+def test_patched_diff_command_ignores_repository_abbreviation_default(tmp_path: Path) -> None:
+    module = _module(RUNNER_PATH)
+    options = _assignment_literal(module, "PATCHED_DIFF_GIT_OPTIONS")
+    namespace = _isolated_runner_functions("_patched_diff_command")
+    namespace.update(
+        {
+            "PATCHED_DIFF_GIT_OPTIONS": options,
+            "SOURCE_BLOB_PINS": (("source.cpp", "0" * 40),),
+        }
+    )
+    patched_diff_command = namespace["_patched_diff_command"]
+    assert callable(patched_diff_command)
+
+    repository = tmp_path / "repository"
+    subprocess.run(
+        ["git", "init", "--quiet", str(repository)],
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+    source_path = repository / "source.cpp"
+    source_path.write_bytes(b"base\n")
+    subprocess.run(
+        ["git", "-C", str(repository), "add", "source.cpp"],
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "-c",
+            "user.name=Inkling Quant Lab",
+            "-c",
+            "user.email=tests@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "base",
+        ],
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+    source_path.write_bytes(b"candidate\n")
+
+    command = patched_diff_command(repository)
+    assert command == (
+        "git",
+        "-C",
+        str(repository),
+        "diff",
+        *EXPECTED_PATCHED_DIFF_GIT_OPTIONS,
+        "--",
+        "source.cpp",
+    )
+    observed: list[bytes] = []
+    for abbreviation in ("7", "12"):
+        subprocess.run(
+            ["git", "-C", str(repository), "config", "core.abbrev", abbreviation],
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
+        observed.append(
+            subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                timeout=10,
+            ).stdout
+        )
+
+    assert observed[0] == observed[1]
+    index_line = next(line for line in observed[0].splitlines() if line.startswith(b"index "))
+    assert re.fullmatch(rb"index [0-9a-f]{8}\.\.[0-9a-f]{8} 100644", index_line)
 
 
 def test_smoke_runner_binds_trace_verbosity_for_required_info_evidence() -> None:
@@ -2433,6 +2535,7 @@ def test_peer_topology_recheck_rejects_any_post_rehash_drift() -> None:
 
 def _safe_subprocess_failure_namespace() -> dict[str, object]:
     namespace = _isolated_runner_functions(
+        "_patched_diff_command",
         "_failed_subprocess_command_id",
         "_captured_subprocess_bytes",
         "_safe_subprocess_failure",
@@ -2440,6 +2543,7 @@ def _safe_subprocess_failure_namespace() -> dict[str, object]:
     namespace.update(
         {
             "LLAMA_CPP_DIR": Path("/opt/llama.cpp"),
+            "PATCHED_DIFF_GIT_OPTIONS": EXPECTED_PATCHED_DIFF_GIT_OPTIONS,
             "SOURCE_BLOB_PINS": (
                 ("src/first.cpp", "a" * 40),
                 ("src/second.cpp", "b" * 40),
@@ -2483,7 +2587,7 @@ def test_safe_subprocess_failure_maps_every_allowlisted_preflight_command() -> N
             "-C",
             str(llama_cpp_dir),
             "diff",
-            "--binary",
+            *EXPECTED_PATCHED_DIFF_GIT_OPTIONS,
             "--",
             *patched_paths,
         ): "llama_cpp_git_patched_diff_v1",
