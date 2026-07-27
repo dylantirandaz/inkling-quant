@@ -47,6 +47,8 @@ from inkling_quant_lab.gguf.inkling_smoke import (
     PINNED_LLAMA_CPP_COMMIT,
     PINNED_MODEL_REVISION,
     PRE_OWNER_INSTRUMENTATION_PATCH_SHA256,
+    PRE_RECONCILIATION_INSTRUMENTATION_PATCH_SHA256,
+    PRE_RECONCILIATION_INSTRUMENTATION_PATCHED_DIFF_SHA256,
     BackendCpuPlacementError,
     BackendFailureDiagnostic,
     BackendFailureDiagnosticV2,
@@ -62,6 +64,7 @@ SMOKE_RECEIPT_HASH_DOMAIN = b"inkling-smoke-terminal-receipt-v5\0"
 _SMOKE_RECEIPT_HASH_DOMAIN_V6 = b"inkling-smoke-terminal-receipt-v6\0"
 _SMOKE_RECEIPT_HASH_DOMAIN_V7 = b"inkling-smoke-terminal-receipt-v7\0"
 _SMOKE_RECEIPT_HASH_DOMAIN_V8 = b"inkling-smoke-terminal-receipt-v8\0"
+_SMOKE_RECEIPT_HASH_DOMAIN_V9 = b"inkling-smoke-terminal-receipt-v9\0"
 SMOKE_PACKAGE_MANIFEST_HASH_DOMAIN = b"inkling-smoke-package-manifest-v2\0"
 _SMOKE_HARDWARE_TOPOLOGY_HASH_DOMAIN_V2 = b"inkling-smoke-hardware-topology-v2\0"
 _SMOKE_HARDWARE_TOPOLOGY_HASH_DOMAIN_V3 = b"inkling-smoke-hardware-topology-v3\0"
@@ -1231,6 +1234,12 @@ class SmokeFailureReceiptV8(_SmokeFailureReceiptWithOwnerTaggedCpuProof):
     schema_version: Literal["inkling-smoke-terminal-v8"]
 
 
+class SmokeFailureReceiptV9(_SmokeFailureReceiptWithOwnerTaggedCpuProof):
+    """Version 9 failure evidence with metadata-only shard reconciliation."""
+
+    schema_version: Literal["inkling-smoke-terminal-v9"]
+
+
 SmokeFailureReceipt: TypeAlias = (
     SmokeFailureReceiptV2
     | SmokeFailureReceiptV3
@@ -1239,6 +1248,7 @@ SmokeFailureReceipt: TypeAlias = (
     | SmokeFailureReceiptV6
     | SmokeFailureReceiptV7
     | SmokeFailureReceiptV8
+    | SmokeFailureReceiptV9
 )
 
 
@@ -1406,6 +1416,7 @@ class SmokeRuntimeEvidence(_SmokeReceiptModel):
         "inkling-llama-smoke-instrumentation-v2",
         "inkling-llama-smoke-instrumentation-v3",
         "inkling-llama-smoke-instrumentation-v4",
+        "inkling-llama-smoke-instrumentation-v5",
     ]
     instrumentation_patch_path: Literal["/root/inkling-smoke-a015409.patch"]
     instrumentation_patch_sha256: StrictStr = Field(pattern=r"^[0-9a-f]{64}$")
@@ -1502,6 +1513,14 @@ class SmokeRuntimeEvidence(_SmokeReceiptModel):
             expected_blobs = _SMOKE_OWNER_TAGGED_PATCHED_SOURCE_BLOB_IDS
             expected_paths = _SMOKE_OWNER_TAGGED_PATCHED_SOURCE_PATHS
             expected_instrumentation_schema = "inkling-llama-smoke-instrumentation-v3"
+        elif self.instrumentation_patch_sha256 == PRE_RECONCILIATION_INSTRUMENTATION_PATCH_SHA256:
+            expected_blobs = _SMOKE_PATCHED_SOURCE_BLOB_IDS
+            expected_paths = _SMOKE_PATCHED_SOURCE_PATHS
+            expected_instrumentation_schema = "inkling-llama-smoke-instrumentation-v4"
+            if self.patched_diff_sha256 != PRE_RECONCILIATION_INSTRUMENTATION_PATCHED_DIFF_SHA256:
+                raise ValueError(
+                    "runtime patched diff differs from the pre-reconciliation source patch"
+                )
         elif self.instrumentation_patch_sha256 == INSTRUMENTATION_PATCH_SHA256:
             expected_blobs = _SMOKE_PATCHED_SOURCE_BLOB_IDS
             expected_paths = _SMOKE_PATCHED_SOURCE_PATHS
@@ -1982,9 +2001,17 @@ class SmokeProjectorReadyEvidence(_SmokeReceiptModel):
 
 
 class SmokeArtifactLoadEvidence(_SmokeReceiptModel):
-    """Pinned loader proof for all shards and the multimodal projector."""
+    """Loader proof for all shards and the multimodal projector.
 
-    schema_version: Literal["inkling-artifact-load-v1"]
+    Version 1 requires each shard to load at least one tensor. Version 2 uses
+    expected and loaded tensor counts, so it also supports a metadata-only
+    shard.
+    """
+
+    schema_version: Literal[
+        "inkling-artifact-load-v1",
+        "inkling-artifact-load-v2",
+    ]
     first_shard_path: Literal["/subject/q3_k_m/inkling-Q3_K_M-00001-of-00049.gguf"]
     additional_shards_loaded: StrictInt = Field(ge=48, le=48)
     total_shards_loaded: StrictInt = Field(ge=49, le=49)
@@ -2558,6 +2585,7 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
         "inkling-smoke-terminal-v5",
         "inkling-smoke-terminal-v7",
         "inkling-smoke-terminal-v8",
+        "inkling-smoke-terminal-v9",
     ]
     status: Literal["passed"]
     stage: Literal["smoke_test"]
@@ -2603,6 +2631,15 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
             ("audio_greedy_v1", "audio"),
         ):
             raise ValueError("receipt must contain exact ordered text, image, and audio probes")
+        expected_artifact_load_schema = (
+            "inkling-artifact-load-v2"
+            if self.schema_version == "inkling-smoke-terminal-v9"
+            else "inkling-artifact-load-v1"
+        )
+        if self.server.artifact_load.schema_version != expected_artifact_load_schema:
+            raise ValueError(
+                "terminal and artifact-load evidence schemas describe different accounting rules"
+            )
         vocabulary = self.server.properties.vocab_size
         if self.server.raw_logit_audit.vocab_size != vocabulary:
             raise ValueError("raw-logit and server vocabulary sizes differ")
@@ -2613,6 +2650,7 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
             "inkling-smoke-terminal-v5",
             "inkling-smoke-terminal-v7",
             "inkling-smoke-terminal-v8",
+            "inkling-smoke-terminal-v9",
         }:
             if not isinstance(self.server.raw_logit_audit, SmokeRawLogitAuditV2):
                 raise ValueError("current terminal receipt requires raw-logit audit v2")
@@ -2642,6 +2680,7 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
         if self.schema_version in {
             "inkling-smoke-terminal-v7",
             "inkling-smoke-terminal-v8",
+            "inkling-smoke-terminal-v9",
         }:
             if not isinstance(self.server.backend_audit, SmokeBackendAuditV2):
                 raise ValueError("current terminal receipt requires owner-tagged backend audit v2")
@@ -2703,6 +2742,19 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
                 or owner_tagged_source_blobs != _SMOKE_OWNER_TAGGED_PATCHED_SOURCE_BLOB_IDS
             ):
                 raise ValueError("version 7 success receipt uses the wrong source patch")
+        elif self.schema_version == "inkling-smoke-terminal-v8":
+            _require_current_cuda_backend_identities(self.server.backend_audit.identities)
+            pre_reconciliation_source_blobs = tuple(
+                (identity.path, identity.git_blob_id)
+                for identity in self.runtime.base_source_blob_ids
+            )
+            if (
+                self.runtime.instrumentation_patch_sha256
+                != PRE_RECONCILIATION_INSTRUMENTATION_PATCH_SHA256
+                or self.runtime.patched_source_paths != _SMOKE_PATCHED_SOURCE_PATHS
+                or pre_reconciliation_source_blobs != _SMOKE_PATCHED_SOURCE_BLOB_IDS
+            ):
+                raise ValueError("version 8 success receipt uses the wrong source patch")
         else:
             _require_current_cuda_backend_identities(self.server.backend_audit.identities)
             current_source_blobs = tuple(
@@ -2714,12 +2766,13 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
                 or self.runtime.patched_source_paths != _SMOKE_PATCHED_SOURCE_PATHS
                 or current_source_blobs != _SMOKE_PATCHED_SOURCE_BLOB_IDS
             ):
-                raise ValueError("version 8 success receipt uses the wrong source patch")
+                raise ValueError("version 9 success receipt uses the wrong source patch")
         if self.schema_version in {
             "inkling-smoke-terminal-v4",
             "inkling-smoke-terminal-v5",
             "inkling-smoke-terminal-v7",
             "inkling-smoke-terminal-v8",
+            "inkling-smoke-terminal-v9",
         }:
             if self.gpu_topology is None:
                 raise ValueError("current success receipt lacks CUDA peer topology evidence")
@@ -2780,6 +2833,12 @@ class SmokeSuccessReceiptV8(SmokeTerminalReceipt):
     """Active-node version 8 success evidence."""
 
     schema_version: Literal["inkling-smoke-terminal-v8"]
+
+
+class SmokeSuccessReceiptV9(SmokeTerminalReceipt):
+    """Metadata-reconciled version 9 success evidence."""
+
+    schema_version: Literal["inkling-smoke-terminal-v9"]
 
 
 def smoke_control_plane_tree_sha256(
@@ -3053,6 +3112,7 @@ def _expected_server_command(
         "inkling-smoke-terminal-v5",
         "inkling-smoke-terminal-v7",
         "inkling-smoke-terminal-v8",
+        "inkling-smoke-terminal-v9",
     ],
 ) -> tuple[str, ...]:
     first_shard = f"/subject/{reference.q3_shards[0].path}"
@@ -3102,6 +3162,7 @@ def _expected_server_command(
                 "inkling-smoke-terminal-v5",
                 "inkling-smoke-terminal-v7",
                 "inkling-smoke-terminal-v8",
+                "inkling-smoke-terminal-v9",
             }
             else (*common_arguments, *verbosity_arguments)
         ),
@@ -3171,7 +3232,8 @@ def _validate_smoke_failure_launch_schema(
             OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
             INITIALIZED_OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
         },
-        "inkling-smoke-terminal-v8": {INSTRUMENTATION_PATCH_SHA256},
+        "inkling-smoke-terminal-v8": {PRE_RECONCILIATION_INSTRUMENTATION_PATCH_SHA256},
+        "inkling-smoke-terminal-v9": {INSTRUMENTATION_PATCH_SHA256},
     }
     expected_patches = expected_patches_by_schema.get(schema_version)
     if expected_patches is None:
@@ -3230,6 +3292,8 @@ def validate_smoke_failure_receipt(
             receipt = SmokeFailureReceiptV7.model_validate(raw)
         elif schema_version == "inkling-smoke-terminal-v8":
             receipt = SmokeFailureReceiptV8.model_validate(raw)
+        elif schema_version == "inkling-smoke-terminal-v9":
+            receipt = SmokeFailureReceiptV9.model_validate(raw)
         else:
             raise ValueError("unsupported terminal smoke failure receipt schema version")
     except ValidationError as error:
@@ -3293,6 +3357,8 @@ def validate_smoke_terminal_receipt(
             receipt = SmokeSuccessReceiptV7.model_validate(raw)
         elif raw.get("schema_version") == "inkling-smoke-terminal-v8":
             receipt = SmokeSuccessReceiptV8.model_validate(raw)
+        elif raw.get("schema_version") == "inkling-smoke-terminal-v9":
+            receipt = SmokeSuccessReceiptV9.model_validate(raw)
         else:
             receipt = SmokeTerminalReceipt.model_validate(raw)
     except ValidationError as error:
@@ -3331,6 +3397,7 @@ def validate_smoke_terminal_receipt(
         "inkling-smoke-terminal-v5",
         "inkling-smoke-terminal-v7",
         "inkling-smoke-terminal-v8",
+        "inkling-smoke-terminal-v9",
     }:
         output_vocabulary = config.output_vocabulary
         raw_logit_audit = receipt.server.raw_logit_audit
@@ -3488,6 +3555,8 @@ def smoke_terminal_receipt_sha256(value: Mapping[str, Any]) -> str:
         domain = _SMOKE_RECEIPT_HASH_DOMAIN_V7
     elif schema_version == "inkling-smoke-terminal-v8":
         domain = _SMOKE_RECEIPT_HASH_DOMAIN_V8
+    elif schema_version == "inkling-smoke-terminal-v9":
+        domain = _SMOKE_RECEIPT_HASH_DOMAIN_V9
     else:
         raise ValueError("unsupported terminal smoke receipt schema version")
     return hashlib.sha256(domain + _canonical_json(payload).encode("utf-8")).hexdigest()
@@ -3514,6 +3583,7 @@ __all__ = [
     "SmokeFailureReceiptV6",
     "SmokeFailureReceiptV7",
     "SmokeFailureReceiptV8",
+    "SmokeFailureReceiptV9",
     "SmokeGpuTopologyEvidence",
     "SmokeHostEvidence",
     "SmokeInvocationEvidence",
@@ -3528,6 +3598,7 @@ __all__ = [
     "SmokeSubprocessFailureEvidence",
     "SmokeSuccessReceiptV7",
     "SmokeSuccessReceiptV8",
+    "SmokeSuccessReceiptV9",
     "SmokeTerminalReceipt",
     "canonical_python_package_inventory",
     "canonical_smoke_attempt_registry_created_at_utc",

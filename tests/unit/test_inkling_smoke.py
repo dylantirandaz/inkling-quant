@@ -36,6 +36,7 @@ from inkling_quant_lab.gguf.inkling_smoke import (
     PINNED_CUDA_IMAGE,
     PINNED_CUDA_IMAGE_DIGEST,
     PINNED_CUDA_PLATFORM,
+    PRE_RECONCILIATION_INSTRUMENTATION_PATCH_SHA256,
     SMOKE_CONFIG_RELATIVE_PATH,
     SUBJECT_CONFIG_HASH,
     SUBJECT_CONTROL_PLANE_SHA256,
@@ -82,7 +83,10 @@ INKLING_VOCAB_SIZE = 201_024
 INKLING_UNPADDED_VOCAB_SIZE = 200_058
 INKLING_PADDED_VOCAB_SIZE = INKLING_VOCAB_SIZE - INKLING_UNPADDED_VOCAB_SIZE
 OWNER_TAGGED_V3_PATCH_SHA256 = "a5510130b39c2f2073320e44973f5414a69d8e7d38e525bac0bb2dde60a1d31b"
-CORRECTED_V4_PATCH_SHA256 = "83eb5a1340c4951096d4f0d48c18ace41b182c9802babfea8eec7ff47cc1aa72"
+PRE_RECONCILIATION_V4_PATCH_SHA256 = (
+    "83eb5a1340c4951096d4f0d48c18ace41b182c9802babfea8eec7ff47cc1aa72"
+)
+RECONCILED_V5_PATCH_SHA256 = "005f1f342511fc3fc843bdcc7be814ed8a60e67033b733eb7e7e4af53925be04"
 
 
 class _FakeCudaFunction:
@@ -354,13 +358,13 @@ def test_reference_loader_rejects_noncanonical_json(tmp_path: Path) -> None:
 def test_checked_smoke_config_binds_runtime_hardware_probes_and_claims() -> None:
     config = load_inkling_smoke_config(CONFIG_PATH)
 
-    assert config.schema_version == "inkling-smoke-config-v4"
+    assert config.schema_version == "inkling-smoke-config-v5"
     assert config.verified_export_reference_sha256 == (EXPECTED_VERIFIED_EXPORT_REFERENCE_SHA256)
     assert config.runtime.image.image == PINNED_CUDA_IMAGE
     assert config.runtime.image.digest == PINNED_CUDA_IMAGE_DIGEST
     assert config.runtime.image.platform == PINNED_CUDA_PLATFORM
-    assert INSTRUMENTATION_SCHEMA_VERSION == "inkling-llama-smoke-instrumentation-v4"
-    assert INSTRUMENTATION_PATCH_SHA256 == CORRECTED_V4_PATCH_SHA256
+    assert INSTRUMENTATION_SCHEMA_VERSION == "inkling-llama-smoke-instrumentation-v5"
+    assert INSTRUMENTATION_PATCH_SHA256 == RECONCILED_V5_PATCH_SHA256
     assert config.runtime.instrumentation_schema_version == INSTRUMENTATION_SCHEMA_VERSION
     assert config.runtime.instrumentation_patch_path == INSTRUMENTATION_PATCH_RELATIVE_PATH
     assert config.runtime.instrumentation_patch_sha256 == INSTRUMENTATION_PATCH_SHA256
@@ -426,6 +430,20 @@ def test_initialized_v3_config_remains_bound_to_owner_tagged_v3_patch() -> None:
     )
 
 
+def test_pre_reconciliation_v4_config_remains_bound_to_v4_patch() -> None:
+    raw = _config_mapping()
+    raw["schema_version"] = "inkling-smoke-config-v4"
+    runtime = raw["runtime"]
+    assert isinstance(runtime, dict)
+    runtime["instrumentation_schema_version"] = "inkling-llama-smoke-instrumentation-v4"
+    runtime["instrumentation_patch_sha256"] = PRE_RECONCILIATION_INSTRUMENTATION_PATCH_SHA256
+
+    config = InklingSmokeConfig.model_validate(raw)
+
+    assert config.schema_version == "inkling-smoke-config-v4"
+    assert config.runtime.instrumentation_patch_sha256 == PRE_RECONCILIATION_V4_PATCH_SHA256
+
+
 @pytest.mark.parametrize(
     (
         "config_schema_version",
@@ -436,12 +454,12 @@ def test_initialized_v3_config_remains_bound_to_owner_tagged_v3_patch() -> None:
         (
             "inkling-smoke-config-v3",
             "inkling-llama-smoke-instrumentation-v4",
-            CORRECTED_V4_PATCH_SHA256,
+            PRE_RECONCILIATION_V4_PATCH_SHA256,
         ),
         (
             "inkling-smoke-config-v3",
             "inkling-llama-smoke-instrumentation-v3",
-            CORRECTED_V4_PATCH_SHA256,
+            PRE_RECONCILIATION_V4_PATCH_SHA256,
         ),
         (
             "inkling-smoke-config-v4",
@@ -452,6 +470,16 @@ def test_initialized_v3_config_remains_bound_to_owner_tagged_v3_patch() -> None:
             "inkling-smoke-config-v4",
             "inkling-llama-smoke-instrumentation-v4",
             OWNER_TAGGED_V3_PATCH_SHA256,
+        ),
+        (
+            "inkling-smoke-config-v4",
+            "inkling-llama-smoke-instrumentation-v5",
+            RECONCILED_V5_PATCH_SHA256,
+        ),
+        (
+            "inkling-smoke-config-v5",
+            "inkling-llama-smoke-instrumentation-v4",
+            PRE_RECONCILIATION_V4_PATCH_SHA256,
         ),
     ),
 )
@@ -474,8 +502,8 @@ def test_smoke_config_rejects_cross_version_instrumentation_bindings(
 def test_checked_smoke_patch_bytes_match_the_pinned_digest() -> None:
     patch_path = PROJECT_ROOT / INSTRUMENTATION_PATCH_RELATIVE_PATH
 
-    assert hashlib.sha256(patch_path.read_bytes()).hexdigest() == (CORRECTED_V4_PATCH_SHA256)
-    assert patch_path.stat().st_size == 47_777
+    assert hashlib.sha256(patch_path.read_bytes()).hexdigest() == RECONCILED_V5_PATCH_SHA256
+    assert patch_path.stat().st_size == 48_409
 
 
 def test_owner_tagged_patch_remains_valid_historical_schema_v3_evidence() -> None:
@@ -2125,7 +2153,7 @@ def test_artifact_load_parser_binds_all_49_shards_and_projector() -> None:
             "llama_model_loader: additional 48 GGUFs metadata loaded.",
             f"srv load_model: loaded multimodal model, '{projector}'",
             "IQL_SMOKE_TEXT_SHARDS_V1 expected=49 opened=49 contexts=49 tensors=1200",
-            "IQL_SMOKE_TEXT_LOAD_V1 opened=49 accounted=49 tensors=1200 "
+            "IQL_SMOKE_TEXT_LOAD_V2 opened=49 accounted=49 tensors=1200 "
             "bytes=451035400288 size_done=451035400288 size_data=451035400288 mmap=1",
             "IQL_SMOKE_PROJECTOR_TENSORS_V1 modality=vision projector=inkling "
             "tensors=10 bytes=90000000",
@@ -2138,6 +2166,7 @@ def test_artifact_load_parser_binds_all_49_shards_and_projector() -> None:
 
     evidence = parse_artifact_load_evidence(log)
 
+    assert evidence.schema_version == "inkling-artifact-load-v2"
     assert evidence.first_shard_path == first
     assert evidence.total_shards_loaded == 49
     assert evidence.projector_path == projector
@@ -2153,6 +2182,7 @@ def test_artifact_load_parser_binds_all_49_shards_and_projector() -> None:
         ("additional 48", "additional 47", "additional shard"),
         ("00001-of-00049", "00002-of-00049", "first shard"),
         ("mmproj-BF16.gguf", "other.gguf", "projector"),
+        ("accounted=49", "accounted=48", "accounted"),
     ),
 )
 def test_artifact_load_parser_rejects_wrong_artifact_set(
@@ -2167,7 +2197,7 @@ def test_artifact_load_parser_rejects_wrong_artifact_set(
             "llama_model_loader: additional 48 GGUFs metadata loaded.",
             "loaded multimodal model, '/subject/mmproj/mmproj-BF16.gguf'",
             "IQL_SMOKE_TEXT_SHARDS_V1 expected=49 opened=49 contexts=49 tensors=1200",
-            "IQL_SMOKE_TEXT_LOAD_V1 opened=49 accounted=49 tensors=1200 "
+            "IQL_SMOKE_TEXT_LOAD_V2 opened=49 accounted=49 tensors=1200 "
             "bytes=451035400288 size_done=451035400288 size_data=451035400288 mmap=1",
             "IQL_SMOKE_PROJECTOR_TENSORS_V1 modality=vision projector=inkling "
             "tensors=10 bytes=90000000",

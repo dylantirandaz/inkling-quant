@@ -39,49 +39,27 @@ The final verification checked the export structure, file set, sizes, and checks
 It did not measure the quality of the quantized Inkling model.
 The project does not yet have an accepted inference-smoke result for the final files.
 
-The latest controlled smoke attempt used commit
-`b051abdd1701ca16fc473c4b7944151aa02ae7b2` and control-plane SHA-256
-`d5d20a27fa598a18843e4572414daa4195463a35982cc22246326a4a80966e55`.
-Modal accepted one launch. Its call ID is `fc-01KYA88KH05C6B5WY7DBBRRD8S`, and its task ID is
-`ta-01KYA88MD533YKP6AF0QZG075R`.
-The backend audit raised `BackendCpuPlacementError`.
-The attempt is consumed.
-It is not a smoke-test pass.
+The latest controlled smoke attempt loaded the complete export.
+It ran the text, image, and audio probes two times.
+All measured model graph work used CUDA.
+The attempt then failed the strict shard-accounting check.
 
-The attempt did not commit a valid terminal version 6 receipt.
-Code review found a scanner path that can treat more than 64 total graph markers as retained-record
-truncation.
-The retained data does not prove which scanner condition blocked this receipt.
-This path is the best available explanation.
-The receipt does not give the exact marker counts or the CPU operation.
-Therefore, the project does not report either value as a measurement.
+The first GGUF file contains metadata and no tensors.
+The old audit counted only files that loaded one or more tensors.
+It therefore reported 48 accounted files instead of 49.
+This is an evidence-accounting failure.
+It is not a model-load or inference failure.
+It is also not an accepted smoke-test pass.
 
-The correction uses separate counts for all graph markers, affected graph markers, and CPU-node
-markers.
-It keeps at most 64 affected graph records and 64 CPU-node samples.
-It sets the truncation flag only when the affected-graph count or the CPU-node count is more than
-64.
-A complete scan requires the affected-graph count to equal the number of retained affected graph
-records.
-It requires the CPU-node count to equal the number of retained CPU-node samples.
-It also requires each CPU sample to match an affected graph.
-The scanner checks exact duplicate graph identifiers with a separate limit of 8,192 identifiers.
-If this limit is exceeded, the scan is malformed and inconclusive.
-The scanner still reads, hashes, and counts the full log.
-It does not retain the raw log, prompts, output text, marker lines, or node names.
-Passing receipts remain version 5.
+The immutable failure receipt has SHA-256
+`9ea52e0d3c3d56d1c89ff14e86c6907d1a5dc906b1b4a935cbf1c7475e447ef7`.
+The correction compares the expected and loaded tensor count for each file.
+This rule counts a valid metadata-only file when both counts are zero.
+The correction uses new schema versions.
 Historical receipt bytes and validation rules do not change.
 
-A version 5 passing receipt must check the active output vocabulary and the padded output rows.
-It must also meet the strict version 4 GPU rules.
-Backend index 0 must use backend and device name `CUDA0`.
-Backend index 1 must use backend and device name `CUDA1`.
-At least one audited graph must use both devices.
-An auxiliary projector graph can use `CUDA0` only.
-Every audited graph must have positive GPU work and no CPU or other accelerator fallback.
-Historical receipts keep their original validation rules and hashes.
-The next remote attempt needs a new commit, control-plane hash, sealed identity, and exact
-confirmation.
+A new remote attempt needs a merged commit, a new control-plane hash, a new sealed identity, and
+new exact confirmation.
 
 The Git repository does not contain the model files.
 The files are too large for Git, and the project does not upload model weights by default.

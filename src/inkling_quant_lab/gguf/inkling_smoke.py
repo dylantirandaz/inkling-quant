@@ -43,7 +43,7 @@ PINNED_LLAMA_CPP_COMMIT: Final = "a015409e6c27b84f60d688823d4c0126a11571fd"
 PINNED_VOCAB_SIZE: Final = 201_024
 PINNED_UNPADDED_VOCAB_SIZE: Final = 200_058
 PINNED_PADDED_VOCAB_SIZE: Final = PINNED_VOCAB_SIZE - PINNED_UNPADDED_VOCAB_SIZE
-INSTRUMENTATION_SCHEMA_VERSION: Final = "inkling-llama-smoke-instrumentation-v4"
+INSTRUMENTATION_SCHEMA_VERSION: Final = "inkling-llama-smoke-instrumentation-v5"
 INSTRUMENTATION_PATCH_RELATIVE_PATH: Final = "patches/inkling-smoke-a015409.patch"
 PINNED_CUDA_GET_ROWS_K_QUANT_UPSTREAM_COMMIT: Final = "a29b346fcd90ea366e91ea3f75573cd11ac7a850"
 HISTORICAL_INSTRUMENTATION_PATCH_SHA256: Final = (
@@ -61,11 +61,17 @@ OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256: Final = (
 INITIALIZED_OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256: Final = (
     "0d6219df99d6bb4cd89b3cf931a2b6d953f9a6a3b9fb88f718975f810d90447b"
 )
-INSTRUMENTATION_PATCH_SHA256: Final = (
+PRE_RECONCILIATION_INSTRUMENTATION_PATCH_SHA256: Final = (
     "83eb5a1340c4951096d4f0d48c18ace41b182c9802babfea8eec7ff47cc1aa72"
 )
-INSTRUMENTATION_PATCHED_DIFF_SHA256: Final = (
+PRE_RECONCILIATION_INSTRUMENTATION_PATCHED_DIFF_SHA256: Final = (
     "f9bd7ed63e0caa66c061dbd3dc270503ae43032d7c26d2fee9aad18292504908"
+)
+INSTRUMENTATION_PATCH_SHA256: Final = (
+    "005f1f342511fc3fc843bdcc7be814ed8a60e67033b733eb7e7e4af53925be04"
+)
+INSTRUMENTATION_PATCHED_DIFF_SHA256: Final = (
+    "7371c3e1bfe0e76b85a8de7da89a0678260d5066db95547564f29e8a9ef60294"
 )
 
 SUBJECT_RUN_ID: Final = "inkling-q3km-86b4d430-a015409e-ffd466dd93-8083cf41e1"
@@ -260,7 +266,7 @@ _TEXT_SHARDS_RE: Final = re.compile(
     rf"{_TEXT_SHARDS_MARKER} expected=([0-9]+) opened=([0-9]+) "
     r"contexts=([0-9]+) tensors=([0-9]+)"
 )
-_TEXT_LOAD_MARKER: Final = "IQL_SMOKE_TEXT_LOAD_V1"
+_TEXT_LOAD_MARKER: Final = "IQL_SMOKE_TEXT_LOAD_V2"
 _TEXT_LOAD_RE: Final = re.compile(
     rf"{_TEXT_LOAD_MARKER} opened=([0-9]+) accounted=([0-9]+) "
     r"tensors=([0-9]+) bytes=([0-9]+) size_done=([0-9]+) "
@@ -471,6 +477,7 @@ class SmokeRuntimeConfig(StrictFrozenModel):
         "inkling-llama-smoke-instrumentation-v2",
         "inkling-llama-smoke-instrumentation-v3",
         "inkling-llama-smoke-instrumentation-v4",
+        "inkling-llama-smoke-instrumentation-v5",
     ]
     instrumentation_patch_path: Literal["patches/inkling-smoke-a015409.patch"]
     instrumentation_patch_sha256: Literal[
@@ -480,6 +487,7 @@ class SmokeRuntimeConfig(StrictFrozenModel):
         "a5510130b39c2f2073320e44973f5414a69d8e7d38e525bac0bb2dde60a1d31b",
         "0d6219df99d6bb4cd89b3cf931a2b6d953f9a6a3b9fb88f718975f810d90447b",
         "83eb5a1340c4951096d4f0d48c18ace41b182c9802babfea8eec7ff47cc1aa72",
+        "005f1f342511fc3fc843bdcc7be814ed8a60e67033b733eb7e7e4af53925be04",
     ]
     image: SmokeCudaImageConfig
     build_targets: tuple[str, ...]
@@ -516,9 +524,14 @@ class SmokeRuntimeConfig(StrictFrozenModel):
         }:
             if self.instrumentation_schema_version != "inkling-llama-smoke-instrumentation-v3":
                 raise ValueError("owner-tagged instrumentation patch requires schema version 3")
+        elif self.instrumentation_patch_sha256 == PRE_RECONCILIATION_INSTRUMENTATION_PATCH_SHA256:
+            if self.instrumentation_schema_version != ("inkling-llama-smoke-instrumentation-v4"):
+                raise ValueError(
+                    "pre-reconciliation instrumentation patch requires schema version 4"
+                )
         elif self.instrumentation_patch_sha256 == INSTRUMENTATION_PATCH_SHA256:
             if self.instrumentation_schema_version != INSTRUMENTATION_SCHEMA_VERSION:
-                raise ValueError("current instrumentation patch requires schema version 4")
+                raise ValueError("current instrumentation patch requires schema version 5")
         else:
             raise ValueError("instrumentation patch SHA-256 is unsupported")
         return self
@@ -646,6 +659,7 @@ class InklingSmokeConfig(StrictFrozenModel):
         "inkling-smoke-config-v2",
         "inkling-smoke-config-v3",
         "inkling-smoke-config-v4",
+        "inkling-smoke-config-v5",
     ]
     verified_export_reference_path: Literal[
         "configs/experiments/inkling_q3_k_m_verified_export.json"
@@ -684,11 +698,18 @@ class InklingSmokeConfig(StrictFrozenModel):
                 "inkling-llama-smoke-instrumentation-v3"
             ):
                 raise ValueError("smoke config version 3 requires instrumentation version 3")
-        else:
+        elif self.schema_version == "inkling-smoke-config-v4":
             if self.output_vocabulary is None:
                 raise ValueError("smoke config version 4 requires output vocabulary")
-            if self.runtime.instrumentation_schema_version != INSTRUMENTATION_SCHEMA_VERSION:
+            if self.runtime.instrumentation_schema_version != (
+                "inkling-llama-smoke-instrumentation-v4"
+            ):
                 raise ValueError("smoke config version 4 requires instrumentation version 4")
+        else:
+            if self.output_vocabulary is None:
+                raise ValueError("smoke config version 5 requires output vocabulary")
+            if self.runtime.instrumentation_schema_version != INSTRUMENTATION_SCHEMA_VERSION:
+                raise ValueError("smoke config version 5 requires instrumentation version 5")
         expected_probe_identity = (
             ("text_greedy_v1", "text"),
             ("image_greedy_v1", "image"),
@@ -2242,9 +2263,14 @@ class ProjectorReadyEvidence(StrictFrozenModel):
 
 
 class ArtifactLoadEvidence(StrictFrozenModel):
-    """Pinned loader evidence for all 49 model shards and the BF16 projector."""
+    """Loader evidence for all 49 model shards and the BF16 projector.
 
-    schema_version: Literal["inkling-artifact-load-v1"] = "inkling-artifact-load-v1"
+    Version 2 counts a shard when its loaded tensor count equals its expected
+    tensor count. This rule includes a valid metadata-only shard with zero
+    tensors.
+    """
+
+    schema_version: Literal["inkling-artifact-load-v2"] = "inkling-artifact-load-v2"
     first_shard_path: Literal["/subject/q3_k_m/inkling-Q3_K_M-00001-of-00049.gguf"]
     additional_shards_loaded: Literal[48]
     total_shards_loaded: Literal[49]
@@ -3372,6 +3398,8 @@ __all__ = [
     "PINNED_UNPADDED_VOCAB_SIZE",
     "PINNED_VOCAB_SIZE",
     "PRE_OWNER_INSTRUMENTATION_PATCH_SHA256",
+    "PRE_RECONCILIATION_INSTRUMENTATION_PATCHED_DIFF_SHA256",
+    "PRE_RECONCILIATION_INSTRUMENTATION_PATCH_SHA256",
     "SMOKE_CONFIG_RELATIVE_PATH",
     "SUBJECT_CONFIG_HASH",
     "SUBJECT_CONTROL_PLANE_SHA256",
