@@ -418,6 +418,22 @@ def _patched_diff_command(repository: Path) -> tuple[str, ...]:
     )
 
 
+def _patched_diff_digest_check_build_command(receipt_path: Path) -> str:
+    message = "Build-time patched llama.cpp diff differs from its exact source contract"
+    script = (
+        "import sys;"
+        "from pathlib import Path;"
+        f"value=Path({str(receipt_path)!r})"
+        ".read_text(encoding='utf-8').split(maxsplit=1)[0];"
+        f"sys.exit({message!r}) "
+        f"if value != {INSTRUMENTATION_PATCHED_DIFF_SHA256!r} else None"
+    )
+    command = f"python -c {shlex.quote(script)}"
+    if "\n" in command or "\r" in command:
+        raise RuntimeError("Build-time patched diff guard must be one line")
+    return command
+
+
 def _elf_link_audit_build_command(paths: Sequence[Path], cuda_library: Path) -> str:
     path_values = [str(path) for path in paths]
     return (
@@ -472,18 +488,7 @@ smoke_image = smoke_image.run_commands(
         f"{shlex.join(_patched_diff_command(LLAMA_CPP_DIR))} "
         f"| sha256sum > {LLAMA_CPP_DIR}/.iql-patched-diff.sha256"
     ),
-    (
-        "python -c "
-        + shlex.quote(
-            "from pathlib import Path\n"
-            f"value = Path({str(LLAMA_CPP_DIR / '.iql-patched-diff.sha256')!r})"
-            ".read_text(encoding='utf-8').split(maxsplit=1)[0]\n"
-            f"if value != {INSTRUMENTATION_PATCHED_DIFF_SHA256!r}:\n"
-            "    raise RuntimeError("
-            "'Build-time patched llama.cpp diff differs from its exact source contract'"
-            ")\n"
-        )
-    ),
+    _patched_diff_digest_check_build_command(LLAMA_CPP_DIR / ".iql-patched-diff.sha256"),
     f"git -C {LLAMA_CPP_DIR} diff --check",
     "python -m pip install --no-cache-dir pydantic==2.13.4 PyYAML==6.0.3",
     f"test -f {CUDA_DRIVER_STUB}",
