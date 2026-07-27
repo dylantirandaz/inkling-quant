@@ -2710,11 +2710,7 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
                 for identity in self.runtime.base_source_blob_ids
             )
             if (
-                self.runtime.instrumentation_patch_sha256
-                not in {
-                    OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
-                    INSTRUMENTATION_PATCH_SHA256,
-                }
+                self.runtime.instrumentation_patch_sha256 != INSTRUMENTATION_PATCH_SHA256
                 or self.runtime.patched_source_paths != _SMOKE_PATCHED_SOURCE_PATHS
                 or current_source_blobs != _SMOKE_PATCHED_SOURCE_BLOB_IDS
             ):
