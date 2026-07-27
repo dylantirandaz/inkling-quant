@@ -331,6 +331,12 @@ if tuple(path for path, _blob_id in PATCHED_SOURCE_BLOB_PINS) != tuple(
     path for path, _blob_id in SOURCE_BLOB_PINS
 ):
     raise RuntimeError("Post-patch source inventory must exactly match its base-source inventory")
+PATCHED_DIFF_GIT_OPTIONS: Final = (
+    "--binary",
+    "--abbrev=8",
+    "--no-ext-diff",
+    "--no-textconv",
+)
 SERVER_AUDIT_ENVIRONMENT: Final = {
     "IQL_SMOKE_BACKEND_AUDIT": "1",
     "IQL_SMOKE_RAW_LOGIT_AUDIT": "1",
@@ -400,6 +406,18 @@ def _python_inventory_build_command(output_path: Path) -> str:
     )
 
 
+def _patched_diff_command(repository: Path) -> tuple[str, ...]:
+    return (
+        "git",
+        "-C",
+        str(repository),
+        "diff",
+        *PATCHED_DIFF_GIT_OPTIONS,
+        "--",
+        *(path for path, _git_blob_id in SOURCE_BLOB_PINS),
+    )
+
+
 def _elf_link_audit_build_command(paths: Sequence[Path], cuda_library: Path) -> str:
     path_values = [str(path) for path in paths]
     return (
@@ -450,6 +468,22 @@ smoke_image = smoke_image.run_commands(
         f"{shlex.quote(expected)}"
         for path, expected in PATCHED_SOURCE_BLOB_PINS
     ),
+    (
+        f"{shlex.join(_patched_diff_command(LLAMA_CPP_DIR))} "
+        f"| sha256sum > {LLAMA_CPP_DIR}/.iql-patched-diff.sha256"
+    ),
+    (
+        "python -c "
+        + shlex.quote(
+            "from pathlib import Path\n"
+            f"value = Path({str(LLAMA_CPP_DIR / '.iql-patched-diff.sha256')!r})"
+            ".read_text(encoding='utf-8').split(maxsplit=1)[0]\n"
+            f"if value != {INSTRUMENTATION_PATCHED_DIFF_SHA256!r}:\n"
+            "    raise RuntimeError("
+            "'Build-time patched llama.cpp diff differs from its exact source contract'"
+            ")\n"
+        )
+    ),
     f"git -C {LLAMA_CPP_DIR} diff --check",
     "python -m pip install --no-cache-dir pydantic==2.13.4 PyYAML==6.0.3",
     f"test -f {CUDA_DRIVER_STUB}",
@@ -490,11 +524,6 @@ smoke_image = smoke_image.run_commands(
     ),
     f"git -C {LLAMA_CPP_DIR} rev-parse HEAD > {LLAMA_CPP_DIR}/.iql-build-commit",
     f"sha256sum {REMOTE_PATCH} > {LLAMA_CPP_DIR}/.iql-smoke-patch.sha256",
-    (
-        f"git -C {LLAMA_CPP_DIR} diff --binary -- "
-        + " ".join(shlex.quote(path) for path, _ in SOURCE_BLOB_PINS)
-        + f" | sha256sum > {LLAMA_CPP_DIR}/.iql-patched-diff.sha256"
-    ),
     (
         "python -c 'import sysconfig; print(sysconfig.get_path(\"purelib\"))' > "
         f"{LLAMA_CPP_DIR}/.iql-python-purelib.txt"
@@ -1347,15 +1376,7 @@ def _runtime_toolchain_evidence() -> dict[str, Any]:
     if set(patched_paths) != set(expected_patched_paths):
         raise RuntimeError("Patched llama.cpp source inventory differs from its contract")
     patched_diff = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(LLAMA_CPP_DIR),
-            "diff",
-            "--binary",
-            "--",
-            *expected_patched_paths,
-        ],
+        _patched_diff_command(LLAMA_CPP_DIR),
         check=True,
         capture_output=True,
         timeout=60,
@@ -2517,7 +2538,6 @@ def _failed_subprocess_command_id(command: object) -> str:
         raise RuntimeError("failed subprocess command is not a string argument sequence")
     argv = tuple(command)
     purelib = sysconfig.get_path("purelib")
-    expected_patched_paths = tuple(path for path, _git_blob_id in SOURCE_BLOB_PINS)
     allowlist: dict[tuple[str, ...], str] = {
         (
             sys.executable,
@@ -2535,15 +2555,7 @@ def _failed_subprocess_command_id(command: object) -> str:
             "diff",
             "--name-only",
         ): "llama_cpp_git_changed_paths_v1",
-        (
-            "git",
-            "-C",
-            str(LLAMA_CPP_DIR),
-            "diff",
-            "--binary",
-            "--",
-            *expected_patched_paths,
-        ): "llama_cpp_git_patched_diff_v1",
+        _patched_diff_command(LLAMA_CPP_DIR): "llama_cpp_git_patched_diff_v1",
         (
             "dpkg-query",
             "-W",
