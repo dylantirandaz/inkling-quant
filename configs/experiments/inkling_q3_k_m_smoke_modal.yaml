@@ -14,7 +14,7 @@ runtime:
   commit: a015409e6c27b84f60d688823d4c0126a11571fd
   instrumentation_schema_version: inkling-llama-smoke-instrumentation-v3
   instrumentation_patch_path: patches/inkling-smoke-a015409.patch
-  instrumentation_patch_sha256: a5510130b39c2f2073320e44973f5414a69d8e7d38e525bac0bb2dde60a1d31b
+  instrumentation_patch_sha256: 0d6219df99d6bb4cd89b3cf931a2b6d953f9a6a3b9fb88f718975f810d90447b
   image:
     image: nvidia/cuda:13.1.2-devel-ubuntu24.04
     digest: sha256:952e42d23230610a2714c8484f38e9c934ed68e6f9c9c7fac62dcd5f98858a6e

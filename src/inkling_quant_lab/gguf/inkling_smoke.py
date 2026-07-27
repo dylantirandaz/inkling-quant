@@ -54,8 +54,11 @@ LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256: Final = (
 PRE_OWNER_INSTRUMENTATION_PATCH_SHA256: Final = (
     "0f824d7a77b0e98816e6d62f982b010caada15f8a93a20343d5cc0d129bcca20"
 )
-INSTRUMENTATION_PATCH_SHA256: Final = (
+OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256: Final = (
     "a5510130b39c2f2073320e44973f5414a69d8e7d38e525bac0bb2dde60a1d31b"
+)
+INSTRUMENTATION_PATCH_SHA256: Final = (
+    "0d6219df99d6bb4cd89b3cf931a2b6d953f9a6a3b9fb88f718975f810d90447b"
 )
 
 SUBJECT_RUN_ID: Final = "inkling-q3km-86b4d430-a015409e-ffd466dd93-8083cf41e1"
@@ -467,6 +470,7 @@ class SmokeRuntimeConfig(StrictFrozenModel):
         "301023aea3a19533710e122fbbd55378bf19c2562bd885fa85b58f9d4ea110cb",
         "0f824d7a77b0e98816e6d62f982b010caada15f8a93a20343d5cc0d129bcca20",
         "a5510130b39c2f2073320e44973f5414a69d8e7d38e525bac0bb2dde60a1d31b",
+        "0d6219df99d6bb4cd89b3cf931a2b6d953f9a6a3b9fb88f718975f810d90447b",
     ]
     image: SmokeCudaImageConfig
     build_targets: tuple[str, ...]
@@ -498,7 +502,11 @@ class SmokeRuntimeConfig(StrictFrozenModel):
             if self.instrumentation_schema_version != "inkling-llama-smoke-instrumentation-v2":
                 raise ValueError("pre-owner instrumentation patch requires schema version 2")
         elif (
-            self.instrumentation_patch_sha256 != INSTRUMENTATION_PATCH_SHA256
+            self.instrumentation_patch_sha256
+            not in {
+                OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
+                INSTRUMENTATION_PATCH_SHA256,
+            }
             or self.instrumentation_schema_version != INSTRUMENTATION_SCHEMA_VERSION
         ):
             raise ValueError("current instrumentation patch requires schema version 3")
@@ -3334,6 +3342,7 @@ __all__ = [
     "MAX_BACKEND_FAILURE_LINE_BYTES",
     "MAX_BACKEND_FAILURE_OP_BYTES",
     "MAX_BACKEND_FAILURE_RECORDS",
+    "OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256",
     "PINNED_CUDA_IMAGE",
     "PINNED_CUDA_IMAGE_DIGEST",
     "PINNED_CUDA_PLATFORM",

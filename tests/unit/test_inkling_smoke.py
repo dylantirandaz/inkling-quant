@@ -31,6 +31,7 @@ from inkling_quant_lab.gguf.inkling_smoke import (
     LLAMA_SERVER_AUDIT_LOG_VERBOSITY,
     MAX_BACKEND_FAILURE_LINE_BYTES,
     MAX_BACKEND_FAILURE_RECORDS,
+    OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
     PINNED_CUDA_IMAGE,
     PINNED_CUDA_IMAGE_DIGEST,
     PINNED_CUDA_PLATFORM,
@@ -392,6 +393,17 @@ def test_checked_smoke_patch_bytes_match_the_pinned_digest() -> None:
     patch_path = PROJECT_ROOT / INSTRUMENTATION_PATCH_RELATIVE_PATH
 
     assert hashlib.sha256(patch_path.read_bytes()).hexdigest() == (INSTRUMENTATION_PATCH_SHA256)
+
+
+def test_owner_tagged_patch_remains_valid_historical_schema_v3_evidence() -> None:
+    raw = _config_mapping()
+    runtime = raw["runtime"]
+    assert isinstance(runtime, dict)
+    runtime["instrumentation_patch_sha256"] = OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256
+
+    config = InklingSmokeConfig.model_validate(raw)
+
+    assert config.runtime.instrumentation_patch_sha256 == OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256
 
 
 def test_cuda_driver_linkage_parser_requires_one_non_stub_absolute_path() -> None:
@@ -1768,6 +1780,7 @@ def test_owner_tagged_patch_contracts_all_scheduler_graphs_and_v2_markers() -> N
     assert "GGML_BACKEND_SCHED_OWNER_VISION" in added_text
     assert "GGML_BACKEND_SCHED_OWNER_AUDIO" in added_text
     assert added_text.count("ggml_backend_sched_set_owner") >= 4
+    assert "sched->iql_owner = GGML_BACKEND_SCHED_OWNER_UNKNOWN;" in added_text
     assert "IQL_SMOKE_BACKEND_GRAPH_V2" in added_text
     assert "IQL_SMOKE_BACKEND_IDENTITY_V2" in added_text
     assert "IQL_SMOKE_CPU_NODE_V2" in added_text

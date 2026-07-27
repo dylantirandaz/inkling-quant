@@ -247,7 +247,7 @@ PATCHED_SOURCE_BLOB_PINS: Final = (
     ),
     (
         "ggml/src/ggml-backend.cpp",
-        "27fa94eea683dcac8a4a4f600bc2180ab71d707c",
+        "4c9eeb8d1486914c4a675eb0c40c53cd20dd13f0",
     ),
     (
         "src/llama-context.cpp",

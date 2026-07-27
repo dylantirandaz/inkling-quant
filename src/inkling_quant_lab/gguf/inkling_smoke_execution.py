@@ -41,6 +41,7 @@ from inkling_quant_lab.gguf.inkling_smoke import (
     INSTRUMENTATION_PATCH_SHA256,
     INSTRUMENTATION_SCHEMA_VERSION,
     LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
+    OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
     PINNED_LLAMA_CPP_COMMIT,
     PINNED_MODEL_REVISION,
     PRE_OWNER_INSTRUMENTATION_PATCH_SHA256,
@@ -1411,7 +1412,10 @@ class SmokeRuntimeEvidence(_SmokeReceiptModel):
             expected_blobs = _SMOKE_PRE_OWNER_PATCHED_SOURCE_BLOB_IDS
             expected_paths = _SMOKE_PRE_OWNER_PATCHED_SOURCE_PATHS
             expected_instrumentation_schema = "inkling-llama-smoke-instrumentation-v2"
-        elif self.instrumentation_patch_sha256 == INSTRUMENTATION_PATCH_SHA256:
+        elif self.instrumentation_patch_sha256 in {
+            OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
+            INSTRUMENTATION_PATCH_SHA256,
+        }:
             expected_blobs = _SMOKE_PATCHED_SOURCE_BLOB_IDS
             expected_paths = _SMOKE_PATCHED_SOURCE_PATHS
             expected_instrumentation_schema = INSTRUMENTATION_SCHEMA_VERSION
@@ -2596,7 +2600,11 @@ class SmokeTerminalReceipt(_SmokeReceiptModel):
                 for identity in self.runtime.base_source_blob_ids
             )
             if (
-                self.runtime.instrumentation_patch_sha256 != INSTRUMENTATION_PATCH_SHA256
+                self.runtime.instrumentation_patch_sha256
+                not in {
+                    OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
+                    INSTRUMENTATION_PATCH_SHA256,
+                }
                 or self.runtime.patched_source_paths != _SMOKE_PATCHED_SOURCE_PATHS
                 or current_source_blobs != _SMOKE_PATCHED_SOURCE_BLOB_IDS
             ):
@@ -3038,18 +3046,21 @@ def _validate_smoke_failure_launch_schema(
     if patch_sha256 != config.runtime.instrumentation_patch_sha256:
         raise ValueError("smoke failure control-plane patch differs from the smoke config")
 
-    expected_patch_by_schema = {
-        "inkling-smoke-terminal-v2": HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
-        "inkling-smoke-terminal-v3": HISTORICAL_INSTRUMENTATION_PATCH_SHA256,
-        "inkling-smoke-terminal-v4": LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256,
-        "inkling-smoke-terminal-v5": PRE_OWNER_INSTRUMENTATION_PATCH_SHA256,
-        "inkling-smoke-terminal-v6": PRE_OWNER_INSTRUMENTATION_PATCH_SHA256,
-        "inkling-smoke-terminal-v7": INSTRUMENTATION_PATCH_SHA256,
+    expected_patches_by_schema = {
+        "inkling-smoke-terminal-v2": {HISTORICAL_INSTRUMENTATION_PATCH_SHA256},
+        "inkling-smoke-terminal-v3": {HISTORICAL_INSTRUMENTATION_PATCH_SHA256},
+        "inkling-smoke-terminal-v4": {LEGACY_CURRENT_INSTRUMENTATION_PATCH_SHA256},
+        "inkling-smoke-terminal-v5": {PRE_OWNER_INSTRUMENTATION_PATCH_SHA256},
+        "inkling-smoke-terminal-v6": {PRE_OWNER_INSTRUMENTATION_PATCH_SHA256},
+        "inkling-smoke-terminal-v7": {
+            OWNER_TAGGED_INSTRUMENTATION_PATCH_SHA256,
+            INSTRUMENTATION_PATCH_SHA256,
+        },
     }
-    expected_patch = expected_patch_by_schema.get(schema_version)
-    if expected_patch is None:
+    expected_patches = expected_patches_by_schema.get(schema_version)
+    if expected_patches is None:
         raise ValueError("terminal smoke failure schema version is unsupported")
-    if patch_sha256 != expected_patch:
+    if patch_sha256 not in expected_patches:
         raise ValueError("terminal smoke failure schema differs from its instrumentation patch")
 
 
