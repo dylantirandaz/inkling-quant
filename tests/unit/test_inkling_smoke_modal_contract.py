@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -976,7 +977,8 @@ def test_smoke_runner_build_and_mount_contract_is_closed() -> None:
         source.index("smoke_image = smoke_image.run_commands("),
     )
     build_diff_check_offset = source.index(
-        "Build-time patched llama.cpp diff differs from its exact source contract"
+        "_patched_diff_digest_check_build_command(",
+        source.index("smoke_image = smoke_image.run_commands("),
     )
     cuda_build_offset = source.index("cmake -S {LLAMA_CPP_DIR}")
     assert build_diff_offset < build_diff_check_offset < cuda_build_offset
@@ -1072,6 +1074,54 @@ def test_patched_diff_command_ignores_repository_abbreviation_default(tmp_path: 
     assert observed[0] == observed[1]
     index_line = next(line for line in observed[0].splitlines() if line.startswith(b"index "))
     assert re.fullmatch(rb"index [0-9a-f]{8}\.\.[0-9a-f]{8} 100644", index_line)
+
+
+def test_patched_diff_digest_build_guard_is_one_line_and_fail_closed(
+    tmp_path: Path,
+) -> None:
+    namespace = _isolated_runner_functions("_patched_diff_digest_check_build_command")
+    namespace.update(
+        {
+            "INSTRUMENTATION_PATCHED_DIFF_SHA256": (
+                inkling_smoke.INSTRUMENTATION_PATCHED_DIFF_SHA256
+            ),
+            "shlex": shlex,
+        }
+    )
+    build_command = namespace["_patched_diff_digest_check_build_command"]
+    assert callable(build_command)
+
+    receipt = tmp_path / "patched-diff.sha256"
+    receipt.write_text(
+        f"{inkling_smoke.INSTRUMENTATION_PATCHED_DIFF_SHA256}  -\n",
+        encoding="utf-8",
+    )
+    command = build_command(receipt)
+    assert isinstance(command, str)
+    assert "\n" not in command
+    assert "\r" not in command
+    argv = shlex.split(command)
+    assert argv[:2] == ["python", "-c"]
+    assert len(argv) == 3
+    subprocess.run(
+        ["/bin/sh", "-c", command],
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+
+    receipt.write_text(f"{'0' * 64}  -\n", encoding="utf-8")
+    failed = subprocess.run(
+        ["/bin/sh", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert failed.returncode != 0
+    assert (
+        "Build-time patched llama.cpp diff differs from its exact source contract" in failed.stderr
+    )
 
 
 def test_smoke_runner_binds_trace_verbosity_for_required_info_evidence() -> None:
