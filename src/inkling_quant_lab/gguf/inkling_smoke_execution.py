@@ -3338,7 +3338,9 @@ def validate_smoke_terminal_receipt(
             raw_logit_audit,
             SmokeRawLogitAuditV2,
         ):
-            raise ValueError("terminal smoke v5 lacks its configured output vocabulary")
+            raise ValueError(
+                "terminal smoke receipt or config lacks required output-vocabulary evidence"
+            )
         if (
             raw_logit_audit.vocab_size,
             raw_logit_audit.unpadded_vocab_size,

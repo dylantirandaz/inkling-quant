@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -1202,6 +1203,26 @@ def test_complete_v8_terminal_receipt_binds_active_cuda_instrumentation() -> Non
     assert observed.runtime.patched_source_paths == tuple(sorted(ACTIVE_CUDA_SOURCE_BLOBS))
     assert len(observed.runtime.patched_source_paths) == 15
     assert "--override-tensor" not in observed.server.command
+
+
+def test_v8_missing_output_vocabulary_error_is_schema_neutral() -> None:
+    receipt, config, reference, control_plane, run_id = _valid_v8_receipt()
+    config_without_output_vocabulary: Any = SimpleNamespace(
+        output_vocabulary=None,
+        config_hash=config.config_hash,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=("terminal smoke receipt or config lacks required output-vocabulary evidence"),
+    ):
+        validate_smoke_terminal_receipt(
+            receipt,
+            config=config_without_output_vocabulary,
+            reference=reference,
+            control_plane=control_plane,
+            run_id=run_id,
+        )
 
 
 def test_v8_terminal_receipt_rejects_tampered_patched_diff() -> None:
