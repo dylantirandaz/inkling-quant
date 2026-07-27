@@ -1267,6 +1267,7 @@ def _validated_remote_failure_receipts(
                 "inkling-smoke-terminal-v5",
                 "inkling-smoke-terminal-v6",
                 "inkling-smoke-terminal-v7",
+                "inkling-smoke-terminal-v8",
             }:
                 invocation = getattr(receipt, "invocation", None)
                 if invocation is None:
@@ -1301,6 +1302,7 @@ def _validated_remote_failure_receipts(
             "inkling-smoke-terminal-v5",
             "inkling-smoke-terminal-v6",
             "inkling-smoke-terminal-v7",
+            "inkling-smoke-terminal-v8",
         }:
             safe_subprocess_failure = _safe_subprocess_failure_record(receipt)
             if safe_subprocess_failure is not None:
@@ -1308,10 +1310,17 @@ def _validated_remote_failure_receipts(
         if receipt.schema_version in {
             "inkling-smoke-terminal-v6",
             "inkling-smoke-terminal-v7",
+            "inkling-smoke-terminal-v8",
         }:
             record["server_log_evidence"] = _safe_server_log_failure_record(receipt)
-        if receipt.schema_version == "inkling-smoke-terminal-v7":
-            record["cpu_placement_evidence_relation"] = receipt.cpu_placement_evidence_relation
+        if receipt.schema_version in {
+            "inkling-smoke-terminal-v7",
+            "inkling-smoke-terminal-v8",
+        }:
+            relation = getattr(receipt, "cpu_placement_evidence_relation", None)
+            if relation is None:
+                raise RuntimeError("Current smoke failure receipt lacks CPU placement relation")
+            record["cpu_placement_evidence_relation"] = relation
         records.append(record)
     return records
 
