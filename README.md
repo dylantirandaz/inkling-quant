@@ -58,15 +58,25 @@ The BF16 text files contain 1,894,278,547,552 bytes.
 These files are on a mutable Modal volume.
 The matched workflow must hash every BF16 and Q3 file again before it uses either subject.
 
-The checked matched-cell file is a planning record.
+The [checked matched-cell file](configs/experiments/inkling_q3_k_m_matched_cell_modal.yaml)
+is a planning record.
 It cannot start remote work.
 It binds the BF16 files, Q3 files, shared projector, tokenizer files, and exact runtime.
 It plans to run BF16 first and Q3 second on one eight-B300 allocation.
 The local preflight checks the capacity calculation with the minimum values in the config.
 It does not probe hardware or run the aggregate capacity screen.
 The calculation does not prove per-device placement, runtime workspace fit, or inference.
-The current backend audit supports two GPUs only.
-A later reviewed change must add an eight-GPU audit and runner.
+
+The accepted Q3 smoke receipt keeps its exact two-GPU audit.
+The repository now has a
+[separate validator for backend marker logs from the planned eight-GPU cell](src/inkling_quant_lab/gguf/inkling_matched_execution.py).
+The validator requires one text graph to use CUDA0 through CUDA7.
+It requires each vision and audio graph to use CUDA0 only.
+It rejects CPU model graph work and unexpected CUDA identities.
+CPU-only unit tests cover the validator.
+It does not start Modal or prove that Inkling can run on eight GPUs.
+The remote matched runner is not implemented.
+
 The plan does not allow quality or speed measurement until both subject smoke tests pass.
 
 The Git repository does not contain the model files.

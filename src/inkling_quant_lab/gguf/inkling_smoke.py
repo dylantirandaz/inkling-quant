@@ -16,6 +16,7 @@ import json
 import math
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Final, Literal, TypeAlias
 from uuid import UUID
@@ -1352,6 +1353,14 @@ class BackendCpuPlacementError(ValueError):
     """A valid runtime marker proves that a model graph operation used the CPU."""
 
 
+@dataclass(frozen=True, slots=True)
+class BackendAuditRowsV2:
+    """Decoded owner-tagged marker rows before a cell placement policy is applied."""
+
+    graphs: tuple[BackendGraphAuditRowV2, ...]
+    identities: tuple[BackendIdentityAuditRowV2, ...]
+
+
 class BackendFailureGraphDiagnostic(StrictFrozenModel):
     """Sanitized counters for one graph that assigned model work to the CPU."""
 
@@ -2452,8 +2461,8 @@ def parse_backend_audit_evidence(log_text: str) -> BackendAuditEvidence:
     )
 
 
-def parse_backend_audit_evidence_v2(log_text: str) -> BackendAuditEvidenceV2:
-    """Parse owner-tagged placement markers and require a complete GPU-only scan."""
+def parse_backend_audit_rows_v2(log_text: str) -> BackendAuditRowsV2:
+    """Decode complete owner-tagged markers without selecting a GPU cell policy."""
 
     historical_markers = (
         _BACKEND_GRAPH_MARKER,
@@ -2542,16 +2551,26 @@ def parse_backend_audit_evidence_v2(log_text: str) -> BackendAuditEvidenceV2:
             compute,
         ) in tuple(identity_matches)
     )
-    return BackendAuditEvidenceV2(
-        observed_graphs=len(graphs),
-        compute_operations=sum(row.compute for row in graphs),
-        gpu_operations=sum(row.gpu for row in graphs),
-        accelerator_operations=sum(row.accel for row in graphs),
-        cpu_operations=sum(row.cpu for row in graphs),
-        other_operations=sum(row.other for row in graphs),
-        unassigned_operations=sum(row.unassigned for row in graphs),
+    return BackendAuditRowsV2(
         graphs=graphs,
         identities=identities,
+    )
+
+
+def parse_backend_audit_evidence_v2(log_text: str) -> BackendAuditEvidenceV2:
+    """Parse owner-tagged placement markers for the historical two-GPU smoke cell."""
+
+    rows = parse_backend_audit_rows_v2(log_text)
+    return BackendAuditEvidenceV2(
+        observed_graphs=len(rows.graphs),
+        compute_operations=sum(row.compute for row in rows.graphs),
+        gpu_operations=sum(row.gpu for row in rows.graphs),
+        accelerator_operations=sum(row.accel for row in rows.graphs),
+        cpu_operations=sum(row.cpu for row in rows.graphs),
+        other_operations=sum(row.other for row in rows.graphs),
+        unassigned_operations=sum(row.unassigned for row in rows.graphs),
+        graphs=rows.graphs,
+        identities=rows.identities,
     )
 
 
@@ -3411,6 +3430,7 @@ __all__ = [
     "ArtifactLoadEvidence",
     "BackendAuditEvidence",
     "BackendAuditEvidenceV2",
+    "BackendAuditRowsV2",
     "BackendCpuPlacementError",
     "BackendCpuPlacementProofV1",
     "BackendFailureCpuNodeDiagnostic",
@@ -3451,6 +3471,7 @@ __all__ = [
     "parse_artifact_load_evidence",
     "parse_backend_audit_evidence",
     "parse_backend_audit_evidence_v2",
+    "parse_backend_audit_rows_v2",
     "parse_cuda_driver_linkage",
     "parse_loader_offload_evidence",
     "parse_nvidia_smi_csv",
