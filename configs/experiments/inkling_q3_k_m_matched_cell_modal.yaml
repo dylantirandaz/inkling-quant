@@ -1,0 +1,135 @@
+schema_version: inkling-matched-cell-config-v1
+model_id: thinkingmachines/Inkling
+revision: 86b4d430ab871652a707666b89203a866888c5e5
+architecture: InklingForConditionalGeneration
+
+bf16_subject_reference_path: configs/experiments/inkling_bf16_subject_reference.json
+bf16_subject_reference_sha256: 3615928f79ae24cdeee9164ac2c4dc3e3ba1999bde74c5b0d631e3aae4f1a53d
+q3_verified_export_reference_path: configs/experiments/inkling_q3_k_m_verified_export.json
+q3_verified_export_reference_sha256: 9f0fae0a48058e73aab38c2b4f6c86916b69fd32343e0f7b821c7faac5b33198
+source_adoption_reference_path: configs/experiments/inkling_q3_k_m_source_adoption.json
+source_adoption_reference_sha256: 4d808b2fcd1c8a0398c6aa15371b6522d6cfb276fe0df395ca9a8beb2293f146
+source_inventory_sha256: a8aa37efec2b12c5d584c8163111d3a8a22d9568ef01886343755a8af6ace571
+
+tokenizer_assets:
+  - path: chat_template.jinja
+    sha256: 0aa1aa0c729d90176dcaa00c440c8faffca2957ffb2cc4b79456ee6d02bcf43b
+    size_bytes: 6294
+  - path: processor_config.json
+    sha256: b4a3962ea5f7ec39f40b5cf14e57ce99776c3dcce4756a110f7a169809e3a04c
+    size_bytes: 1110
+  - path: special_tokens_map.json
+    sha256: abc97715b4b3b30eb65ea6895afd7b529c32bd10c28901f9ddae7edc39723b0f
+    size_bytes: 517
+  - path: tiktoken/tokenizer.model
+    sha256: bc253fd2b702f7a6da7105eaa8f3463b2f1247e83614f23e5323b921088bed2a
+    size_bytes: 3615874
+  - path: tokenizer.json
+    sha256: 9fb6333a7db8fe5da90728e741e4a3ee4ac2ae12c5dd4958cc6f31688787d3c2
+    size_bytes: 27875797
+  - path: tokenizer_config.json
+    sha256: 2e36c9748a2081abb935b2e745ee22e82efa32589c2500df7e5bc0f93145cd77
+    size_bytes: 12111
+
+runtime:
+  repository: https://github.com/danielhanchen/llama.cpp.git
+  commit: a015409e6c27b84f60d688823d4c0126a11571fd
+  instrumentation_schema_version: inkling-llama-smoke-instrumentation-v5
+  instrumentation_patch_path: patches/inkling-smoke-a015409.patch
+  instrumentation_patch_sha256: 005f1f342511fc3fc843bdcc7be814ed8a60e67033b733eb7e7e4af53925be04
+  cuda_image: nvidia/cuda:13.1.2-devel-ubuntu24.04
+  cuda_image_digest: sha256:952e42d23230610a2714c8484f38e9c934ed68e6f9c9c7fac62dcd5f98858a6e
+  platform: linux/amd64
+  binaries:
+    - name: llama-cli
+      path: /opt/llama.cpp/build/bin/llama-cli
+      sha256: 098d8b9c6e57f25b846c5b5b43ded5bb1194cbb3d1ce985f17bbd09c87a82dbc
+      size_bytes: 1246680
+    - name: llama-server
+      path: /opt/llama.cpp/build/bin/llama-server
+      sha256: e960cfe4dcb2f7e541fc0b15bf97a4c1f6feb5fc304267796ef2bdd004cd1b93
+      size_bytes: 17920
+    - name: llama-bench
+      path: /opt/llama.cpp/build/bin/llama-bench
+      sha256: e0844ac337c419ebd8b6cee4902ba13e210a067d6fe47cb652429c71ae97382b
+      size_bytes: 17920
+    - name: llama-perplexity
+      path: /opt/llama.cpp/build/bin/llama-perplexity
+      sha256: d04051888a157ee50a7d6286cffcc78da3a9ca5295c79aa99ea2d92672ebf733
+      size_bytes: 15968
+  cmake_definitions:
+    - GGML_CUDA=ON
+    - GGML_NATIVE=OFF
+    - LLAMA_CURL=OFF
+    - LLAMA_BUILD_UI=OFF
+    - LLAMA_USE_PREBUILT_UI=OFF
+    - CMAKE_CUDA_ARCHITECTURES=103
+    - CMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,/opt/iql-cuda-driver-link
+  tensor_split: [1, 1, 1, 1, 1, 1, 1, 1]
+  split_mode: layer
+  gpu_layers: all
+  no_cpu_fallback: true
+  network_access: false
+  trust_remote_code: false
+
+resources:
+  provider: modal
+  gpu_type: B300
+  gpu_count: 8
+  compute_capability: "10.3"
+  minimum_gpu_memory_bytes: 287000000000
+  capacity_reserve_basis_points: 1000
+  capacity_strategy: sequential_peak_plus_reserve
+  cpu_cores: 16
+  memory_gib: 64
+  ephemeral_disk_mib: 524288
+  startup_timeout_seconds: 1800
+  max_attempts: 1
+
+storage:
+  bf16_volume: inkling-work-v1
+  bf16_run_subpath: runs/inkling-q3km-86b4d430-a015409e-ffd466dd93-8083cf41e1
+  bf16_mount_path: /baseline
+  bf16_read_only: true
+  final_volume: inkling-final-v1
+  final_run_subpath: runs/inkling-q3km-86b4d430-a015409e-ffd466dd93-8083cf41e1
+  final_mount_path: /final
+  final_read_only: true
+  source_volume: inkling-source-v1
+  source_run_subpath: runs/inkling-q3km-86b4d430-a015409e-551ab8f240-bcc168525e
+  source_snapshot_subpath: snapshot
+  source_mount_path: /source
+  source_read_only: true
+  evidence_volume: inkling-matched-evidence-v1
+  evidence_mount_path: /evidence
+  evidence_append_only_after_success: true
+
+execution:
+  record_status: planning_only
+  runner_implemented: false
+  remote_execution_allowed: false
+  subject_mode: sequential_same_allocation
+  subject_order: [bf16, q3]
+  fresh_process_per_subject: true
+  rehash_all_subject_files: true
+  require_both_smoke_receipts: true
+  measurement_execution_allowed: false
+  planned_stages:
+    - verify_subject_references
+    - rehash_bf16_subject
+    - rehash_q3_subject
+    - screen_aggregate_capacity
+    - smoke_bf16_subject
+    - smoke_q3_subject
+    - verify_matched_smoke_evidence
+
+claims:
+  purpose: dual_subject_runtime_smoke_prerequisite
+  compatibility_scope: single_exact_matrix_cell
+  runtime_fit_proven: false
+  quality_measured: false
+  performance_measured: false
+  quality_retention_claim_allowed: false
+  speedup_claim_allowed: false
+  mtp_included: false
+  mtp_supported: false
