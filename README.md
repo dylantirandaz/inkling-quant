@@ -62,8 +62,9 @@ The checked matched-cell file is a planning record.
 It cannot start remote work.
 It binds the BF16 files, Q3 files, shared projector, tokenizer files, and exact runtime.
 It plans to run BF16 first and Q3 second on one eight-B300 allocation.
-An aggregate memory screen passes for the recorded B300 memory size.
-This screen does not prove per-device placement, runtime workspace fit, or inference.
+The local preflight checks the capacity calculation with the minimum values in the config.
+It does not probe hardware or run the aggregate capacity screen.
+The calculation does not prove per-device placement, runtime workspace fit, or inference.
 The current backend audit supports two GPUs only.
 A later reviewed change must add an eight-GPU audit and runner.
 The plan does not allow quality or speed measurement until both subject smoke tests pass.
@@ -183,6 +184,17 @@ uv run python scripts/preflight_inkling_gguf.py \
 The preflight does not download model weights.
 It does not start a remote Modal function.
 
+Validate the checked BF16/Q3 matched plan:
+
+```console
+uv run python scripts/manage_inkling_matched.py preflight --json
+```
+
+This command reads local control files only.
+It does not read the model files, inspect a remote volume, probe hardware, write a receipt, or start compute.
+Only the `verify_subject_references` stage can pass.
+Every remote stage remains `not_executed`.
+
 Inspect the controlled manager commands:
 
 ```console
@@ -202,6 +214,7 @@ These tracked files define the workflow:
 - [Source adoption record](configs/experiments/inkling_q3_k_m_source_adoption.json)
 - [BF16 subject reference](configs/experiments/inkling_bf16_subject_reference.json)
 - [Matched-cell configuration](configs/experiments/inkling_q3_k_m_matched_cell_modal.yaml)
+- [Matched-cell local preflight](scripts/manage_inkling_matched.py)
 
 ## Configuration
 

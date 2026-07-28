@@ -23,9 +23,11 @@ from inkling_quant_lab.gguf.inkling_matched import (
     InklingBF16SubjectReference,
     InklingMatchedCellConfig,
     bf16_subject_reference_sha256,
+    build_matched_cell_bundle,
     load_bf16_subject_reference,
     load_matched_cell_bundle,
     load_matched_cell_config,
+    parse_matched_cell_config_bytes,
     screen_matched_capacity,
 )
 from inkling_quant_lab.gguf.inkling_smoke import (
@@ -137,6 +139,7 @@ def test_bf16_reference_loader_rejects_noncanonical_json(tmp_path: Path) -> None
 def test_checked_matched_cell_binds_subjects_runtime_assets_and_claim_limits() -> None:
     config = load_matched_cell_config(MATCHED_CONFIG_PATH)
 
+    assert config.schema_version == "inkling-matched-cell-config-v2"
     assert config.bf16_subject_reference_sha256 == EXPECTED_BF16_SUBJECT_REFERENCE_SHA256
     assert config.q3_verified_export_reference_sha256 == (EXPECTED_VERIFIED_EXPORT_REFERENCE_SHA256)
     assert tuple(item.name for item in config.runtime.binaries) == (
@@ -157,9 +160,18 @@ def test_checked_matched_cell_binds_subjects_runtime_assets_and_claim_limits() -
     assert config.resources.gpu_count == 8
     assert config.runtime.tensor_split == (1, 1, 1, 1, 1, 1, 1, 1)
     assert config.runtime.no_cpu_fallback is True
+    assert config.storage.bf16_volume_version == 1
+    assert config.storage.bf16_create_if_missing is False
+    assert config.storage.final_volume_version == 1
+    assert config.storage.final_create_if_missing is False
     assert config.storage.final_mount_path == "/final"
+    assert config.storage.source_volume_version == 1
     assert config.storage.source_volume == "inkling-source-v1"
     assert config.storage.source_mount_path == "/source"
+    assert config.storage.source_create_if_missing is False
+    assert config.storage.evidence_volume_version == 1
+    assert config.storage.evidence_read_only is False
+    assert config.storage.evidence_create_if_missing is True
     assert config.execution.record_status == "planning_only"
     assert config.execution.runner_implemented is False
     assert config.execution.remote_execution_allowed is False
@@ -170,6 +182,67 @@ def test_checked_matched_cell_binds_subjects_runtime_assets_and_claim_limits() -
     assert config.claims.speedup_claim_allowed is False
     assert config.claims.runtime_fit_proven is False
     assert len(config.config_hash()) == 64
+
+
+def test_matched_cell_rejects_retired_v1_schema() -> None:
+    raw = _matched_mapping()
+    raw["schema_version"] = "inkling-matched-cell-config-v1"
+
+    with pytest.raises(ValidationError, match="inkling-matched-cell-config-v2"):
+        InklingMatchedCellConfig.model_validate(raw)
+
+
+@pytest.mark.parametrize(
+    ("original", "replacement", "duplicate_key"),
+    [
+        (
+            "schema_version: inkling-matched-cell-config-v2\n",
+            (
+                "schema_version: inkling-matched-cell-config-v2\n"
+                "schema_version: inkling-matched-cell-config-v2\n"
+            ),
+            "schema_version",
+        ),
+        (
+            "storage:\n  bf16_volume: inkling-work-v1\n",
+            ("storage:\n  bf16_volume: inkling-work-v1\n  bf16_volume: inkling-work-v1\n"),
+            "bf16_volume",
+        ),
+    ],
+)
+def test_matched_cell_loader_rejects_duplicate_yaml_keys(
+    tmp_path: Path,
+    original: str,
+    replacement: str,
+    duplicate_key: str,
+) -> None:
+    raw_text = MATCHED_CONFIG_PATH.read_text(encoding="utf-8")
+    assert raw_text.count(original) == 1
+    config_path = tmp_path / "matched.yaml"
+    config_path.write_text(raw_text.replace(original, replacement), encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match=rf"duplicate key '{duplicate_key}'"):
+        load_matched_cell_config(config_path)
+
+
+def test_matched_cell_bytes_parser_validates_the_captured_bytes() -> None:
+    raw_bytes = MATCHED_CONFIG_PATH.read_bytes()
+
+    parsed = parse_matched_cell_config_bytes(raw_bytes, source="captured-matched-config")
+
+    assert parsed == load_matched_cell_config(MATCHED_CONFIG_PATH)
+
+
+def test_matched_cell_bytes_parser_normalizes_recursion_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_load(*_args: object, **_kwargs: object) -> object:
+        raise RecursionError("simulated YAML nesting failure")
+
+    monkeypatch.setattr(inkling_matched.yaml, "load", fail_load)
+
+    with pytest.raises(ConfigurationError, match=r"(?i)nesting failure"):
+        parse_matched_cell_config_bytes(b"schema_version: invalid\n")
 
 
 def test_matched_cell_rejects_runtime_tampering() -> None:
@@ -232,6 +305,17 @@ def test_matched_bundle_loads_references_and_resolves_every_subject_path() -> No
         "/source/snapshot/tiktoken/tokenizer.model",
         "/source/snapshot/tokenizer.json",
         "/source/snapshot/tokenizer_config.json",
+    )
+
+
+def test_matched_bundle_can_cross_check_already_captured_records() -> None:
+    config = load_matched_cell_config(MATCHED_CONFIG_PATH)
+    bf16 = load_bf16_subject_reference(BF16_REFERENCE_PATH)
+    q3 = load_verified_export_reference(Q3_REFERENCE_PATH)
+    source = load_inkling_source_adoption_reference(SOURCE_REFERENCE_PATH)
+
+    assert build_matched_cell_bundle(config, bf16, q3, source) == (
+        load_matched_cell_bundle(PROJECT_ROOT)
     )
 
 
