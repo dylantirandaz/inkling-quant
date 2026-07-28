@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any, Final, Literal
 
 import yaml
 from pydantic import Field, ValidationError, field_validator, model_validator
+from yaml.constructor import ConstructorError
+from yaml.nodes import MappingNode
 
 from inkling_quant_lab.config import StrictFrozenModel
 from inkling_quant_lab.exceptions import CapabilityError, ConfigurationError
@@ -127,6 +129,45 @@ _EXPECTED_TOKENIZER_ASSETS: Final = (
         "size_bytes": 12_111,
     },
 )
+
+
+class _DuplicateKeyRejectingSafeLoader(yaml.SafeLoader):
+    """Load safe YAML while rejecting duplicate keys at every mapping level."""
+
+    def construct_mapping(
+        self,
+        node: MappingNode,
+        deep: bool = False,
+    ) -> dict[Any, Any]:
+        if not isinstance(node, MappingNode):
+            raise ConstructorError(
+                None,
+                None,
+                f"expected a mapping node, but found {node.id}",
+                node.start_mark,
+            )
+        self.flatten_mapping(node)
+        mapping: dict[Any, Any] = {}
+        for key_node, value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if not isinstance(key, Hashable):
+                raise ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    "found unhashable key",
+                    key_node.start_mark,
+                )
+            if key in mapping:
+                raise ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    f"found duplicate key {key!r}",
+                    key_node.start_mark,
+                )
+            mapping[key] = self.construct_object(value_node, deep=deep)
+        return mapping
+
+
 _EXPECTED_PLANNED_PREFLIGHT_STAGES: Final = (
     "verify_subject_references",
     "rehash_bf16_subject",
@@ -391,20 +432,29 @@ class MatchedStorageConfig(StrictFrozenModel):
     """Read-only subject mounts and isolated evidence output."""
 
     bf16_volume: Literal["inkling-work-v1"]
+    bf16_volume_version: Literal[1]
     bf16_run_subpath: Literal["runs/inkling-q3km-86b4d430-a015409e-ffd466dd93-8083cf41e1"]
     bf16_mount_path: Literal["/baseline"]
     bf16_read_only: Literal[True]
+    bf16_create_if_missing: Literal[False]
     final_volume: Literal["inkling-final-v1"]
+    final_volume_version: Literal[1]
     final_run_subpath: Literal["runs/inkling-q3km-86b4d430-a015409e-ffd466dd93-8083cf41e1"]
     final_mount_path: Literal["/final"]
     final_read_only: Literal[True]
+    final_create_if_missing: Literal[False]
     source_volume: Literal["inkling-source-v1"]
+    source_volume_version: Literal[1]
     source_run_subpath: Literal["runs/inkling-q3km-86b4d430-a015409e-551ab8f240-bcc168525e"]
     source_snapshot_subpath: Literal["snapshot"]
     source_mount_path: Literal["/source"]
     source_read_only: Literal[True]
+    source_create_if_missing: Literal[False]
     evidence_volume: Literal["inkling-matched-evidence-v1"]
+    evidence_volume_version: Literal[1]
     evidence_mount_path: Literal["/evidence"]
+    evidence_read_only: Literal[False]
+    evidence_create_if_missing: Literal[True]
     evidence_append_only_after_success: Literal[True]
 
 
@@ -448,7 +498,7 @@ class MatchedClaimLimits(StrictFrozenModel):
 class InklingMatchedCellConfig(StrictFrozenModel):
     """Checked data contract for the first matched eight-B300 cell."""
 
-    schema_version: Literal["inkling-matched-cell-config-v1"]
+    schema_version: Literal["inkling-matched-cell-config-v2"]
     model_id: Literal["thinkingmachines/Inkling"]
     revision: Literal["86b4d430ab871652a707666b89203a866888c5e5"]
     architecture: Literal["InklingForConditionalGeneration"]
@@ -507,20 +557,40 @@ class InklingMatchedCellConfig(StrictFrozenModel):
         return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
 
 
-def load_matched_cell_config(path: str | Path) -> InklingMatchedCellConfig:
-    """Load the checked matched-cell YAML without starting external work."""
+def parse_matched_cell_config_bytes(
+    raw_bytes: bytes,
+    *,
+    source: str | Path = "<bytes>",
+) -> InklingMatchedCellConfig:
+    """Parse one captured matched-cell YAML byte sequence without external work."""
 
-    config_path = Path(path)
     try:
-        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        raw = yaml.load(
+            raw_bytes.decode("utf-8"),
+            Loader=_DuplicateKeyRejectingSafeLoader,
+        )
         if not isinstance(raw, Mapping):
             raise ValueError("matched-cell config root must be a mapping")
         return InklingMatchedCellConfig.model_validate(raw)
-    except (OSError, ValueError, yaml.YAMLError, ValidationError) as error:
+    except (OSError, RecursionError, ValueError, yaml.YAMLError, ValidationError) as error:
+        raise ConfigurationError(
+            f"Unable to parse Inkling matched-cell config {source}: {error}",
+            component="inkling_matched_cell_config",
+        ) from error
+
+
+def load_matched_cell_config(path: str | Path) -> InklingMatchedCellConfig:
+    """Read and parse the checked matched-cell YAML without external work."""
+
+    config_path = Path(path)
+    try:
+        raw_bytes = config_path.read_bytes()
+    except OSError as error:
         raise ConfigurationError(
             f"Unable to load Inkling matched-cell config {config_path}: {error}",
             component="inkling_matched_cell_config",
         ) from error
+    return parse_matched_cell_config_bytes(raw_bytes, source=config_path)
 
 
 class MatchedSubjectPaths(StrictFrozenModel):
@@ -649,28 +719,13 @@ def _project_file(project_root: Path, relative_path: str) -> Path:
     return candidate
 
 
-def load_matched_cell_bundle(
-    project_root: str | Path,
-    *,
-    config_relative_path: str = MATCHED_CELL_CONFIG_RELATIVE_PATH,
+def build_matched_cell_bundle(
+    config: InklingMatchedCellConfig,
+    bf16: InklingBF16SubjectReference,
+    q3: InklingVerifiedExportReference,
+    source: InklingSourceAdoptionReference,
 ) -> InklingMatchedCellBundle:
-    """Load and cross-check the matched plan and all three subject records."""
-
-    root = Path(project_root).expanduser().resolve()
-    if not root.is_dir():
-        raise ConfigurationError(
-            f"Matched project root is not a directory: {root}",
-            component="inkling_matched_cell_bundle",
-        )
-
-    config = load_matched_cell_config(_project_file(root, config_relative_path))
-    bf16 = load_bf16_subject_reference(_project_file(root, config.bf16_subject_reference_path))
-    q3 = load_verified_export_reference(
-        _project_file(root, config.q3_verified_export_reference_path)
-    )
-    source = load_inkling_source_adoption_reference(
-        _project_file(root, config.source_adoption_reference_path)
-    )
+    """Cross-check captured matched-plan records without reopening their paths."""
 
     mismatches: list[str] = []
     if config.bf16_subject_reference_sha256 != bf16.reference_sha256:
@@ -751,6 +806,32 @@ def load_matched_cell_bundle(
         source=source,
         paths=resolve_matched_subject_paths(config, bf16, q3),
     )
+
+
+def load_matched_cell_bundle(
+    project_root: str | Path,
+    *,
+    config_relative_path: str = MATCHED_CELL_CONFIG_RELATIVE_PATH,
+) -> InklingMatchedCellBundle:
+    """Load and cross-check the matched plan and all three subject records."""
+
+    root = Path(project_root).expanduser().resolve()
+    if not root.is_dir():
+        raise ConfigurationError(
+            f"Matched project root is not a directory: {root}",
+            component="inkling_matched_cell_bundle",
+        )
+
+    config = load_matched_cell_config(_project_file(root, config_relative_path))
+    bf16 = load_bf16_subject_reference(_project_file(root, config.bf16_subject_reference_path))
+    q3 = load_verified_export_reference(
+        _project_file(root, config.q3_verified_export_reference_path)
+    )
+    source = load_inkling_source_adoption_reference(
+        _project_file(root, config.source_adoption_reference_path)
+    )
+
+    return build_matched_cell_bundle(config, bf16, q3, source)
 
 
 class MatchedCapacityResult(StrictFrozenModel):
@@ -887,9 +968,11 @@ __all__ = [
     "MatchedCapacityResult",
     "MatchedSubjectPaths",
     "bf16_subject_reference_sha256",
+    "build_matched_cell_bundle",
     "load_bf16_subject_reference",
     "load_matched_cell_bundle",
     "load_matched_cell_config",
+    "parse_matched_cell_config_bytes",
     "resolve_matched_subject_paths",
     "screen_matched_capacity",
 ]

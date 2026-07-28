@@ -1,4 +1,4 @@
-schema_version: inkling-matched-cell-config-v1
+schema_version: inkling-matched-cell-config-v2
 model_id: thinkingmachines/Inkling
 revision: 86b4d430ab871652a707666b89203a866888c5e5
 architecture: InklingForConditionalGeneration
@@ -88,20 +88,29 @@ resources:
 
 storage:
   bf16_volume: inkling-work-v1
+  bf16_volume_version: 1
   bf16_run_subpath: runs/inkling-q3km-86b4d430-a015409e-ffd466dd93-8083cf41e1
   bf16_mount_path: /baseline
   bf16_read_only: true
+  bf16_create_if_missing: false
   final_volume: inkling-final-v1
+  final_volume_version: 1
   final_run_subpath: runs/inkling-q3km-86b4d430-a015409e-ffd466dd93-8083cf41e1
   final_mount_path: /final
   final_read_only: true
+  final_create_if_missing: false
   source_volume: inkling-source-v1
+  source_volume_version: 1
   source_run_subpath: runs/inkling-q3km-86b4d430-a015409e-551ab8f240-bcc168525e
   source_snapshot_subpath: snapshot
   source_mount_path: /source
   source_read_only: true
+  source_create_if_missing: false
   evidence_volume: inkling-matched-evidence-v1
+  evidence_volume_version: 1
   evidence_mount_path: /evidence
+  evidence_read_only: false
+  evidence_create_if_missing: true
   evidence_append_only_after_success: true
 
 execution:
