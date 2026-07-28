@@ -714,10 +714,12 @@ def load_matched_cell_bundle(
         config.storage.final_run_subpath, q3.final_run_subpath
     ):
         mismatches.append("final_storage")
+    source_run_root = PurePosixPath(source.source_run_root)
+    source_mount_path = PurePosixPath(source.source_mount_path)
     source_run_subpath = (
-        PurePosixPath(source.source_run_root)
-        .relative_to(PurePosixPath(source.source_mount_path))
-        .as_posix()
+        source_run_root.relative_to(source_mount_path).as_posix()
+        if source_run_root.is_relative_to(source_mount_path)
+        else None
     )
     if (
         config.storage.source_volume != source.source_volume
@@ -786,7 +788,7 @@ def screen_matched_capacity(
     *,
     observed_gpu_memory_bytes: Sequence[int],
 ) -> MatchedCapacityResult:
-    """Apply the conservative aggregate screen to one observed GPU allocation."""
+    """Screen one allocation whose memory values use zero-based CUDA ordinal order."""
 
     observed = tuple(observed_gpu_memory_bytes)
     expected_count = config.resources.gpu_count
@@ -833,12 +835,12 @@ def screen_matched_capacity(
     q3_subject_bytes = q3.q3_total_bytes + q3.projector.size_bytes
     sequential_peak = max(bf16_subject_bytes, q3_subject_bytes)
     remaining = usable_capacity - sequential_peak
-    below_minimum = [
-        index
-        for index, size_bytes in enumerate(observed)
+    below_minimum_cuda_ordinals = [
+        cuda_ordinal
+        for cuda_ordinal, size_bytes in enumerate(observed)
         if size_bytes < config.resources.minimum_gpu_memory_bytes
     ]
-    if below_minimum or remaining < 0:
+    if below_minimum_cuda_ordinals or remaining < 0:
         raise CapabilityError(
             "Observed GPU memory does not satisfy the matched capacity policy",
             component="inkling_matched_capacity",
@@ -849,7 +851,7 @@ def screen_matched_capacity(
                 "expected_gpu_count": expected_count,
                 "observed_gpu_count": len(observed),
                 "minimum_gpu_memory_bytes": config.resources.minimum_gpu_memory_bytes,
-                "below_minimum_ordinals": below_minimum,
+                "below_minimum_cuda_ordinals": below_minimum_cuda_ordinals,
                 "observed_total_gpu_memory_bytes": observed_total,
                 "required_headroom_bytes": required_headroom,
                 "usable_gpu_memory_bytes": usable_capacity,

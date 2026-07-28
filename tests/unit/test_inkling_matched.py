@@ -10,9 +10,11 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+import inkling_quant_lab.gguf.inkling_matched as inkling_matched
 from inkling_quant_lab.exceptions import CapabilityError, ConfigurationError
 from inkling_quant_lab.gguf.inkling import (
     INKLING_SOURCE_ADOPTION_REFERENCE_RELATIVE_PATH,
+    load_inkling_source_adoption_reference,
 )
 from inkling_quant_lab.gguf.inkling_matched import (
     BF16_SUBJECT_REFERENCE_RELATIVE_PATH,
@@ -41,6 +43,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BF16_REFERENCE_PATH = PROJECT_ROOT / BF16_SUBJECT_REFERENCE_RELATIVE_PATH
 Q3_REFERENCE_PATH = PROJECT_ROOT / VERIFIED_EXPORT_REFERENCE_RELATIVE_PATH
 MATCHED_CONFIG_PATH = PROJECT_ROOT / MATCHED_CELL_CONFIG_RELATIVE_PATH
+SOURCE_REFERENCE_PATH = PROJECT_ROOT / INKLING_SOURCE_ADOPTION_REFERENCE_RELATIVE_PATH
 OBSERVED_B300_MEMORY_BYTES = 287_428_771_840
 
 
@@ -253,6 +256,30 @@ def test_matched_bundle_rejects_missing_or_tampered_references(tmp_path: Path) -
         load_matched_cell_bundle(tampered_root)
 
 
+def test_matched_bundle_reports_source_root_outside_mount_as_storage_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = load_inkling_source_adoption_reference(SOURCE_REFERENCE_PATH)
+    detached_root = "/detached/runs/source"
+    detached_source = source.model_copy(
+        update={
+            "source_run_root": detached_root,
+            "snapshot_path": f"{detached_root}/snapshot",
+        }
+    )
+    monkeypatch.setattr(
+        inkling_matched,
+        "load_inkling_source_adoption_reference",
+        lambda _path: detached_source,
+    )
+
+    with pytest.raises(ConfigurationError, match="one exact subject bundle") as captured:
+        load_matched_cell_bundle(PROJECT_ROOT)
+
+    assert captured.value.component == "inkling_matched_cell_bundle"
+    assert captured.value.details["mismatches"] == ["source_storage"]
+
+
 def test_capacity_screen_passes_the_observed_eight_b300_aggregate_cell() -> None:
     config = load_matched_cell_config(MATCHED_CONFIG_PATH)
     bf16 = load_bf16_subject_reference(BF16_REFERENCE_PATH)
@@ -303,3 +330,17 @@ def test_capacity_screen_rejects_wrong_device_count_and_low_memory() -> None:
         captured.value.details["sequential_peak_subject_bytes"]
         > (captured.value.details["usable_gpu_memory_bytes"])
     )
+
+    one_small_gpu = (
+        config.resources.minimum_gpu_memory_bytes - 1,
+        *(OBSERVED_B300_MEMORY_BYTES,) * 7,
+    )
+    with pytest.raises(CapabilityError) as captured:
+        screen_matched_capacity(
+            config,
+            bf16,
+            q3,
+            observed_gpu_memory_bytes=one_small_gpu,
+        )
+    assert captured.value.details["aggregate_remaining_bytes"] > 0
+    assert captured.value.details["below_minimum_cuda_ordinals"] == [0]
