@@ -37,29 +37,36 @@ The workflow records this omission and does not hide it.
 
 The final verification checked the export structure, file set, sizes, and checksums.
 It did not measure the quality of the quantized Inkling model.
-The project does not yet have an accepted inference-smoke result for the final files.
 
-The latest controlled smoke attempt loaded the complete export.
+An external immutable receipt records a controlled smoke-test pass for the final Q3 export.
+The test loaded all 49 text files and the BF16 projector.
 It ran the text, image, and audio probes two times.
-All measured model graph work used CUDA.
-The attempt then failed the strict shard-accounting check.
+The token output was repeatable, and all checked unpadded logits were finite.
+The backend audit found no CPU model graph work.
 
-The first GGUF file contains metadata and no tensors.
-The old audit counted only files that loaded one or more tensors.
-It therefore reported 48 accounted files instead of 49.
-This is an evidence-accounting failure.
-It is not a model-load or inference failure.
-It is also not an accepted smoke-test pass.
+The receipt has file SHA-256
+`9b951a46cde9fbd30a825e606ce7f84c8c2a4ec9fb5e61971d8bb8b386279871`
+and internal canonical seal
+`2eccb51e6d4519a47930ca3a89cebe22f09f883b82868343b16eefc5a9f8dad7`.
+The receipt did not capture the host CPU model.
+The repository therefore does not publish this observation as a supported compatibility cell.
+The observed pass applies only to the recorded model, files, runtime, software, and two B300 GPUs.
+It does not prove quality retention or deployment speed.
 
-The immutable failure receipt has SHA-256
-`9ea52e0d3c3d56d1c89ff14e86c6907d1a5dc906b1b4a935cbf1c7475e447ef7`.
-The correction compares the expected and loaded tensor count for each file.
-This rule counts a valid metadata-only file when both counts are zero.
-The correction uses new schema versions.
-Historical receipt bytes and validation rules do not change.
+The project also records the retained 49-file BF16 control.
+The BF16 text files contain 1,894,278,547,552 bytes.
+These files are on a mutable Modal volume.
+The matched workflow must hash every BF16 and Q3 file again before it uses either subject.
 
-A new remote attempt needs a merged commit, a new control-plane hash, a new sealed identity, and
-new exact confirmation.
+The checked matched-cell file is a planning record.
+It cannot start remote work.
+It binds the BF16 files, Q3 files, shared projector, tokenizer files, and exact runtime.
+It plans to run BF16 first and Q3 second on one eight-B300 allocation.
+An aggregate memory screen passes for the recorded B300 memory size.
+This screen does not prove per-device placement, runtime workspace fit, or inference.
+The current backend audit supports two GPUs only.
+A later reviewed change must add an eight-GPU audit and runner.
+The plan does not allow quality or speed measurement until both subject smoke tests pass.
 
 The Git repository does not contain the model files.
 The files are too large for Git, and the project does not upload model weights by default.
@@ -193,6 +200,8 @@ These tracked files define the workflow:
 - [Inkling local manager](scripts/manage_inkling_modal.py)
 - [Inkling remote stages](scripts/quantize_inkling_modal.py)
 - [Source adoption record](configs/experiments/inkling_q3_k_m_source_adoption.json)
+- [BF16 subject reference](configs/experiments/inkling_bf16_subject_reference.json)
+- [Matched-cell configuration](configs/experiments/inkling_q3_k_m_matched_cell_modal.yaml)
 
 ## Configuration
 

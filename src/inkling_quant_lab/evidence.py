@@ -6,7 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal, TypeAlias, cast
 
 from pydantic import (
     BaseModel,
@@ -18,7 +18,12 @@ from pydantic import (
     model_validator,
 )
 
-from inkling_quant_lab.comparison import ComparisonResult, NormalizedRunSummary, compare_summaries
+from inkling_quant_lab.comparison import (
+    ComparisonResult,
+    NormalizedRunSummary,
+    compare_summaries,
+    compatibility_mismatches,
+)
 from inkling_quant_lab.exceptions import ArtifactIntegrityError, ComparisonCompatibilityError
 
 EvidenceStatus: TypeAlias = Literal["success", "partial", "failed"]
@@ -343,6 +348,61 @@ def _canonical_json(value: object) -> str:
     )
 
 
+def _protocol_field_json(value: object) -> JsonValue:
+    """Convert one protocol field into a JSON-safe mismatch value."""
+
+    if isinstance(value, BaseModel):
+        return cast(JsonValue, value.model_dump(mode="json"))
+    if isinstance(value, tuple):
+        return cast(
+            JsonValue,
+            [
+                item.model_dump(mode="json") if isinstance(item, BaseModel) else item
+                for item in value
+            ],
+        )
+    return cast(JsonValue, value)
+
+
+def _protocol_mismatches(
+    baseline: EvidenceComparisonProtocol | None,
+    candidate: EvidenceComparisonProtocol | None,
+) -> list[dict[str, JsonValue]]:
+    """Return the legacy protocol mismatch followed by stable granular details."""
+
+    protocol_fields = (
+        ("protocol_id", "protocol_identity"),
+        ("baseline_artifacts", "baseline_artifacts"),
+        ("candidate_artifacts", "candidate_artifacts"),
+        ("candidate_quantization", "candidate_quantization"),
+    )
+    granular: list[dict[str, JsonValue]] = []
+    for field_name, dimension in protocol_fields:
+        baseline_value = getattr(baseline, field_name) if baseline is not None else None
+        candidate_value = getattr(candidate, field_name) if candidate is not None else None
+        if baseline_value == candidate_value:
+            continue
+        granular.append(
+            {
+                "dimension": dimension,
+                "baseline": _protocol_field_json(baseline_value),
+                "candidate": _protocol_field_json(candidate_value),
+                "message": f"baseline and candidate {field_name} differ",
+            }
+        )
+    if not granular:
+        return []
+    return [
+        {
+            "dimension": "comparison_protocol",
+            "baseline": _protocol_field_json(baseline),
+            "candidate": _protocol_field_json(candidate),
+            "message": "baseline and candidate comparison protocols differ",
+        },
+        *granular,
+    ]
+
+
 def _sequence_sha256(values: tuple[str, ...]) -> str:
     return hashlib.sha256(_canonical_json(list(values)).encode("utf-8")).hexdigest()
 
@@ -550,33 +610,29 @@ def compare_evidence_records(
 ) -> EvidenceComparison:
     """Compare two validated records under the normalized strict contract."""
 
-    unusable = [
-        loaded.record.payload.record_id
-        for loaded in (baseline, candidate)
-        if loaded.record.payload.status == "failed"
-    ]
-    if unusable:
-        raise ComparisonCompatibilityError(
-            "Failed experiment evidence cannot be used for metric comparison",
-            component="evidence",
-            remediation="Use successful or explicitly partial evidence records.",
-            details={
-                "mismatches": [
-                    {
-                        "dimension": "experiment_status",
-                        "baseline": baseline.record.payload.status,
-                        "candidate": candidate.record.payload.status,
-                        "message": "failed experiment evidence is not comparison-ready",
-                    }
-                ],
-                "failed_record_ids": unusable,
-            },
-        )
     baseline_payload = baseline.record.payload
     candidate_payload = candidate.record.payload
-    protocol_mismatches: list[dict[str, JsonValue]] = []
+    failed_record_ids = [
+        payload.record_id
+        for payload in (baseline_payload, candidate_payload)
+        if payload.status == "failed"
+    ]
+    protocol_mismatches = _protocol_mismatches(
+        baseline_payload.comparison_protocol,
+        candidate_payload.comparison_protocol,
+    )
+    governance_mismatches: list[dict[str, JsonValue]] = []
+    if failed_record_ids:
+        governance_mismatches.append(
+            {
+                "dimension": "experiment_status",
+                "baseline": baseline_payload.status,
+                "candidate": candidate_payload.status,
+                "message": "failed experiment evidence is not comparison-ready",
+            }
+        )
     if baseline_payload.comparison_role != "baseline":
-        protocol_mismatches.append(
+        governance_mismatches.append(
             {
                 "dimension": "baseline_comparison_role",
                 "baseline": baseline_payload.comparison_role,
@@ -585,7 +641,7 @@ def compare_evidence_records(
             }
         )
     if candidate_payload.comparison_role != "candidate":
-        protocol_mismatches.append(
+        governance_mismatches.append(
             {
                 "dimension": "candidate_comparison_role",
                 "baseline": baseline_payload.comparison_role,
@@ -593,36 +649,61 @@ def compare_evidence_records(
                 "message": "the second record must declare comparison_role='candidate'",
             }
         )
-    baseline_protocol = (
-        baseline_payload.comparison_protocol.model_dump(mode="json")
-        if baseline_payload.comparison_protocol is not None
-        else None
-    )
-    candidate_protocol = (
-        candidate_payload.comparison_protocol.model_dump(mode="json")
-        if candidate_payload.comparison_protocol is not None
-        else None
-    )
-    if baseline_protocol != candidate_protocol:
-        protocol_mismatches.append(
+    if baseline_payload.result_kind != candidate_payload.result_kind:
+        governance_mismatches.append(
             {
-                "dimension": "comparison_protocol",
-                "baseline": baseline_protocol,
-                "candidate": candidate_protocol,
+                "dimension": "result_kind",
+                "baseline": baseline_payload.result_kind,
+                "candidate": candidate_payload.result_kind,
+                "message": "baseline and candidate result kinds differ",
+            }
+        )
+    if (
+        baseline_payload.compatibility_scope_sha256 is None
+        or candidate_payload.compatibility_scope_sha256 is None
+        or baseline_payload.compatibility_scope_sha256
+        != candidate_payload.compatibility_scope_sha256
+    ):
+        governance_mismatches.append(
+            {
+                "dimension": "compatibility_scope_sha256",
+                "baseline": baseline_payload.compatibility_scope_sha256,
+                "candidate": candidate_payload.compatibility_scope_sha256,
                 "message": (
-                    "baseline/candidate artifact hashes or candidate quantization identity differ"
+                    "baseline and candidate require one matching exact compatibility scope"
                 ),
             }
         )
-    if protocol_mismatches:
+
+    summary_mismatches = [
+        mismatch.model_dump(mode="json")
+        for mismatch in compatibility_mismatches(
+            baseline_payload.subject,
+            candidate_payload.subject,
+        )
+    ]
+    evidence_mismatches = [*protocol_mismatches, *governance_mismatches]
+    if evidence_mismatches:
+        details: dict[str, JsonValue] = {
+            "mismatches": cast(
+                JsonValue,
+                [*evidence_mismatches, *summary_mismatches],
+            )
+        }
+        if failed_record_ids:
+            details["failed_record_ids"] = cast(JsonValue, failed_record_ids)
         raise ComparisonCompatibilityError(
-            "Evidence records do not share the required baseline/candidate protocol",
+            (
+                "Failed experiment evidence cannot be used for metric comparison"
+                if failed_record_ids
+                else "Evidence records do not share the required governance and comparison protocol"
+            ),
             component="evidence",
             remediation=(
-                "Use records sealed against one protocol with the declared BF16 baseline "
-                "and quantized candidate artifact identities."
+                "Use records with one result kind, compatibility scope, protocol, "
+                "BF16 baseline, and quantized candidate identity."
             ),
-            details={"mismatches": protocol_mismatches},
+            details=details,
         )
 
     result = compare_summaries(

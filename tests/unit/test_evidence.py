@@ -165,6 +165,11 @@ def _record(
     candidate_artifact_sha256: str = "2" * 64,
     status: Literal["success", "partial", "failed"] = "success",
     failures: tuple[str, ...] = (),
+    result_kind: Literal[
+        "quality_evaluation",
+        "performance_benchmark",
+    ] = "quality_evaluation",
+    compatibility_scope_sha256: str | None = "7" * 64,
 ) -> ExperimentEvidenceRecord:
     role: Literal["baseline", "candidate"] = comparison_role or (
         "candidate" if record_id == "candidate" else "baseline"
@@ -182,10 +187,11 @@ def _record(
     artifact_sha256 = candidate_artifact_sha256 if role == "candidate" else baseline_artifact_sha256
     payload = ExperimentEvidencePayload(
         record_id=record_id,
-        result_kind="quality_evaluation",
+        result_kind=result_kind,
         status=status,
         comparison_role=role,
         comparison_protocol=protocol,
+        compatibility_scope_sha256=compatibility_scope_sha256,
         subject=_summary(
             record_id,
             quality=quality,
@@ -352,7 +358,192 @@ def test_comparison_rejects_wrong_record_roles_and_protocol_hashes(tmp_path: Pat
             load_evidence_record(baseline),
             load_evidence_record(candidate),
         )
-    assert captured.value.details["mismatches"][0]["dimension"] == "comparison_protocol"
+    assert [item["dimension"] for item in captured.value.details["mismatches"]] == [
+        "comparison_protocol",
+        "candidate_artifacts",
+    ]
+
+
+def test_comparison_rejects_result_kind_drift(tmp_path: Path) -> None:
+    baseline = _write_record(
+        tmp_path / "baseline.json",
+        _record("baseline", result_kind="quality_evaluation"),
+    )
+    candidate = _write_record(
+        tmp_path / "candidate.json",
+        _record("candidate", result_kind="performance_benchmark"),
+    )
+
+    with pytest.raises(ComparisonCompatibilityError) as captured:
+        compare_evidence_records(
+            load_evidence_record(baseline),
+            load_evidence_record(candidate),
+        )
+
+    assert captured.value.details["mismatches"][0]["dimension"] == "result_kind"
+
+
+@pytest.mark.parametrize(
+    ("baseline_scope", "candidate_scope"),
+    [
+        (None, None),
+        (None, "7" * 64),
+        ("7" * 64, None),
+        ("7" * 64, "8" * 64),
+    ],
+)
+def test_comparison_requires_same_non_null_compatibility_scope(
+    tmp_path: Path,
+    baseline_scope: str | None,
+    candidate_scope: str | None,
+) -> None:
+    baseline = _write_record(
+        tmp_path / "baseline.json",
+        _record("baseline", compatibility_scope_sha256=baseline_scope),
+    )
+    candidate = _write_record(
+        tmp_path / "candidate.json",
+        _record("candidate", compatibility_scope_sha256=candidate_scope),
+    )
+
+    with pytest.raises(ComparisonCompatibilityError) as captured:
+        compare_evidence_records(
+            load_evidence_record(baseline),
+            load_evidence_record(candidate),
+        )
+
+    assert captured.value.details["mismatches"][0]["dimension"] == ("compatibility_scope_sha256")
+
+
+@pytest.mark.parametrize(
+    ("protocol_field", "replacement", "dimension"),
+    [
+        ("protocol_id", "inkling-bf16-vs-q3-v2", "protocol_identity"),
+        ("baseline_artifacts", (), "baseline_artifacts"),
+        ("candidate_artifacts", (), "candidate_artifacts"),
+        ("candidate_quantization", None, "candidate_quantization"),
+    ],
+)
+def test_comparison_reports_each_protocol_dimension(
+    tmp_path: Path,
+    protocol_field: str,
+    replacement: object,
+    dimension: str,
+) -> None:
+    baseline_record = _record("baseline")
+    candidate_record = _record("candidate")
+    protocol = candidate_record.payload.comparison_protocol
+    assert protocol is not None
+    if protocol_field in {"baseline_artifacts", "candidate_artifacts"}:
+        current = getattr(protocol, protocol_field)
+        replacement = tuple(item.model_copy(update={"sha256": "9" * 64}) for item in current)
+    elif protocol_field == "candidate_quantization":
+        replacement = protocol.candidate_quantization.model_copy(
+            update={"quantizer_revision": "different-quantizer-revision"}
+        )
+    changed_protocol = protocol.model_copy(update={protocol_field: replacement})
+    artifacts = candidate_record.payload.artifacts
+    if protocol_field == "candidate_artifacts":
+        artifacts = tuple(
+            item.model_copy(update={"sha256": "9" * 64})
+            if item.artifact_id == "inkling-q3.gguf"
+            else item
+            for item in artifacts
+        )
+    changed_payload = candidate_record.payload.model_copy(
+        update={
+            "comparison_protocol": changed_protocol,
+            "artifacts": artifacts,
+        }
+    )
+    candidate_record = seal_evidence_record(changed_payload)
+    baseline = _write_record(tmp_path / "baseline.json", baseline_record)
+    candidate = _write_record(tmp_path / "candidate.json", candidate_record)
+
+    with pytest.raises(ComparisonCompatibilityError) as captured:
+        compare_evidence_records(
+            load_evidence_record(baseline),
+            load_evidence_record(candidate),
+        )
+
+    assert [item["dimension"] for item in captured.value.details["mismatches"]] == [
+        "comparison_protocol",
+        dimension,
+    ]
+
+
+def test_comparison_reports_protocol_and_summary_mismatches_together(
+    tmp_path: Path,
+) -> None:
+    baseline_record = _record("baseline")
+    candidate_record = _record("candidate")
+    protocol = candidate_record.payload.comparison_protocol
+    assert protocol is not None
+
+    subject = candidate_record.payload.subject.model_dump(mode="json")
+    subject["model_revision"] = "different-model-revision"
+    subject["software_toolchain"]["runtime_binary_sha256"] = "8" * 64
+    subject["datasets"][0]["dataset_sha256"] = "9" * 64
+    subject["evaluation_suites"][0]["dataset_sha256"] = "9" * 64
+    subject["metrics"]["quality"]["evaluation_suite"]["dataset_sha256"] = "9" * 64
+    subject["hardware_environment"]["hardware"]["gpu"] = "different-gpu"
+    subject["failures"] = ["runtime crashed"]
+    changed_protocol = protocol.model_copy(
+        update={
+            "protocol_id": "inkling-bf16-vs-q3-v2",
+            "baseline_artifacts": tuple(
+                item.model_copy(update={"sha256": "3" * 64}) for item in protocol.baseline_artifacts
+            ),
+            "candidate_artifacts": tuple(
+                item.model_copy(update={"sha256": "4" * 64})
+                for item in protocol.candidate_artifacts
+            ),
+            "candidate_quantization": protocol.candidate_quantization.model_copy(
+                update={"quantizer_revision": "different-quantizer-revision"}
+            ),
+        }
+    )
+    artifacts = tuple(
+        item.model_copy(update={"sha256": "4" * 64})
+        if item.artifact_id == "inkling-q3.gguf"
+        else item
+        for item in candidate_record.payload.artifacts
+    )
+    changed_payload = candidate_record.payload.model_copy(
+        update={
+            "status": "failed",
+            "result_kind": "performance_benchmark",
+            "compatibility_scope_sha256": "8" * 64,
+            "comparison_protocol": changed_protocol,
+            "subject": NormalizedRunSummary.model_validate(subject),
+            "artifacts": artifacts,
+        }
+    )
+    candidate_record = seal_evidence_record(changed_payload)
+    baseline = _write_record(tmp_path / "baseline.json", baseline_record)
+    candidate = _write_record(tmp_path / "candidate.json", candidate_record)
+
+    with pytest.raises(ComparisonCompatibilityError) as captured:
+        compare_evidence_records(
+            load_evidence_record(baseline),
+            load_evidence_record(candidate),
+        )
+
+    assert [item["dimension"] for item in captured.value.details["mismatches"]] == [
+        "comparison_protocol",
+        "protocol_identity",
+        "baseline_artifacts",
+        "candidate_artifacts",
+        "candidate_quantization",
+        "experiment_status",
+        "result_kind",
+        "compatibility_scope_sha256",
+        "model_revision",
+        "software_toolchain",
+        "datasets",
+        "hardware_environment",
+    ]
+    assert captured.value.details["failed_record_ids"] == ["candidate"]
 
 
 @pytest.mark.parametrize(
