@@ -193,8 +193,7 @@ def test_report_marks_only_static_reference_validation_as_passed() -> None:
 def test_report_keeps_every_execution_and_claim_fact_false() -> None:
     payload = json.loads(build_matched_preflight_report(PROJECT_ROOT).canonical_json())
     required_false_facts = (
-        "runner_implemented",
-        "remote_execution_allowed",
+        "remote_execution_default_enabled",
         "remote_execution_performed",
         "measurement_execution_allowed",
         "measurement_execution_performed",
@@ -219,6 +218,11 @@ def test_report_keeps_every_execution_and_claim_fact_false() -> None:
         assert all(value is False for value in values), (
             f"preflight report made a positive {key!r} claim: {values!r}"
         )
+
+    assert payload["execution"]["record_status"] == "execution_ready"
+    assert payload["execution"]["runner_implemented"] is True
+    assert payload["facts"]["remote_execution_performed"] is False
+    assert payload["facts"]["paid_compute_started"] is False
 
 
 def test_report_records_explicit_negative_side_effect_facts() -> None:
@@ -272,7 +276,9 @@ def test_report_records_the_exact_declared_resource_cell() -> None:
         "memory_gib": 64,
         "ephemeral_disk_mib": 524_288,
         "startup_timeout_seconds": 1_800,
+        "function_timeout_seconds": 14_400,
         "max_attempts": 1,
+        "max_recovery_attempts": 0,
         "declared_only": True,
     }
 
@@ -448,7 +454,7 @@ def test_cli_inspect_reports_the_static_plan_without_execution(
     captured = capsys.readouterr()
     assert captured.err == ""
     assert report.plan_sha256 in captured.out
-    assert "planning_only" in captured.out
+    assert "execution_ready" in captured.out
     assert "not_executed" in captured.out
 
 

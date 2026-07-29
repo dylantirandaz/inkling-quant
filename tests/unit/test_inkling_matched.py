@@ -139,7 +139,7 @@ def test_bf16_reference_loader_rejects_noncanonical_json(tmp_path: Path) -> None
 def test_checked_matched_cell_binds_subjects_runtime_assets_and_claim_limits() -> None:
     config = load_matched_cell_config(MATCHED_CONFIG_PATH)
 
-    assert config.schema_version == "inkling-matched-cell-config-v2"
+    assert config.schema_version == "inkling-matched-cell-config-v3"
     assert config.bf16_subject_reference_sha256 == EXPECTED_BF16_SUBJECT_REFERENCE_SHA256
     assert config.q3_verified_export_reference_sha256 == (EXPECTED_VERIFIED_EXPORT_REFERENCE_SHA256)
     assert tuple(item.name for item in config.runtime.binaries) == (
@@ -160,6 +160,23 @@ def test_checked_matched_cell_binds_subjects_runtime_assets_and_claim_limits() -
     assert config.resources.gpu_count == 8
     assert config.runtime.tensor_split == (1, 1, 1, 1, 1, 1, 1, 1)
     assert config.runtime.no_cpu_fallback is True
+    assert config.runtime.server_endpoint == "/completion"
+    assert config.runtime.log_verbosity == 4
+    assert config.runtime.context_size == 8192
+    assert config.output_vocabulary.vocab_size == 201024
+    assert config.output_vocabulary.unpadded_vocab_size == 200058
+    assert tuple((probe.probe_id, probe.modality) for probe in config.probes) == (
+        ("text_greedy_v1", "text"),
+        ("image_greedy_v1", "image"),
+        ("audio_greedy_v1", "audio"),
+    )
+    assert all(probe.trials == 2 for probe in config.probes)
+    assert all(probe.temperature == 0.0 for probe in config.probes)
+    assert config.evidence.record_prompt_text is False
+    assert config.evidence.record_output_text is False
+    assert config.evidence.record_token_ids is True
+    assert config.resources.function_timeout_seconds == 14_400
+    assert config.resources.max_recovery_attempts == 0
     assert config.storage.bf16_volume_version == 1
     assert config.storage.bf16_create_if_missing is False
     assert config.storage.final_volume_version == 1
@@ -172,9 +189,16 @@ def test_checked_matched_cell_binds_subjects_runtime_assets_and_claim_limits() -
     assert config.storage.evidence_volume_version == 1
     assert config.storage.evidence_read_only is False
     assert config.storage.evidence_create_if_missing is True
-    assert config.execution.record_status == "planning_only"
-    assert config.execution.runner_implemented is False
-    assert config.execution.remote_execution_allowed is False
+    assert config.storage.attempt_registry == "inkling-matched-attempt-registry-v1"
+    assert config.storage.attempt_registry_append_only is True
+    assert config.execution.record_status == "execution_ready"
+    assert config.execution.runner_implemented is True
+    assert (
+        config.execution.remote_execution_policy == "fresh_content_addressed_confirmation_required"
+    )
+    assert config.execution.remote_execution_default_enabled is False
+    assert config.execution.confirmation_reuse_allowed is False
+    assert config.execution.one_atomic_attempt is True
     assert config.execution.subject_mode == "sequential_same_allocation"
     assert config.execution.subject_order == ("bf16", "q3")
     assert config.execution.measurement_execution_allowed is False
@@ -184,11 +208,15 @@ def test_checked_matched_cell_binds_subjects_runtime_assets_and_claim_limits() -
     assert len(config.config_hash()) == 64
 
 
-def test_matched_cell_rejects_retired_v1_schema() -> None:
+@pytest.mark.parametrize(
+    "retired_schema",
+    ("inkling-matched-cell-config-v1", "inkling-matched-cell-config-v2"),
+)
+def test_matched_cell_rejects_retired_schemas(retired_schema: str) -> None:
     raw = _matched_mapping()
-    raw["schema_version"] = "inkling-matched-cell-config-v1"
+    raw["schema_version"] = retired_schema
 
-    with pytest.raises(ValidationError, match="inkling-matched-cell-config-v2"):
+    with pytest.raises(ValidationError, match="inkling-matched-cell-config-v3"):
         InklingMatchedCellConfig.model_validate(raw)
 
 
@@ -196,10 +224,10 @@ def test_matched_cell_rejects_retired_v1_schema() -> None:
     ("original", "replacement", "duplicate_key"),
     [
         (
-            "schema_version: inkling-matched-cell-config-v2\n",
+            "schema_version: inkling-matched-cell-config-v3\n",
             (
-                "schema_version: inkling-matched-cell-config-v2\n"
-                "schema_version: inkling-matched-cell-config-v2\n"
+                "schema_version: inkling-matched-cell-config-v3\n"
+                "schema_version: inkling-matched-cell-config-v3\n"
             ),
             "schema_version",
         ),
@@ -261,12 +289,14 @@ def test_matched_cell_rejects_runtime_tampering() -> None:
 @pytest.mark.parametrize(
     ("field_name", "value"),
     [
-        ("runner_implemented", True),
-        ("remote_execution_allowed", True),
+        ("runner_implemented", False),
+        ("remote_execution_default_enabled", True),
+        ("confirmation_reuse_allowed", True),
+        ("one_atomic_attempt", False),
         ("measurement_execution_allowed", True),
     ],
 )
-def test_matched_cell_rejects_execution_enablement(
+def test_matched_cell_rejects_execution_policy_tampering(
     field_name: str,
     value: bool,
 ) -> None:
@@ -275,6 +305,38 @@ def test_matched_cell_rejects_execution_enablement(
     assert isinstance(execution, dict)
     execution[field_name] = value
     with pytest.raises(ValidationError):
+        InklingMatchedCellConfig.model_validate(raw)
+
+
+def test_matched_cell_rejects_smoke_protocol_tampering() -> None:
+    raw = _matched_mapping()
+    probes = raw["probes"]
+    assert isinstance(probes, list)
+    first = probes[0]
+    assert isinstance(first, dict)
+    first["prompt"] = "A different but internally hashed prompt."
+    first["prompt_sha256"] = "cb4d8d0d566ea66d02d6d200118bb762ca38f39179e7647a72598d759691a3b0"
+
+    with pytest.raises(ValidationError, match="exact deterministic protocol"):
+        InklingMatchedCellConfig.model_validate(raw)
+
+
+def test_matched_cell_rejects_attempt_and_timeout_tampering() -> None:
+    raw = _matched_mapping()
+    storage = raw["storage"]
+    resources = raw["resources"]
+    assert isinstance(storage, dict)
+    assert isinstance(resources, dict)
+    storage["attempt_registry"] = "other-registry"
+
+    with pytest.raises(ValidationError, match="inkling-matched-attempt-registry-v1"):
+        InklingMatchedCellConfig.model_validate(raw)
+
+    raw = _matched_mapping()
+    resources = raw["resources"]
+    assert isinstance(resources, dict)
+    resources["function_timeout_seconds"] = 14_399
+    with pytest.raises(ValidationError, match="14400"):
         InklingMatchedCellConfig.model_validate(raw)
 
 

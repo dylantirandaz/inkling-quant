@@ -63,9 +63,9 @@ _NOT_EXECUTED_STAGES: Final = (
 )
 # Update this complete raw identity set in one reviewed change when a control changes.
 _MATCHED_CONFIG_CONTROL_SHA256: Final = (
-    "dbb68759e452cef0d809159bd00cda688f17321be1fbd519464462379eb82ef8"
+    "d3cbf6ae5abc9b1c798820ffc2d3b8e4181b318078b538312534ce6641ad21f5"
 )
-_MATCHED_CONFIG_CONTROL_SIZE_BYTES: Final = 5_391
+_MATCHED_CONFIG_CONTROL_SIZE_BYTES: Final = 7_655
 _BF16_REFERENCE_CONTROL_SHA256: Final = (
     "1aa0fc8be7c1a5f6eb4ea480684a660ce443e0830c05668b141d5b88e5a762ff"
 )
@@ -276,7 +276,9 @@ class MatchedDeclaredResourceCell(StrictFrozenModel):
     memory_gib: Literal[64]
     ephemeral_disk_mib: Literal[524288]
     startup_timeout_seconds: Literal[1800]
+    function_timeout_seconds: Literal[14400]
     max_attempts: Literal[1]
+    max_recovery_attempts: Literal[0]
     declared_only: Literal[True]
 
 
@@ -1018,7 +1020,9 @@ def _declared_resource_cell(
         memory_gib=resources.memory_gib,
         ephemeral_disk_mib=resources.ephemeral_disk_mib,
         startup_timeout_seconds=resources.startup_timeout_seconds,
+        function_timeout_seconds=resources.function_timeout_seconds,
         max_attempts=resources.max_attempts,
+        max_recovery_attempts=resources.max_recovery_attempts,
         declared_only=True,
     )
 

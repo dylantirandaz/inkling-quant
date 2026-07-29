@@ -27,6 +27,7 @@ from pydantic import (
     Field,
     StrictBool,
     StrictInt,
+    StrictStr,
     ValidationError,
     field_validator,
     model_validator,
@@ -2271,6 +2272,21 @@ class ProjectorReadyEvidence(StrictFrozenModel):
     n_embd: int = Field(gt=0)
 
 
+def _validated_artifact_load_path(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("artifact load path must be text")
+    path = PurePosixPath(value)
+    if (
+        not path.is_absolute()
+        or str(path) != value
+        or ".." in path.parts
+        or "\x00" in value
+        or any(character.isspace() for character in value)
+    ):
+        raise ValueError("artifact load path must be a canonical absolute POSIX path")
+    return value
+
+
 class ArtifactLoadEvidence(StrictFrozenModel):
     """Loader evidence for all 49 model shards and the BF16 projector.
 
@@ -2280,15 +2296,20 @@ class ArtifactLoadEvidence(StrictFrozenModel):
     """
 
     schema_version: Literal["inkling-artifact-load-v2"] = "inkling-artifact-load-v2"
-    first_shard_path: Literal["/subject/q3_k_m/inkling-Q3_K_M-00001-of-00049.gguf"]
+    first_shard_path: StrictStr = Field(min_length=1)
     additional_shards_loaded: Literal[48]
     total_shards_loaded: Literal[49]
-    projector_path: Literal["/subject/mmproj/mmproj-BF16.gguf"]
+    projector_path: StrictStr = Field(min_length=1)
     text_shards: TextShardLoadEvidence
     text_load: TextTensorLoadEvidence
     projector_tensors: tuple[ProjectorTensorLoadEvidence, ...]
     projector_ready: ProjectorReadyEvidence
     all_expected_artifacts_loaded: Literal[True] = True
+
+    @field_validator("first_shard_path", "projector_path")
+    @classmethod
+    def artifact_path_is_canonical_absolute(cls, value: str) -> str:
+        return _validated_artifact_load_path(value)
 
     @model_validator(mode="after")
     def exact_loaded_inventory(self) -> ArtifactLoadEvidence:
@@ -2574,17 +2595,24 @@ def parse_backend_audit_evidence_v2(log_text: str) -> BackendAuditEvidenceV2:
     )
 
 
-def parse_artifact_load_evidence(log_text: str) -> ArtifactLoadEvidence:
+def parse_artifact_load_evidence(
+    log_text: str,
+    *,
+    expected_first_shard_path: str = EXPECTED_FIRST_Q3_MOUNT_PATH,
+    expected_projector_path: str = EXPECTED_PROJECTOR_MOUNT_PATH,
+) -> ArtifactLoadEvidence:
     """Parse exact first-shard, split-count, and multimodal-projector loader lines."""
 
+    expected_first_shard_path = _validated_artifact_load_path(expected_first_shard_path)
+    expected_projector_path = _validated_artifact_load_path(expected_projector_path)
     first_shards = tuple(_FIRST_SHARD_LOAD_RE.findall(log_text))
-    if len(first_shards) != 1 or first_shards[0] != EXPECTED_FIRST_Q3_MOUNT_PATH:
+    if len(first_shards) != 1 or first_shards[0] != expected_first_shard_path:
         raise ValueError("loader log does not bind the exact first shard")
     additional = tuple(_ADDITIONAL_SHARD_LOAD_RE.findall(log_text))
     if len(additional) != 1 or additional[0] != "48":
         raise ValueError("loader log does not prove the exact additional shard count")
     projectors = tuple(_PROJECTOR_LOAD_RE.findall(log_text))
-    if len(projectors) != 1 or projectors[0] != EXPECTED_PROJECTOR_MOUNT_PATH:
+    if len(projectors) != 1 or projectors[0] != expected_projector_path:
         raise ValueError("loader log does not bind the exact projector")
 
     shard_matches = tuple(_TEXT_SHARDS_RE.findall(log_text))
@@ -2647,10 +2675,10 @@ def parse_artifact_load_evidence(log_text: str) -> ArtifactLoadEvidence:
         n_embd=int(ready[5]),
     )
     return ArtifactLoadEvidence(
-        first_shard_path=EXPECTED_FIRST_Q3_MOUNT_PATH,
+        first_shard_path=expected_first_shard_path,
         additional_shards_loaded=48,
         total_shards_loaded=EXPECTED_Q3_SHARD_COUNT,
-        projector_path=EXPECTED_PROJECTOR_MOUNT_PATH,
+        projector_path=expected_projector_path,
         text_shards=text_shards,
         text_load=text_load,
         projector_tensors=projector_tensors,
