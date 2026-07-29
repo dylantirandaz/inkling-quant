@@ -110,6 +110,7 @@ from inkling_quant_lab.gguf.inkling_matched_execution import (  # noqa: E402
     MATCHED_SUBJECT_ORDER,
     MatchedArtifactHashObservation,
     MatchedCudaPeerTopologyEvidence,
+    MatchedFailureCauseCode,
     MatchedFailureReceipt,
     MatchedGpuResourceEvidence,
     MatchedNvidiaSmiGpuEvidence,
@@ -162,6 +163,10 @@ class _EvidenceStateUnknownError(RuntimeError):
     """Installed immutable evidence cannot be reconciled with the mounted Volume."""
 
 
+class _FileSizeMismatchError(RuntimeError):
+    """A regular file differs from its reviewed byte count."""
+
+
 _FailureCategory = Literal[
     "artifact_rehash",
     "hardware_identity",
@@ -177,12 +182,43 @@ _FailureCategory = Literal[
 ]
 
 
-class _MatchedStageError(RuntimeError):
-    """A bounded stage identity whose cause remains available only in memory."""
+def _default_failure_cause(category: _FailureCategory) -> MatchedFailureCauseCode:
+    return {
+        "artifact_rehash": MatchedFailureCauseCode.ARTIFACT_CONTRACT_FAILED,
+        "hardware_identity": MatchedFailureCauseCode.HARDWARE_IDENTITY_FAILED,
+        "hardware_capacity": MatchedFailureCauseCode.HARDWARE_CAPACITY_FAILED,
+        "peer_topology": MatchedFailureCauseCode.PEER_TOPOLOGY_FAILED,
+        "server_start": MatchedFailureCauseCode.SERVER_START_FAILED,
+        "server_health": MatchedFailureCauseCode.SERVER_HEALTH_FAILED,
+        "probe": MatchedFailureCauseCode.COMPLETION_CONTRACT_FAILED,
+        "backend_placement": MatchedFailureCauseCode.BACKEND_PLACEMENT_FAILED,
+        "resource_monitor": MatchedFailureCauseCode.RESOURCE_MONITOR_FAILED,
+        "cleanup": MatchedFailureCauseCode.CLEANUP_FAILED,
+        "publication": MatchedFailureCauseCode.PUBLICATION_FAILED,
+    }[category]
 
-    def __init__(self, category: _FailureCategory) -> None:
+
+class _MatchedStageError(RuntimeError):
+    """A bounded stage identity with no raw provider or artifact detail."""
+
+    def __init__(
+        self,
+        category: _FailureCategory,
+        *,
+        cause_code: MatchedFailureCauseCode | None = None,
+        artifact_path: str | None = None,
+    ) -> None:
         super().__init__(f"matched smoke stage failed: {category}")
         self.category = category
+        self.cause_code = _default_failure_cause(category) if cause_code is None else cause_code
+        if artifact_path is not None and (
+            artifact_path.startswith("/")
+            or "\\" in artifact_path
+            or "\x00" in artifact_path
+            or any(part in {"", ".", ".."} for part in artifact_path.split("/"))
+        ):
+            raise ValueError("matched failure artifact path is not safe and relative")
+        self.artifact_path = artifact_path
 
 
 def _remaining_work_timeout(
@@ -200,7 +236,10 @@ def _remaining_work_timeout(
         raise ValueError("matched work deadline inputs are invalid")
     remaining = work_deadline_monotonic - time.monotonic()
     if remaining <= 0.0:
-        raise _MatchedStageError(category)
+        raise _MatchedStageError(
+            category,
+            cause_code=MatchedFailureCauseCode.DEADLINE_EXHAUSTED,
+        )
     return min(maximum_seconds, remaining)
 
 
@@ -798,12 +837,13 @@ def _sha256_file(
     path: Path,
     *,
     expected_size: int,
+    failure_category: _FailureCategory,
     work_deadline_monotonic: float,
 ) -> tuple[str, int]:
     _remaining_work_timeout(
         work_deadline_monotonic,
         maximum_seconds=1.0,
-        category="artifact_rehash",
+        category=failure_category,
     )
     descriptor = os.open(
         path,
@@ -815,13 +855,13 @@ def _sha256_file(
         if not stat.S_ISREG(before.st_mode):
             raise RuntimeError("subject artifact is not a regular file")
         if before.st_size != expected_size:
-            raise RuntimeError("subject artifact size drifted")
+            raise _FileSizeMismatchError("subject artifact size drifted")
         while chunk := os.read(descriptor, 16 * 1024 * 1024):
             digest.update(chunk)
             _remaining_work_timeout(
                 work_deadline_monotonic,
                 maximum_seconds=1.0,
-                category="artifact_rehash",
+                category=failure_category,
             )
         after = os.fstat(descriptor)
     finally:
@@ -923,6 +963,8 @@ def _observe_allocation(
             shell=False,
         ).stdout
         cuda_driver_path = parse_cuda_driver_linkage(linkage)
+    except _MatchedStageError:
+        raise
     except BaseException as error:
         raise _MatchedStageError("hardware_identity") from error
     try:
@@ -939,6 +981,8 @@ def _observe_allocation(
             unordered_gpus,
             cuda_gpu_uuids=topology.gpu_uuids,
         )
+    except _MatchedStageError:
+        raise
     except BaseException as error:
         raise _MatchedStageError("peer_topology") from error
     try:
@@ -954,6 +998,8 @@ def _observe_allocation(
             bundle.q3,
             observed_gpu_memory_bytes=capacity_inputs.observed_gpu_memory_bytes,
         )
+    except _MatchedStageError:
+        raise
     except BaseException as error:
         raise _MatchedStageError("hardware_capacity") from error
     identity_sha256 = _identity_sha256(
@@ -987,10 +1033,11 @@ def _observe_runtime_identity(
             digest, size = _sha256_file(
                 Path(binary.path),
                 expected_size=binary.size_bytes,
+                failure_category="hardware_identity",
                 work_deadline_monotonic=work_deadline_monotonic,
             )
-            if digest != binary.sha256:
-                raise RuntimeError("runtime binary hash drifted")
+            if size != binary.size_bytes or digest != binary.sha256:
+                raise RuntimeError("runtime binary identity drifted")
             observed_binaries.append(
                 {
                     "name": binary.name,
@@ -998,6 +1045,8 @@ def _observe_runtime_identity(
                     "size_bytes": size,
                 }
             )
+    except _MatchedStageError:
+        raise
     except BaseException as error:
         raise _MatchedStageError("hardware_identity") from error
     return _identity_sha256(
@@ -1030,11 +1079,43 @@ def _observe_artifact(
     work_deadline_monotonic: float,
     shard_ordinal: int | None = None,
 ) -> MatchedArtifactHashObservation:
-    digest, size = _sha256_file(
-        Path(absolute_path),
-        expected_size=artifact.size_bytes,
-        work_deadline_monotonic=work_deadline_monotonic,
-    )
+    try:
+        digest, size = _sha256_file(
+            Path(absolute_path),
+            expected_size=artifact.size_bytes,
+            failure_category="artifact_rehash",
+            work_deadline_monotonic=work_deadline_monotonic,
+        )
+    except _FileSizeMismatchError as error:
+        raise _MatchedStageError(
+            "artifact_rehash",
+            cause_code=MatchedFailureCauseCode.ARTIFACT_SIZE_MISMATCH,
+            artifact_path=artifact.path,
+        ) from error
+    except _MatchedStageError as error:
+        raise _MatchedStageError(
+            "artifact_rehash",
+            cause_code=error.cause_code,
+            artifact_path=artifact.path,
+        ) from error
+    except BaseException as error:
+        raise _MatchedStageError(
+            "artifact_rehash",
+            cause_code=MatchedFailureCauseCode.ARTIFACT_READ_FAILED,
+            artifact_path=artifact.path,
+        ) from error
+    if size != artifact.size_bytes:
+        raise _MatchedStageError(
+            "artifact_rehash",
+            cause_code=MatchedFailureCauseCode.ARTIFACT_SIZE_MISMATCH,
+            artifact_path=artifact.path,
+        )
+    if digest != artifact.sha256:
+        raise _MatchedStageError(
+            "artifact_rehash",
+            cause_code=MatchedFailureCauseCode.ARTIFACT_HASH_MISMATCH,
+            artifact_path=artifact.path,
+        )
     return MatchedArtifactHashObservation(
         subject=subject,
         kind=kind,
@@ -1455,7 +1536,7 @@ def _completion_timings(
     payload: Mapping[str, Any],
     *,
     tokens_predicted: int,
-) -> tuple[float, float, float]:
+) -> tuple[float, float]:
     timings = payload.get("timings")
     if not isinstance(timings, Mapping):
         raise RuntimeError("completion lacks timing evidence")
@@ -1496,8 +1577,7 @@ def _completion_timings(
         1000.0 * predicted_n / predicted_ms,
         field="predicted_per_second",
     )
-    # The pinned server reports prompt_ms at its internal first-token boundary.
-    return prompt_ms, prompt_ms, predicted_ms
+    return prompt_ms, predicted_ms
 
 
 def _validate_completion_envelope(
@@ -1531,6 +1611,7 @@ def _run_probe(
     probe: Any,
     marker: str,
     vocab_size: int,
+    unpadded_vocab_size: int,
     *,
     work_deadline_monotonic: float,
 ) -> MatchedProbeEvidence:
@@ -1569,7 +1650,7 @@ def _run_probe(
         completion = parse_server_completion(
             payload,
             vocab_size=vocab_size,
-            unpadded_vocab_size=200058,
+            unpadded_vocab_size=unpadded_vocab_size,
             expected_n_probs=probe.n_probs,
         )
         _validate_completion_envelope(
@@ -1577,7 +1658,7 @@ def _run_probe(
             tokens_predicted=completion.tokens_predicted,
         )
         logprobs = _completion_logprobs(payload)
-        first_token_ms, prompt_ms, decode_ms = _completion_timings(
+        prompt_ms, decode_ms = _completion_timings(
             payload,
             tokens_predicted=completion.tokens_predicted,
         )
@@ -1589,7 +1670,6 @@ def _run_probe(
                 minimum_logprob=min(logprobs),
                 maximum_logprob=max(logprobs),
                 mean_logprob=sum(logprobs) / len(logprobs),
-                time_to_first_token_ms=first_token_ms,
                 prompt_processing_ms=prompt_ms,
                 decode_ms=decode_ms,
                 response_sha256=response_sha256,
@@ -1598,7 +1678,10 @@ def _run_probe(
             )
         )
     if trials[0].token_ids != trials[1].token_ids:
-        raise RuntimeError("repeated greedy output is not token-identical")
+        raise _MatchedStageError(
+            "probe",
+            cause_code=MatchedFailureCauseCode.GREEDY_REPEATABILITY_FAILED,
+        )
     return MatchedProbeEvidence(
         probe_id=probe.probe_id,
         modality=probe.modality,
@@ -1609,7 +1692,7 @@ def _run_probe(
         temperature=probe.temperature,
         n_predict=probe.n_predict,
         n_probs=probe.n_probs,
-        usable_vocab_size=200058,
+        usable_vocab_size=unpadded_vocab_size,
         trials=(trials[0], trials[1]),
         repeatable_greedy_token_ids=True,
         prompt_text_recorded=False,
@@ -1849,6 +1932,8 @@ def _run_subject(
                     f"{type(close_error).__qualname__}"
                 )
             raise
+    except _MatchedStageError:
+        raise
     except BaseException as error:
         raise _MatchedStageError("server_start") from error
     monitor = _RuntimeMonitor(process.pid, gpu_uuids)
@@ -1884,9 +1969,12 @@ def _run_subject(
                     port,
                     work_deadline_monotonic=work_deadline_monotonic,
                 )
+            except _MatchedStageError:
+                raise
             except BaseException as error:
                 raise _MatchedStageError("server_health") from error
-            if vocab_size != bundle.config.output_vocabulary.vocab_size:
+            output_vocabulary = bundle.config.output_vocabulary
+            if vocab_size != output_vocabulary.vocab_size:
                 raise _MatchedStageError("server_health")
             try:
                 probes = tuple(
@@ -1895,10 +1983,13 @@ def _run_subject(
                         probe,
                         media_marker,
                         vocab_size,
+                        output_vocabulary.unpadded_vocab_size,
                         work_deadline_monotonic=work_deadline_monotonic,
                     )
                     for probe in bundle.config.probes
                 )
+            except _MatchedStageError:
+                raise
             except BaseException as error:
                 raise _MatchedStageError("probe") from error
         except BaseException as error:
@@ -1914,6 +2005,8 @@ def _run_subject(
         raise subject_error
     try:
         resources = monitor.evidence()
+    except _MatchedStageError:
+        raise
     except BaseException as error:
         raise _MatchedStageError("resource_monitor") from error
     try:
@@ -1931,13 +2024,15 @@ def _run_subject(
         raw_logits = parse_raw_logit_audit_evidence(
             log_text,
             expected_generated_token_vectors=expected_vectors,
-            vocab_size=201024,
-            unpadded_vocab_size=200058,
+            vocab_size=output_vocabulary.vocab_size,
+            unpadded_vocab_size=output_vocabulary.unpadded_vocab_size,
         )
         backend = parse_exact_cuda_backend_audit(
             log_text,
             policy=build_matched_cuda_placement_policy(bundle.config),
         )
+    except _MatchedStageError:
+        raise
     except BaseException as error:
         raise _MatchedStageError("backend_placement") from error
     payload: dict[str, object] = {
@@ -2283,8 +2378,32 @@ def _failure_category(error: BaseException) -> _FailureCategory:
     return "publication"
 
 
+def _failure_cause_code(error: BaseException) -> MatchedFailureCauseCode:
+    if isinstance(error, _MatchedStageError):
+        return error.cause_code
+    return MatchedFailureCauseCode.PUBLICATION_FAILED
+
+
+def _failure_artifact_path(error: BaseException) -> str | None:
+    if isinstance(error, _MatchedStageError):
+        return error.artifact_path
+    return None
+
+
+def _failure_detail(error: BaseException) -> BaseException:
+    """Return the first in-memory non-stage cause without retaining it."""
+
+    current = error
+    for _ in range(8):
+        cause = current.__cause__
+        if not isinstance(current, _MatchedStageError) or cause is None or cause is current:
+            break
+        current = cause
+    return current
+
+
 def _failure_type(error: BaseException) -> str:
-    name = type(error).__name__
+    name = type(_failure_detail(error)).__name__
     if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]{0,127}", name) is None:
         return "RuntimeError"
     return name
@@ -2293,10 +2412,11 @@ def _failure_type(error: BaseException) -> str:
 def _failure_message_sha256(error: BaseException) -> str:
     """Hash a bounded diagnostic even when an exception cannot be stringified."""
 
+    detail = _failure_detail(error)
     try:
-        message = str(error)
+        message = str(detail)
     except BaseException:
-        message = f"<unprintable:{type(error).__module__}.{type(error).__qualname__}>"
+        message = f"<unprintable:{type(detail).__module__}.{type(detail).__qualname__}>"
     return hashlib.sha256(message.encode("utf-8", errors="strict")).hexdigest()
 
 
@@ -2315,6 +2435,8 @@ def _build_failure_receipt(
         category=_failure_category(error),
         failure_type=_failure_type(error),
         subject=subject,
+        cause_code=_failure_cause_code(error),
+        artifact_path=_failure_artifact_path(error),
         message_sha256=_failure_message_sha256(error),
         raw_message_recorded=False,
         traceback_recorded=False,
@@ -2450,6 +2572,8 @@ def matched_smoke_test(run_id: str, launch_intent_sha256: str) -> dict[str, Any]
                     subject,
                     work_deadline_monotonic=work_deadline_monotonic,
                 )
+            except _MatchedStageError:
+                raise
             except BaseException as error:
                 raise _MatchedStageError("artifact_rehash") from error
             subject_allocation = _observe_allocation(
@@ -2477,6 +2601,8 @@ def matched_smoke_test(run_id: str, launch_intent_sha256: str) -> dict[str, Any]
             )
             try:
                 reference = _persist_subject_receipt(receipt)
+            except _MatchedStageError:
+                raise
             except BaseException as error:
                 raise _MatchedStageError("publication") from error
             receipts.append(receipt)
@@ -2493,6 +2619,8 @@ def matched_smoke_test(run_id: str, launch_intent_sha256: str) -> dict[str, Any]
                 subject_receipts=receipts,
                 completed_at_utc=_utc_microseconds(),
             )
+        except _MatchedStageError:
+            raise
         except BaseException as error:
             raise _MatchedStageError("publication") from error
         publication = _publish_terminal(

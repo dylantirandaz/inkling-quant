@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
+
+import pytest
+
+pytestmark = pytest.mark.unit
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PREREGISTRATION = (
     PROJECT_ROOT / "docs/experiments/stories15m-native-int8-confirmatory-256-preregistration.json"
 )
 ATTEMPT_ROOT = PROJECT_ROOT / "artifacts/research-slices/stories15m-native-int8-confirmatory-256"
+RAW_ARTIFACT_VALIDATION_ENV = "IQL_VALIDATE_RAW_CONFIRMATORY_QUALITY_ARTIFACTS"
 PREREGISTRATION_SHA256 = "290dfee3ffaec8a46472f40f5b50ebc7a07f8ea34ae0caf7cec10ee8045ae0a4"
 PROTOCOL_DEFINITION_SHA256 = "84dff06f85d9490f71d80a37fa4788ee6bec326a5673afef67461ecc586153dd"
 ATTEMPT_START_SHA256 = {
@@ -47,6 +53,11 @@ def _strict_preregistration() -> dict[str, Any]:
     return _strict_json(PREREGISTRATION)
 
 
+def _require_raw_attempt_starts() -> None:
+    if os.environ.get(RAW_ARTIFACT_VALIDATION_ENV) != "1":
+        pytest.skip(f"set {RAW_ARTIFACT_VALIDATION_ENV}=1 to validate ignored historical artifacts")
+
+
 def test_preregistration_is_the_pinned_outcome_blind_lock() -> None:
     preregistration = _strict_preregistration()
 
@@ -75,6 +86,7 @@ def test_preregistration_is_the_pinned_outcome_blind_lock() -> None:
 
 
 def test_attempt_starts_retain_the_exact_historical_source_and_environment_lock() -> None:
+    _require_raw_attempt_starts()
     preregistration = _strict_preregistration()
     bindings = preregistration["bindings"]
     files = bindings["files"]
@@ -174,6 +186,7 @@ def test_preregistered_analysis_and_two_attempt_promotion_are_exact() -> None:
 
 
 def test_preregistered_interpreter_identity_is_retained_as_historical_metadata() -> None:
+    _require_raw_attempt_starts()
     preregistration = _strict_preregistration()
     environment = preregistration["environment_contract"]
     executable = environment["python_executable"]

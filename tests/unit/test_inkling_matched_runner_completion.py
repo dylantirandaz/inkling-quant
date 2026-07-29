@@ -9,13 +9,19 @@ from __future__ import annotations
 import ast
 import hashlib
 import math
+import os
+import re
+import stat
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+
+from inkling_quant_lab.gguf.inkling_matched_execution import MatchedFailureCauseCode
 
 pytestmark = pytest.mark.unit
 
@@ -152,7 +158,13 @@ def _runtime_slice(
         "dataclass": dataclass,
         "hashlib": hashlib,
         "math": math,
+        "MatchedFailureCauseCode": MatchedFailureCauseCode,
+        "os": os,
+        "Path": Path,
+        "re": re,
+        "stat": stat,
         "subprocess": subprocess,
+        "time": time,
     }
     if extra_namespace is not None:
         namespace.update(extra_namespace)
@@ -275,6 +287,89 @@ def test_broken_exception_string_still_produces_a_stable_sanitized_digest() -> N
     assert first == second == expected
 
 
+def test_failure_helpers_retain_one_safe_bounded_cause() -> None:
+    namespace = _runtime_slice(
+        "_failure_artifact_path",
+        "_failure_cause_code",
+        "_failure_message_sha256",
+        "_failure_type",
+    )
+    stage_error = namespace["_MatchedStageError"]
+    underlying = OSError("short write")
+    try:
+        raise stage_error(
+            "artifact_rehash",
+            cause_code=MatchedFailureCauseCode.ARTIFACT_SIZE_MISMATCH,
+            artifact_path="q3_k_m/inkling-Q3_K_M-00015-of-00049.gguf",
+        ) from underlying
+    except stage_error as error:
+        assert namespace["_failure_cause_code"](error) is (
+            MatchedFailureCauseCode.ARTIFACT_SIZE_MISMATCH
+        )
+        assert namespace["_failure_artifact_path"](error) == (
+            "q3_k_m/inkling-Q3_K_M-00015-of-00049.gguf"
+        )
+        assert namespace["_failure_type"](error) == "OSError"
+        assert (
+            namespace["_failure_message_sha256"](error)
+            == hashlib.sha256(b"short write").hexdigest()
+        )
+
+
+def test_artifact_mismatches_fail_with_path_before_success_model_validation(
+    tmp_path: Path,
+) -> None:
+    namespace = _runtime_slice("_observe_artifact")
+    observe = namespace["_observe_artifact"]
+    sha256_file = namespace["_sha256_file"]
+    stage_error = namespace["_MatchedStageError"]
+    size_error = namespace["_FileSizeMismatchError"]
+    artifact = SimpleNamespace(
+        path="q3_k_m/inkling-Q3_K_M-00015-of-00049.gguf",
+        sha256="a" * 64,
+        size_bytes=10,
+    )
+
+    undersized = tmp_path / "undersized.gguf"
+    undersized.write_bytes(b"")
+    with pytest.raises(size_error, match="size drifted"):
+        sha256_file(
+            undersized,
+            expected_size=artifact.size_bytes,
+            failure_category="artifact_rehash",
+            work_deadline_monotonic=time.monotonic() + 5.0,
+        )
+
+    def raise_size_mismatch(*_args: object, **_kwargs: object) -> None:
+        raise size_error("subject artifact size drifted")
+
+    namespace["_sha256_file"] = raise_size_mismatch
+    with pytest.raises(stage_error) as size_mismatch:
+        observe(
+            subject=object(),
+            kind="text_shard",
+            artifact=artifact,
+            absolute_path=f"/final/{artifact.path}",
+            work_deadline_monotonic=100.0,
+            shard_ordinal=15,
+        )
+    assert size_mismatch.value.cause_code is MatchedFailureCauseCode.ARTIFACT_SIZE_MISMATCH
+    assert size_mismatch.value.artifact_path == artifact.path
+
+    namespace["_sha256_file"] = lambda *_args, **_kwargs: ("b" * 64, 10)
+    with pytest.raises(stage_error) as wrong_hash:
+        observe(
+            subject=object(),
+            kind="text_shard",
+            artifact=artifact,
+            absolute_path=f"/final/{artifact.path}",
+            work_deadline_monotonic=100.0,
+            shard_ordinal=15,
+        )
+    assert wrong_hash.value.cause_code is MatchedFailureCauseCode.ARTIFACT_HASH_MISMATCH
+    assert wrong_hash.value.artifact_path == artifact.path
+
+
 def test_work_timeout_is_monotonic_bounded_and_fail_closed() -> None:
     clock = SimpleNamespace(monotonic=lambda: 100.0)
     namespace = _runtime_slice(
@@ -291,6 +386,8 @@ def test_work_timeout_is_monotonic_bounded_and_fail_closed() -> None:
     with pytest.raises(stage_error) as captured:
         remaining(100.0, 5.0, "server_health")
     assert captured.value.category == "server_health"
+    assert captured.value.cause_code is MatchedFailureCauseCode.DEADLINE_EXHAUSTED
+    assert captured.value.artifact_path is None
 
 
 def test_whole_run_deadline_reserves_terminal_time_and_clamps_remote_waits() -> None:
@@ -444,6 +541,7 @@ def test_process_and_log_cleanup_faults_retain_the_primary_failure() -> None:
     cleanup_only = close(BrokenLog(), None)
     assert isinstance(cleanup_only, stage_error)
     assert cleanup_only.category == "cleanup"
+    assert cleanup_only.cause_code is MatchedFailureCauseCode.CLEANUP_FAILED
     assert isinstance(cleanup_only.__cause__, OSError)
 
     module = _module()

@@ -20,6 +20,7 @@ from typing import Any
 import pytest
 
 from inkling_quant_lab.gguf.inkling_matched_execution import (
+    MatchedFailureCauseCode,
     MatchedFailureReceipt,
     MatchedPublicationState,
     MatchedRollupReceipt,
@@ -664,6 +665,7 @@ def _failure_receipt(run_id: str) -> MatchedFailureReceipt:
         category="server_start",
         failure_type="RuntimeError",
         subject=MatchedSubject.BF16,
+        cause_code=MatchedFailureCauseCode.SERVER_START_FAILED,
         message_sha256=hashlib.sha256(b"private provider detail").hexdigest(),
         raw_message_recorded=False,
         traceback_recorded=False,
@@ -1282,6 +1284,8 @@ def test_status_reads_fresh_volume_and_returns_nonzero_for_validated_failure(
     assert output["attempt_claim_sha256"] == claim.claim_sha256()
     assert output["attempt_consumed"] is True
     assert output["retry_allowed"] is False
+    assert output["failure_cause_code"] == "server_start_failed"
+    assert output["failure_artifact_path"] is None
     assert output["failure_message_sha256"] == receipt.diagnostic.message_sha256
     assert "private provider detail" not in json.dumps(output)
     assert "result" not in output

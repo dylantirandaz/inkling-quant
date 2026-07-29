@@ -1161,6 +1161,8 @@ def matched_shard_inventory_sha256(
         for shard in shard_tuple
     ]
     payload = _canonical_json_bytes(rows)
+    # Preserve the source receipts' byte domains: BF16 hashed the canonical
+    # inventory with one trailing newline; Q3 hashed the same form without one.
     if subject is MatchedSubject.BF16:
         payload += b"\n"
     return hashlib.sha256(payload).hexdigest()
@@ -1249,7 +1251,6 @@ class MatchedProbeTrialEvidence(StrictFrozenModel):
     minimum_logprob: FiniteFloat
     maximum_logprob: FiniteFloat
     mean_logprob: FiniteFloat
-    time_to_first_token_ms: FiniteFloat = Field(gt=0)
     prompt_processing_ms: FiniteFloat = Field(gt=0)
     decode_ms: FiniteFloat = Field(gt=0)
     response_sha256: StrictStr = Field(pattern=_SHA256_PATTERN)
@@ -1659,6 +1660,27 @@ MatchedFailureCategory: TypeAlias = Literal[
 ]
 
 
+class MatchedFailureCauseCode(StrEnum):
+    """Allowlisted reason retained in one sanitized matched-run failure."""
+
+    ARTIFACT_CONTRACT_FAILED = "artifact_contract_failed"
+    ARTIFACT_HASH_MISMATCH = "artifact_hash_mismatch"
+    ARTIFACT_READ_FAILED = "artifact_read_failed"
+    ARTIFACT_SIZE_MISMATCH = "artifact_size_mismatch"
+    BACKEND_PLACEMENT_FAILED = "backend_placement_failed"
+    CLEANUP_FAILED = "cleanup_failed"
+    COMPLETION_CONTRACT_FAILED = "completion_contract_failed"
+    DEADLINE_EXHAUSTED = "deadline_exhausted"
+    GREEDY_REPEATABILITY_FAILED = "greedy_repeatability_failed"
+    HARDWARE_CAPACITY_FAILED = "hardware_capacity_failed"
+    HARDWARE_IDENTITY_FAILED = "hardware_identity_failed"
+    PEER_TOPOLOGY_FAILED = "peer_topology_failed"
+    PUBLICATION_FAILED = "publication_failed"
+    RESOURCE_MONITOR_FAILED = "resource_monitor_failed"
+    SERVER_HEALTH_FAILED = "server_health_failed"
+    SERVER_START_FAILED = "server_start_failed"
+
+
 class MatchedSanitizedFailureDiagnostic(StrictFrozenModel):
     """Bounded failure identity without traceback, raw logs, prompts, or outputs."""
 
@@ -1670,10 +1692,59 @@ class MatchedSanitizedFailureDiagnostic(StrictFrozenModel):
         pattern=r"^[A-Za-z_][A-Za-z0-9_.]*$",
     )
     subject: MatchedSubject
+    cause_code: MatchedFailureCauseCode
+    artifact_path: StrictStr | None = Field(default=None, min_length=1)
     message_sha256: StrictStr = Field(pattern=_SHA256_PATTERN)
     raw_message_recorded: Literal[False]
     traceback_recorded: Literal[False]
     raw_server_log_recorded: Literal[False]
+
+    @field_validator("artifact_path")
+    @classmethod
+    def artifact_path_is_safe(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _canonical_relative_path(value, label="failure artifact path")
+
+    @model_validator(mode="after")
+    def bounded_cause_matches_category(self) -> MatchedSanitizedFailureDiagnostic:
+        expected_default = {
+            "artifact_rehash": MatchedFailureCauseCode.ARTIFACT_CONTRACT_FAILED,
+            "probe": MatchedFailureCauseCode.COMPLETION_CONTRACT_FAILED,
+        }.get(self.category)
+        if expected_default is None:
+            expected_default = MatchedFailureCauseCode(f"{self.category}_failed")
+        allowed_causes = {expected_default}
+        if self.category != "cleanup":
+            allowed_causes.add(MatchedFailureCauseCode.DEADLINE_EXHAUSTED)
+        if self.category == "artifact_rehash":
+            allowed_causes.update(
+                {
+                    MatchedFailureCauseCode.ARTIFACT_CONTRACT_FAILED,
+                    MatchedFailureCauseCode.ARTIFACT_HASH_MISMATCH,
+                    MatchedFailureCauseCode.ARTIFACT_READ_FAILED,
+                    MatchedFailureCauseCode.ARTIFACT_SIZE_MISMATCH,
+                }
+            )
+        elif self.category == "probe":
+            allowed_causes.update(
+                {
+                    MatchedFailureCauseCode.COMPLETION_CONTRACT_FAILED,
+                    MatchedFailureCauseCode.GREEDY_REPEATABILITY_FAILED,
+                }
+            )
+        if self.cause_code not in allowed_causes:
+            raise ValueError("failure cause is incompatible with its category")
+        path_required = {
+            MatchedFailureCauseCode.ARTIFACT_HASH_MISMATCH,
+            MatchedFailureCauseCode.ARTIFACT_READ_FAILED,
+            MatchedFailureCauseCode.ARTIFACT_SIZE_MISMATCH,
+        }
+        if self.cause_code in path_required and self.artifact_path is None:
+            raise ValueError("artifact failure cause requires a safe relative artifact path")
+        if self.artifact_path is not None and self.category != "artifact_rehash":
+            raise ValueError("only artifact-rehash failures may retain an artifact path")
+        return self
 
 
 def matched_failure_receipt_sha256(payload: Mapping[str, object]) -> str:
@@ -1758,6 +1829,7 @@ __all__ = [
     "MatchedCapacityInputs",
     "MatchedCudaPeerEdgeEvidence",
     "MatchedCudaPeerTopologyEvidence",
+    "MatchedFailureCauseCode",
     "MatchedFailureReceipt",
     "MatchedGpuResourceEvidence",
     "MatchedNvidiaSmiGpuEvidence",

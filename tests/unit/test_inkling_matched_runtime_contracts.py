@@ -14,6 +14,7 @@ from inkling_quant_lab.gguf.inkling_matched_execution import (
     MatchedArtifactHashObservation,
     MatchedCudaPeerEdgeEvidence,
     MatchedCudaPeerTopologyEvidence,
+    MatchedFailureCauseCode,
     MatchedFailureReceipt,
     MatchedGpuResourceEvidence,
     MatchedProbeEvidence,
@@ -287,7 +288,6 @@ def _trial(index: int, token_ids: tuple[int, ...] = (10, 11, 12)) -> MatchedProb
         minimum_logprob=-2.0,
         maximum_logprob=-0.1,
         mean_logprob=-0.7,
-        time_to_first_token_ms=12.5,
         prompt_processing_ms=8.0,
         decode_ms=20.0,
         response_sha256=f"{100 + index:064x}",
@@ -816,6 +816,7 @@ def test_failure_receipt_is_sanitized_self_hashed_and_pre_publication_only() -> 
         category="server_start",
         failure_type="RuntimeError",
         subject=MatchedSubject.BF16,
+        cause_code=MatchedFailureCauseCode.SERVER_START_FAILED,
         message_sha256=hashlib.sha256(b"server failed").hexdigest(),
         raw_message_recorded=False,
         traceback_recorded=False,
@@ -848,6 +849,62 @@ def test_failure_receipt_is_sanitized_self_hashed_and_pre_publication_only() -> 
         MatchedFailureReceipt.model_validate(tampered)
 
 
+def test_failure_diagnostic_retains_only_allowlisted_cause_and_safe_artifact_path() -> None:
+    diagnostic = MatchedSanitizedFailureDiagnostic(
+        schema_version="inkling-matched-sanitized-failure-v1",
+        category="artifact_rehash",
+        failure_type="OSError",
+        subject=MatchedSubject.Q3,
+        cause_code=MatchedFailureCauseCode.ARTIFACT_HASH_MISMATCH,
+        artifact_path="q3_k_m/inkling-Q3_K_M-00015-of-00049.gguf",
+        message_sha256=SHA_A,
+        raw_message_recorded=False,
+        traceback_recorded=False,
+        raw_server_log_recorded=False,
+    )
+    assert diagnostic.artifact_path == "q3_k_m/inkling-Q3_K_M-00015-of-00049.gguf"
+
+    for unsafe in (
+        "/final/q3_k_m/model.gguf",
+        "../q3_k_m/model.gguf",
+        "q3_k_m\\model.gguf",
+    ):
+        with pytest.raises(ValidationError, match="relative"):
+            MatchedSanitizedFailureDiagnostic.model_validate(
+                {
+                    **diagnostic.model_dump(mode="python"),
+                    "artifact_path": unsafe,
+                }
+            )
+
+    with pytest.raises(ValidationError, match="requires a safe relative artifact path"):
+        MatchedSanitizedFailureDiagnostic.model_validate(
+            {
+                **diagnostic.model_dump(mode="python"),
+                "artifact_path": None,
+            }
+        )
+
+    with pytest.raises(ValidationError, match="only artifact-rehash failures"):
+        MatchedSanitizedFailureDiagnostic.model_validate(
+            {
+                **diagnostic.model_dump(mode="python"),
+                "category": "server_start",
+                "cause_code": MatchedFailureCauseCode.SERVER_START_FAILED,
+            }
+        )
+
+    with pytest.raises(ValidationError, match="incompatible with its category"):
+        MatchedSanitizedFailureDiagnostic.model_validate(
+            {
+                **diagnostic.model_dump(mode="python"),
+                "artifact_path": None,
+                "category": "server_start",
+                "cause_code": MatchedFailureCauseCode.COMPLETION_CONTRACT_FAILED,
+            }
+        )
+
+
 def _failure_payload(
     *,
     category: str,
@@ -867,6 +924,11 @@ def _failure_payload(
         category=category,
         failure_type="RuntimeError",
         subject=MatchedSubject.Q3,
+        cause_code=(
+            MatchedFailureCauseCode.PUBLICATION_FAILED
+            if category == "publication"
+            else MatchedFailureCauseCode.COMPLETION_CONTRACT_FAILED
+        ),
         message_sha256=hashlib.sha256(b"matched failure").hexdigest(),
         raw_message_recorded=False,
         traceback_recorded=False,

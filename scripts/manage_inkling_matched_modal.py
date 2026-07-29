@@ -1679,6 +1679,8 @@ def _terminal_status_payload(
         "evidence_status": "validated_terminal_failure",
         "subject_at_failure": receipt.subject_at_failure.value,
         "failure_category": receipt.diagnostic.category,
+        "failure_cause_code": receipt.diagnostic.cause_code.value,
+        "failure_artifact_path": receipt.diagnostic.artifact_path,
         "failure_type": receipt.diagnostic.failure_type,
         "failure_message_sha256": receipt.diagnostic.message_sha256,
         **common,

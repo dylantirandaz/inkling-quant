@@ -624,67 +624,18 @@ def test_allocation_topology_is_reobserved_fail_closed_inside_each_subject_itera
     ), "topology drift must stop the run before either subject server starts"
 
 
-def test_probe_ttft_uses_prompt_timing_and_greedy_repeatability_is_checked() -> None:
+def test_probe_records_truthful_timings_and_checks_greedy_repeatability() -> None:
     module = _module()
     run_probe = _function(module, "_run_probe")
     assignments = _local_assignments(run_probe)
     trial_calls = _calls(run_probe, "MatchedProbeTrialEvidence")
     assert len(trial_calls) == 1
     trial_call = trial_calls[0]
-    ttft = _call_keyword(trial_call, "time_to_first_token_ms")
     prompt_processing = _call_keyword(trial_call, "prompt_processing_ms")
-    assert ttft is not None and prompt_processing is not None
-    timing_values_match = _expression_fingerprint(ttft, assignments) == _expression_fingerprint(
-        prompt_processing, assignments
-    )
-    if not timing_values_match:
-        assert isinstance(ttft, ast.Name)
-        assert isinstance(prompt_processing, ast.Name)
-        timing_assignment = next(
-            (
-                candidate
-                for candidate in ast.walk(run_probe)
-                if isinstance(candidate, ast.Assign)
-                and len(candidate.targets) == 1
-                and isinstance(candidate.targets[0], (ast.Tuple, ast.List))
-                and {
-                    element.id
-                    for element in candidate.targets[0].elts
-                    if isinstance(element, ast.Name)
-                }
-                >= {ttft.id, prompt_processing.id}
-                and isinstance(candidate.value, ast.Call)
-            ),
-            None,
-        )
-        assert timing_assignment is not None
-        assert isinstance(timing_assignment.targets[0], (ast.Tuple, ast.List))
-        target_names = [
-            element.id
-            for element in timing_assignment.targets[0].elts
-            if isinstance(element, ast.Name)
-        ]
-        assert len(target_names) == len(timing_assignment.targets[0].elts)
-        timing_helper_name = _call_name(timing_assignment.value)
-        timing_helper = _top_level_functions(module)[timing_helper_name]
-        returns = [
-            candidate
-            for candidate in ast.walk(timing_helper)
-            if isinstance(candidate, ast.Return)
-            and isinstance(candidate.value, (ast.Tuple, ast.List))
-        ]
-        assert len(returns) == 1
-        returned_values = returns[0].value.elts
-        helper_assignments = _local_assignments(timing_helper)
-        ttft_index = target_names.index(ttft.id)
-        prompt_index = target_names.index(prompt_processing.id)
-        assert _expression_fingerprint(
-            returned_values[ttft_index],
-            helper_assignments,
-        ) == _expression_fingerprint(
-            returned_values[prompt_index],
-            helper_assignments,
-        ), "the pinned server defines TTFT at its prompt_ms compute boundary"
+    decode = _call_keyword(trial_call, "decode_ms")
+    assert prompt_processing is not None and decode is not None
+    assert _call_keyword(trial_call, "time_to_first_token_ms") is None
+    assert "time_to_first_token_ms" not in ast.unparse(run_probe)
 
     def depends_on_token_ids(
         node: ast.AST,
@@ -706,6 +657,23 @@ def test_probe_ttft_uses_prompt_timing_and_greedy_repeatability_is_checked() -> 
         and _contains_raise(candidate)
         for candidate in ast.walk(run_probe)
     ), "two greedy trials must be compared instead of declaring repeatability"
+
+
+def test_runner_binds_vocabulary_checks_to_the_reviewed_config() -> None:
+    module = _module()
+    scope = ast.Module(
+        body=[
+            _function(module, "_run_probe"),
+            _function(module, "_run_subject"),
+        ],
+        type_ignores=[],
+    )
+    source = ast.unparse(scope)
+    assert "200058" not in source
+    assert "201024" not in source
+    assert "bundle.config.output_vocabulary" in source
+    assert "output_vocabulary.vocab_size" in source
+    assert "output_vocabulary.unpadded_vocab_size" in source
 
 
 def test_subject_receipts_are_committed_and_read_back_before_terminal_publication() -> None:
