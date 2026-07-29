@@ -31,6 +31,9 @@ from inkling_quant_lab.gguf.inkling_smoke import (
     EXPECTED_PROJECTOR_SHA256,
     EXPECTED_VERIFIED_EXPORT_REFERENCE_SHA256,
     InklingVerifiedExportReference,
+    SmokeEvidencePolicy,
+    SmokeOutputVocabularyConfig,
+    SmokeProbeConfig,
     VerifiedExportArtifact,
     load_verified_export_reference,
 )
@@ -127,6 +130,59 @@ _EXPECTED_TOKENIZER_ASSETS: Final = (
         "path": "tokenizer_config.json",
         "sha256": "2e36c9748a2081abb935b2e745ee22e82efa32589c2500df7e5bc0f93145cd77",
         "size_bytes": 12_111,
+    },
+)
+_EXPECTED_MATCHED_PROBES: Final = (
+    {
+        "probe_id": "text_greedy_v1",
+        "modality": "text",
+        "prompt": "Reply with exactly one short sentence that identifies the color of snow.",
+        "prompt_sha256": "99fa8c49b59ec88fba4b5e3ecaf132727741c50e3c817f4c52bfd09cebe145d8",
+        "fixture": "none",
+        "seed": 42,
+        "temperature": 0.0,
+        "n_predict": 8,
+        "n_probs": 5,
+        "post_sampling_probs": False,
+        "stream": False,
+        "cache_prompt": False,
+        "return_tokens": True,
+        "timings_per_token": True,
+        "trials": 2,
+    },
+    {
+        "probe_id": "image_greedy_v1",
+        "modality": "image",
+        "prompt": "Describe the synthetic checkerboard image in one short sentence.",
+        "prompt_sha256": "e282bb36d06dad41a8dd2ce29f4c9b76f9cec21c61e4094ef3918f304207e5b2",
+        "fixture": "synthetic_rgb8_png_16x16_checkerboard_v1",
+        "seed": 42,
+        "temperature": 0.0,
+        "n_predict": 8,
+        "n_probs": 5,
+        "post_sampling_probs": False,
+        "stream": False,
+        "cache_prompt": False,
+        "return_tokens": True,
+        "timings_per_token": True,
+        "trials": 2,
+    },
+    {
+        "probe_id": "audio_greedy_v1",
+        "modality": "audio",
+        "prompt": "Describe the synthetic audio clip in one short sentence.",
+        "prompt_sha256": "95a6367324fb49c1d0aeddba5b95d6b1fecb73c63744b753b39440f25df2adc2",
+        "fixture": "synthetic_pcm_s16le_wav_16000hz_mono_silence_250ms_v1",
+        "seed": 42,
+        "temperature": 0.0,
+        "n_predict": 8,
+        "n_probs": 5,
+        "post_sampling_probs": False,
+        "stream": False,
+        "cache_prompt": False,
+        "return_tokens": True,
+        "timings_per_token": True,
+        "trials": 2,
     },
 )
 
@@ -385,6 +441,9 @@ class MatchedRuntimeConfig(StrictFrozenModel):
     platform: Literal["linux/amd64"]
     binaries: tuple[MatchedRuntimeBinary, ...]
     cmake_definitions: tuple[str, ...]
+    server_endpoint: Literal["/completion"]
+    log_verbosity: Literal[4]
+    context_size: Literal[8192]
     tensor_split: tuple[
         Literal[1],
         Literal[1],
@@ -425,7 +484,9 @@ class MatchedResourcesConfig(StrictFrozenModel):
     memory_gib: Literal[64]
     ephemeral_disk_mib: Literal[524288]
     startup_timeout_seconds: Literal[1800]
+    function_timeout_seconds: Literal[14400]
     max_attempts: Literal[1]
+    max_recovery_attempts: Literal[0]
 
 
 class MatchedStorageConfig(StrictFrozenModel):
@@ -456,14 +517,19 @@ class MatchedStorageConfig(StrictFrozenModel):
     evidence_read_only: Literal[False]
     evidence_create_if_missing: Literal[True]
     evidence_append_only_after_success: Literal[True]
+    attempt_registry: Literal["inkling-matched-attempt-registry-v1"]
+    attempt_registry_append_only: Literal[True]
 
 
 class MatchedExecutionConfig(StrictFrozenModel):
-    """Reviewed plan that cannot start remote work."""
+    """Reviewed runner policy whose default path cannot start remote work."""
 
-    record_status: Literal["planning_only"]
-    runner_implemented: Literal[False]
-    remote_execution_allowed: Literal[False]
+    record_status: Literal["execution_ready"]
+    runner_implemented: Literal[True]
+    remote_execution_policy: Literal["fresh_content_addressed_confirmation_required"]
+    remote_execution_default_enabled: Literal[False]
+    confirmation_reuse_allowed: Literal[False]
+    one_atomic_attempt: Literal[True]
     subject_mode: Literal["sequential_same_allocation"]
     subject_order: tuple[Literal["bf16"], Literal["q3"]]
     fresh_process_per_subject: Literal[True]
@@ -498,7 +564,7 @@ class MatchedClaimLimits(StrictFrozenModel):
 class InklingMatchedCellConfig(StrictFrozenModel):
     """Checked data contract for the first matched eight-B300 cell."""
 
-    schema_version: Literal["inkling-matched-cell-config-v2"]
+    schema_version: Literal["inkling-matched-cell-config-v3"]
     model_id: Literal["thinkingmachines/Inkling"]
     revision: Literal["86b4d430ab871652a707666b89203a866888c5e5"]
     architecture: Literal["InklingForConditionalGeneration"]
@@ -519,8 +585,11 @@ class InklingMatchedCellConfig(StrictFrozenModel):
     ]
     tokenizer_assets: tuple[VerifiedExportArtifact, ...]
     runtime: MatchedRuntimeConfig
+    output_vocabulary: SmokeOutputVocabularyConfig
     resources: MatchedResourcesConfig
     storage: MatchedStorageConfig
+    probes: tuple[SmokeProbeConfig, SmokeProbeConfig, SmokeProbeConfig]
+    evidence: SmokeEvidencePolicy
     execution: MatchedExecutionConfig
     claims: MatchedClaimLimits
 
@@ -533,6 +602,9 @@ class InklingMatchedCellConfig(StrictFrozenModel):
         tokenizer_assets = tuple(item.model_dump(mode="json") for item in self.tokenizer_assets)
         if tokenizer_assets != _EXPECTED_TOKENIZER_ASSETS:
             raise ValueError("matched tokenizer assets differ from the source inventory")
+        probes = tuple(item.model_dump(mode="json") for item in self.probes)
+        if probes != _EXPECTED_MATCHED_PROBES:
+            raise ValueError("matched smoke probes differ from the exact deterministic protocol")
         literal_secret = sensitive_literal_path(self.model_dump(mode="json"))
         if literal_secret is not None:
             raise ValueError(

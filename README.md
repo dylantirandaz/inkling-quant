@@ -59,23 +59,25 @@ These files are on a mutable Modal volume.
 The matched workflow must hash every BF16 and Q3 file again before it uses either subject.
 
 The [checked matched-cell file](configs/experiments/inkling_q3_k_m_matched_cell_modal.yaml)
-is a planning record.
-It cannot start remote work.
+is the execution record for one matched smoke-test cell.
 It binds the BF16 files, Q3 files, shared projector, tokenizer files, and exact runtime.
-It plans to run BF16 first and Q3 second on one eight-B300 allocation.
-The local preflight checks the capacity calculation with the minimum values in the config.
-It does not probe hardware or run the aggregate capacity screen.
-The calculation does not prove per-device placement, runtime workspace fit, or inference.
+The matched Modal runner runs BF16 first and Q3 second on one eight-B300 allocation.
+It hashes every input again, checks the exact CUDA device and peer topology, and runs
+the same text, image, and audio probes for both subjects.
+The manager keeps local review, deployment, and launch as separate steps.
+Deployment does not start compute.
+Launch can start one call only after an exact confirmation.
 
 The accepted Q3 smoke receipt keeps its exact two-GPU audit.
 The repository now has a
-[separate validator for backend marker logs from the planned eight-GPU cell](src/inkling_quant_lab/gguf/inkling_matched_execution.py).
+[separate validator for backend marker logs from the matched eight-GPU cell](src/inkling_quant_lab/gguf/inkling_matched_execution.py).
 The validator requires one text graph to use CUDA0 through CUDA7.
 It requires each vision and audio graph to use CUDA0 only.
 It rejects CPU model graph work and unexpected CUDA identities.
 CPU-only unit tests cover the validator.
-It does not start Modal or prove that Inkling can run on eight GPUs.
-The remote matched runner is not implemented.
+The repository has not run the matched cell.
+The runner and its unit tests do not prove that Inkling can run on eight GPUs.
+A valid immutable rollup receipt from the confirmed run is the required evidence.
 
 The plan does not allow quality or speed measurement until both subject smoke tests pass.
 
@@ -205,15 +207,26 @@ It does not read the model files, inspect a remote volume, probe hardware, write
 Only the `verify_subject_references` stage can pass.
 Every remote stage remains `not_executed`.
 
+Inspect the execution-ready matched controls:
+
+```console
+uv run python scripts/manage_inkling_matched_modal.py inspect --json
+```
+
+This command is local-only.
+It checks the files and prints the exact run identity.
+
 Inspect the controlled manager commands:
 
 ```console
 uv run python scripts/manage_inkling_modal.py --help
+uv run python scripts/manage_inkling_matched_modal.py --help
 ```
 
 Use the manager for each remote stage.
 Do not call the stage module with `modal run`.
-The manager checks the stage order, deployment identity, and immutable receipts.
+The manager checks the reviewed Git state, deployment identity, launch confirmation,
+and immutable control records.
 
 These tracked files define the workflow:
 
@@ -225,6 +238,8 @@ These tracked files define the workflow:
 - [BF16 subject reference](configs/experiments/inkling_bf16_subject_reference.json)
 - [Matched-cell configuration](configs/experiments/inkling_q3_k_m_matched_cell_modal.yaml)
 - [Matched-cell local preflight](scripts/manage_inkling_matched.py)
+- [Matched-cell Modal manager](scripts/manage_inkling_matched_modal.py)
+- [Matched-cell Modal runner](scripts/run_inkling_matched_modal.py)
 
 ## Configuration
 

@@ -2177,6 +2177,18 @@ def test_artifact_load_parser_binds_all_49_shards_and_projector() -> None:
 
 
 @pytest.mark.parametrize(
+    "path",
+    (
+        "/subject/q3_k_m\\inkling-Q3_K_M-00001-of-00049.gguf",
+        "//subject/q3_k_m/inkling-Q3_K_M-00001-of-00049.gguf",
+    ),
+)
+def test_artifact_load_parser_rejects_noncanonical_expected_path(path: str) -> None:
+    with pytest.raises(ValueError, match="canonical absolute POSIX path"):
+        parse_artifact_load_evidence("", expected_first_shard_path=path)
+
+
+@pytest.mark.parametrize(
     ("old", "new", "match"),
     (
         ("additional 48", "additional 47", "additional shard"),

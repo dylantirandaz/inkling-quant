@@ -1,4 +1,4 @@
-schema_version: inkling-matched-cell-config-v2
+schema_version: inkling-matched-cell-config-v3
 model_id: thinkingmachines/Inkling
 revision: 86b4d430ab871652a707666b89203a866888c5e5
 architecture: InklingForConditionalGeneration
@@ -65,12 +65,22 @@ runtime:
     - LLAMA_USE_PREBUILT_UI=OFF
     - CMAKE_CUDA_ARCHITECTURES=103
     - CMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,/opt/iql-cuda-driver-link
+  server_endpoint: /completion
+  log_verbosity: 4
+  context_size: 8192
   tensor_split: [1, 1, 1, 1, 1, 1, 1, 1]
   split_mode: layer
   gpu_layers: all
   no_cpu_fallback: true
   network_access: false
   trust_remote_code: false
+
+output_vocabulary:
+  schema_version: inkling-output-vocabulary-v1
+  vocab_size: 201024
+  unpadded_vocab_size: 200058
+  gguf_metadata_key: inkling.unpadded_vocab_size
+  padded_suffix_policy: negative_infinity
 
 resources:
   provider: modal
@@ -84,7 +94,9 @@ resources:
   memory_gib: 64
   ephemeral_disk_mib: 524288
   startup_timeout_seconds: 1800
+  function_timeout_seconds: 14400
   max_attempts: 1
+  max_recovery_attempts: 0
 
 storage:
   bf16_volume: inkling-work-v1
@@ -112,11 +124,75 @@ storage:
   evidence_read_only: false
   evidence_create_if_missing: true
   evidence_append_only_after_success: true
+  attempt_registry: inkling-matched-attempt-registry-v1
+  attempt_registry_append_only: true
+
+probes:
+  - probe_id: text_greedy_v1
+    modality: text
+    prompt: Reply with exactly one short sentence that identifies the color of snow.
+    prompt_sha256: 99fa8c49b59ec88fba4b5e3ecaf132727741c50e3c817f4c52bfd09cebe145d8
+    fixture: none
+    seed: 42
+    temperature: 0.0
+    n_predict: 8
+    n_probs: 5
+    post_sampling_probs: false
+    stream: false
+    cache_prompt: false
+    return_tokens: true
+    timings_per_token: true
+    trials: 2
+  - probe_id: image_greedy_v1
+    modality: image
+    prompt: Describe the synthetic checkerboard image in one short sentence.
+    prompt_sha256: e282bb36d06dad41a8dd2ce29f4c9b76f9cec21c61e4094ef3918f304207e5b2
+    fixture: synthetic_rgb8_png_16x16_checkerboard_v1
+    seed: 42
+    temperature: 0.0
+    n_predict: 8
+    n_probs: 5
+    post_sampling_probs: false
+    stream: false
+    cache_prompt: false
+    return_tokens: true
+    timings_per_token: true
+    trials: 2
+  - probe_id: audio_greedy_v1
+    modality: audio
+    prompt: Describe the synthetic audio clip in one short sentence.
+    prompt_sha256: 95a6367324fb49c1d0aeddba5b95d6b1fecb73c63744b753b39440f25df2adc2
+    fixture: synthetic_pcm_s16le_wav_16000hz_mono_silence_250ms_v1
+    seed: 42
+    temperature: 0.0
+    n_predict: 8
+    n_probs: 5
+    post_sampling_probs: false
+    stream: false
+    cache_prompt: false
+    return_tokens: true
+    timings_per_token: true
+    trials: 2
+
+evidence:
+  record_prompt_text: false
+  record_output_text: false
+  record_token_ids: true
+  record_logprob_summary: true
+  record_command_arguments: true
+  record_artifact_hashes: true
+  record_runtime_commit: true
+  record_hardware: true
+  record_timings: true
+  record_peak_memory: true
 
 execution:
-  record_status: planning_only
-  runner_implemented: false
-  remote_execution_allowed: false
+  record_status: execution_ready
+  runner_implemented: true
+  remote_execution_policy: fresh_content_addressed_confirmation_required
+  remote_execution_default_enabled: false
+  confirmation_reuse_allowed: false
+  one_atomic_attempt: true
   subject_mode: sequential_same_allocation
   subject_order: [bf16, q3]
   fresh_process_per_subject: true
