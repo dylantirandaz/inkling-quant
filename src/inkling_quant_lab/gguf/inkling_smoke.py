@@ -2277,10 +2277,12 @@ def _validated_artifact_load_path(value: str) -> str:
         raise ValueError("artifact load path must be text")
     path = PurePosixPath(value)
     if (
-        not path.is_absolute()
+        "\x00" in value
+        or "\\" in value
+        or "//" in value
+        or not path.is_absolute()
         or str(path) != value
         or ".." in path.parts
-        or "\x00" in value
         or any(character.isspace() for character in value)
     ):
         raise ValueError("artifact load path must be a canonical absolute POSIX path")
