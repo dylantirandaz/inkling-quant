@@ -79,6 +79,7 @@ SPEC.md
 SDD.md
 TDD.md
 !/README.md
+configs/experiments/inkling_wikitext2_raw_test.txt
 
 # Local editor and OS metadata
 .idea/

@@ -1,0 +1,131 @@
+--- a/tools/perplexity/perplexity.cpp
++++ b/tools/perplexity/perplexity.cpp
+@@ -10,10 +10,13 @@
+ #include <chrono>
+ #include <clocale>
+ #include <cmath>
++#include <cstdlib>
+ #include <cstdio>
+ #include <cstring>
+ #include <ctime>
+ #include <fstream>
++#include <iomanip>
++#include <limits>
+ #include <mutex>
+ #include <random>
+ #include <sstream>
+@@ -108,11 +111,11 @@
+
+ static void process_logits(
+     int n_vocab, const float * logits, const int * tokens, int n_token, std::vector<std::thread> & workers,
+-    double & nll, double & nll2, float * logit_history, float * prob_history
++    double & nll, double & nll2, double * nll_history, float * logit_history, float * prob_history
+ ) {
+     std::mutex mutex;
+     int counter = 0;
+-    auto compute = [&mutex, &counter, &nll, &nll2, logit_history, prob_history, n_vocab, logits, tokens, n_token] () {
++    auto compute = [&mutex, &counter, &nll, &nll2, nll_history, logit_history, prob_history, n_vocab, logits, tokens, n_token] () {
+         double local_nll  = 0;
+         double local_nll2 = 0;
+         while (true) {
+@@ -128,6 +131,7 @@
+             local_nll += v;
+             local_nll2 += v*v;
+
++            nll_history[i]   = v;
+             logit_history[i] = results.logit;
+             prob_history[i]  = results.prob;
+         }
+@@ -490,6 +494,10 @@
+     std::vector<float> prob_history;
+     prob_history.resize(tokens.size());
+
++    std::vector<double> nll_history(
++        tokens.size(),
++        std::numeric_limits<double>::quiet_NaN());
++
+     const int n_chunk_max = tokens.size() / n_ctx;
+
+     const int n_chunk = params.n_chunks < 0 ? n_chunk_max : std::min(params.n_chunks, n_chunk_max);
+@@ -623,6 +631,7 @@
+                 process_logits(n_vocab, all_logits,
+                         tokens_data, n_ctx - 1 - first,
+                         workers, nll, nll2,
++                        nll_history.data()   + start + seq*n_ctx + first,
+                         logit_history.data() + start + seq*n_ctx + first,
+                         prob_history.data()  + start + seq*n_ctx + first);
+             }
+@@ -650,6 +659,61 @@
+     const double ppl = exp(nll);
+     nll2 -= nll * nll;
+     if (nll2 > 0) {
++        const char * token_nll_path = std::getenv("IQL_MEASUREMENT_TOKEN_NLL_PATH");
++        if (token_nll_path != nullptr) {
++            if (token_nll_path[0] == '\0') {
++                LOG_ERR("IQL_MEASUREMENT_TOKEN_NLL_PATH must not be empty\n");
++                return {tokens, -1, logit_history, prob_history};
++            }
++
++            std::ofstream token_nll_stream(token_nll_path, std::ios::out | std::ios::trunc);
++            if (!token_nll_stream.is_open()) {
++                LOG_ERR("failed to open token NLL output\n");
++                return {tokens, -1, logit_history, prob_history};
++            }
++
++            token_nll_stream
++                << "{\"schema_version\":\"iql-token-nll-v1\",\"n_ctx\":"
++                << n_ctx
++                << ",\"n_chunks\":" << n_chunk
++                << ",\"scored_tokens\":" << count
++                << "}\n"
++                << std::setprecision(17);
++
++            size_t emitted = 0;
++            for (int chunk_index = 0; chunk_index < n_chunk; ++chunk_index) {
++                const int start = chunk_index*n_ctx;
++                for (int source_index = first; source_index < n_ctx - 1; ++source_index) {
++                    const int history_index = start + source_index;
++                    const int token_index = history_index + 1;
++                    const double token_nll = nll_history[history_index];
++                    if (!std::isfinite(token_nll)) {
++                        LOG_ERR("token NLL output contains a non-finite value\n");
++                        return {tokens, -1, logit_history, prob_history};
++                    }
++                    token_nll_stream
++                        << "{\"chunk_index\":" << chunk_index
++                        << ",\"token_index\":" << token_index
++                        << ",\"token_id\":" << tokens[token_index]
++                        << ",\"nll\":" << token_nll
++                        << "}\n";
++                    ++emitted;
++                }
++            }
++
++            token_nll_stream.flush();
++            if (!token_nll_stream.good() || emitted != static_cast<size_t>(count)) {
++                LOG_ERR("failed to write complete token NLL output\n");
++                return {tokens, -1, logit_history, prob_history};
++            }
++            token_nll_stream.close();
++            if (token_nll_stream.fail()) {
++                LOG_ERR("failed to close token NLL output\n");
++                return {tokens, -1, logit_history, prob_history};
++            }
++            LOG_INF("IQL_MEASUREMENT_TOKEN_NLL_V1 count=%d\n", count);
++        }
++
+         nll2 = sqrt(nll2/(count-1));
+         LOG_INF("Final estimate: PPL = %.4lf +/- %.5lf\n", ppl, nll2*ppl);
+     } else {
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -1849,5 +1849,9 @@
+         }
+
+         if (incomplete) {
++            if (slot.task->params.stream) {
++                result.text_to_send = "";
++                send_partial_response(slot, result, false);
++            }
+             slot.has_next_token = true;
+         }

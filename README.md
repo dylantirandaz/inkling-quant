@@ -79,7 +79,15 @@ The repository has not run the matched cell.
 The runner and its unit tests do not prove that Inkling can run on eight GPUs.
 A valid immutable rollup receipt from the confirmed run is the required evidence.
 
-The plan does not allow quality or speed measurement until both subject smoke tests pass.
+The repository now includes a
+[separate matched measurement plan](configs/experiments/inkling_q3_k_m_measurement_modal.yaml).
+It compares the exact BF16 and Q3 subjects with the same runtime, hardware, data,
+prompts, tokenization, and decoding settings.
+It measures token negative log-likelihood, perplexity, diagnostic accuracy, load time, latency,
+throughput, memory, GPU use, and file size.
+This plan has not run.
+No quality-retention or speed result exists until the confirmed Modal run publishes
+a valid immutable receipt.
 
 The Git repository does not contain the model files.
 The files are too large for Git, and the project does not upload model weights by default.
@@ -216,11 +224,22 @@ uv run python scripts/manage_inkling_matched_modal.py inspect --json
 This command is local-only.
 It checks the files and prints the exact run identity.
 
+Inspect the matched quality and performance controls:
+
+```console
+uv run python scripts/manage_inkling_measurement_modal.py inspect --json
+```
+
+This command is also local-only.
+It does not deploy a Modal function or start GPU compute.
+The measurement manager keeps deployment and launch as separate confirmed actions.
+
 Inspect the controlled manager commands:
 
 ```console
 uv run python scripts/manage_inkling_modal.py --help
 uv run python scripts/manage_inkling_matched_modal.py --help
+uv run python scripts/manage_inkling_measurement_modal.py --help
 ```
 
 Use the manager for each remote stage.
@@ -240,6 +259,9 @@ These tracked files define the workflow:
 - [Matched-cell local preflight](scripts/manage_inkling_matched.py)
 - [Matched-cell Modal manager](scripts/manage_inkling_matched_modal.py)
 - [Matched-cell Modal runner](scripts/run_inkling_matched_modal.py)
+- [Matched measurement configuration](configs/experiments/inkling_q3_k_m_measurement_modal.yaml)
+- [Matched measurement Modal manager](scripts/manage_inkling_measurement_modal.py)
+- [Matched measurement Modal runner](scripts/run_inkling_measurement_modal.py)
 
 ## Configuration
 
@@ -334,8 +356,9 @@ These tests must use fixed external revisions.
 
 ## Public repository contents
 
-The public repository contains code, configuration files, tests, and machine-readable evidence.
-It does not contain downloaded models, datasets, caches, logs, or run artifacts.
+The public repository contains code, configuration files, tests, small checked evaluation inputs,
+and machine-readable evidence.
+It does not contain downloaded models, full external datasets, caches, logs, or run artifacts.
 
 The public repository publishes only this Markdown file.
 The `.gitignore` file excludes `SPEC.md`, `SDD.md`, `TDD.md`, and agent instruction files.
