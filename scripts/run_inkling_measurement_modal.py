@@ -691,8 +691,9 @@ def _cuda_runtime_preflight_child(arguments: Sequence[str]) -> int:
         sha256=sha256,
         size_bytes=int(size_text),
     )
-    evidence = MeasurementCudaRuntimePreflight.model_validate(
-        _run_cuda_runtime_preflight_in_child(dependency)
+    evidence = MeasurementCudaRuntimePreflight.model_validate_json(
+        canonical_measurement_raw_json_bytes(_run_cuda_runtime_preflight_in_child(dependency)),
+        strict=True,
     )
     sys.stdout.buffer.write(canonical_measurement_raw_json_bytes(evidence.model_dump(mode="json")))
     sys.stdout.buffer.flush()
@@ -902,8 +903,10 @@ def _load_local_deployment() -> tuple[InklingMeasurementBundle, str, Path]:
         )
     provenance_path = Path(provenance_text)
     payload = provenance_path.read_bytes()
-    provenance = MeasurementControlPlaneProvenance.model_validate(
-        strict_measurement_json_object(payload)
+    strict_measurement_json_object(payload)
+    provenance = MeasurementControlPlaneProvenance.model_validate_json(
+        payload,
+        strict=True,
     )
     if payload != provenance.canonical_bytes():
         raise RuntimeError("local measurement provenance is not canonical")
@@ -929,35 +932,32 @@ else:
 
 app = modal.App(measurement_app_name(_CONTROL_SHA256))
 
-baseline_volume = (
-    modal.Volume.from_name(
-        _LOCAL_BUNDLE.matched.config.storage.bf16_volume,
-        environment_name="inkling-quant",
-        create_if_missing=False,
-        version=_LOCAL_BUNDLE.matched.config.storage.bf16_volume_version,
-    )
-    .with_mount_options(sub_path=_LOCAL_BUNDLE.matched.config.storage.bf16_run_subpath)
-    .read_only()
+baseline_volume = modal.Volume.from_name(
+    _LOCAL_BUNDLE.matched.config.storage.bf16_volume,
+    environment_name="inkling-quant",
+    create_if_missing=False,
+    version=_LOCAL_BUNDLE.matched.config.storage.bf16_volume_version,
+).with_mount_options(
+    sub_path=_LOCAL_BUNDLE.matched.config.storage.bf16_run_subpath,
+    read_only=True,
 )
-final_volume = (
-    modal.Volume.from_name(
-        _LOCAL_BUNDLE.matched.config.storage.final_volume,
-        environment_name="inkling-quant",
-        create_if_missing=False,
-        version=_LOCAL_BUNDLE.matched.config.storage.final_volume_version,
-    )
-    .with_mount_options(sub_path=_LOCAL_BUNDLE.matched.config.storage.final_run_subpath)
-    .read_only()
+final_volume = modal.Volume.from_name(
+    _LOCAL_BUNDLE.matched.config.storage.final_volume,
+    environment_name="inkling-quant",
+    create_if_missing=False,
+    version=_LOCAL_BUNDLE.matched.config.storage.final_volume_version,
+).with_mount_options(
+    sub_path=_LOCAL_BUNDLE.matched.config.storage.final_run_subpath,
+    read_only=True,
 )
-source_volume = (
-    modal.Volume.from_name(
-        _LOCAL_BUNDLE.matched.config.storage.source_volume,
-        environment_name="inkling-quant",
-        create_if_missing=False,
-        version=_LOCAL_BUNDLE.matched.config.storage.source_volume_version,
-    )
-    .with_mount_options(sub_path=_LOCAL_BUNDLE.matched.config.storage.source_run_subpath)
-    .read_only()
+source_volume = modal.Volume.from_name(
+    _LOCAL_BUNDLE.matched.config.storage.source_volume,
+    environment_name="inkling-quant",
+    create_if_missing=False,
+    version=_LOCAL_BUNDLE.matched.config.storage.source_volume_version,
+).with_mount_options(
+    sub_path=_LOCAL_BUNDLE.matched.config.storage.source_run_subpath,
+    read_only=True,
 )
 evidence_volume = modal.Volume.from_name(
     _LOCAL_BUNDLE.config.storage.evidence_volume,
@@ -1481,8 +1481,10 @@ def _run_cuda_runtime_preflight(
             f"CUDA Runtime preflight child process exited with code {result.returncode}{suffix}"
         )
     try:
-        evidence = MeasurementCudaRuntimePreflight.model_validate(
-            strict_measurement_json_object(result.stdout)
+        strict_measurement_json_object(result.stdout)
+        evidence = MeasurementCudaRuntimePreflight.model_validate_json(
+            result.stdout,
+            strict=True,
         )
     except (TypeError, ValueError) as error:
         raise RuntimeError(
@@ -1503,8 +1505,10 @@ def _run_cuda_runtime_preflight(
 
 def _validate_remote_provenance(expected_sha256: str) -> MeasurementControlPlaneProvenance:
     payload = _read_regular_bytes(REMOTE_PROVENANCE_PATH)
-    provenance = MeasurementControlPlaneProvenance.model_validate(
-        strict_measurement_json_object(payload)
+    strict_measurement_json_object(payload)
+    provenance = MeasurementControlPlaneProvenance.model_validate_json(
+        payload,
+        strict=True,
     )
     files = {
         item.path: _read_regular_bytes(
@@ -1544,7 +1548,8 @@ def _invocation_ids() -> tuple[str, str, str]:
 def _load_intent(run_id: str, intent_sha256: str) -> MeasurementLaunchIntent:
     relative = measurement_launch_intent_path(run_id, intent_sha256)
     payload = _read_regular_bytes(_evidence_path(relative))
-    intent = MeasurementLaunchIntent.model_validate(strict_measurement_json_object(payload))
+    strict_measurement_json_object(payload)
+    intent = MeasurementLaunchIntent.model_validate_json(payload, strict=True)
     validate_measurement_launch_intent(
         payload,
         expected=intent,
@@ -1573,7 +1578,8 @@ def _wait_for_acceptance(
             if time.monotonic() >= deadline:
                 raise RuntimeError("post-spawn acceptance was not published in time") from None
             time.sleep(0.25)
-    raw = MeasurementPostSpawnAcceptance.model_validate(strict_measurement_json_object(payload))
+    strict_measurement_json_object(payload)
+    raw = MeasurementPostSpawnAcceptance.model_validate_json(payload, strict=True)
     expected = build_measurement_post_spawn_acceptance(
         intent,
         accepted_at_utc=raw.accepted_at_utc,
@@ -3755,12 +3761,14 @@ def _backend_audit_payload(
                 "log_sha256": _sha256_bytes(log_bytes),
             }
         )
-    audit_evidence = MeasurementBackendAuditEvidence.model_validate(
-        {
-            "schema_version": "inkling-measurement-backend-audit-v1",
-            "bindings": bindings.model_dump(mode="json"),
-            "workloads": workloads,
-        }
+    raw_evidence = {
+        "schema_version": "inkling-measurement-backend-audit-v1",
+        "bindings": bindings.model_dump(mode="json"),
+        "workloads": workloads,
+    }
+    audit_evidence = MeasurementBackendAuditEvidence.model_validate_json(
+        canonical_measurement_raw_json_bytes(raw_evidence),
+        strict=True,
     )
     payload = canonical_measurement_raw_json_bytes(audit_evidence.model_dump(mode="json"))
     parse_backend_audit_evidence(payload)
@@ -3773,28 +3781,30 @@ def _raw_trials_payload(
     bindings: MeasurementAttemptBindings,
     hardware: Mapping[str, Any],
 ) -> bytes:
-    evidence = MeasurementRawTrialsEvidence.model_validate(
-        {
-            "schema_version": "inkling-measurement-raw-trials-v1",
-            "bindings": bindings.model_dump(mode="json"),
-            "hardware_identity": dict(hardware),
-            "staging": measurement.staging,
-            "perplexity": _project_model_fields(
-                MeasurementPerplexityTrial,
-                measurement.quality.perplexity.evidence,
-            ),
-            "diagnostics": list(measurement.server.diagnostics),
-            "llama_bench": _project_model_fields(
-                MeasurementLlamaBenchTrials,
-                measurement.performance.benchmark.evidence,
-            ),
-            "server": _project_model_fields(
-                MeasurementServerTrials,
-                measurement.server.evidence,
-            ),
-            "prompt_text_recorded": False,
-            "output_text_recorded": False,
-        }
+    raw_evidence = {
+        "schema_version": "inkling-measurement-raw-trials-v1",
+        "bindings": bindings.model_dump(mode="json"),
+        "hardware_identity": dict(hardware),
+        "staging": measurement.staging,
+        "perplexity": _project_model_fields(
+            MeasurementPerplexityTrial,
+            measurement.quality.perplexity.evidence,
+        ),
+        "diagnostics": list(measurement.server.diagnostics),
+        "llama_bench": _project_model_fields(
+            MeasurementLlamaBenchTrials,
+            measurement.performance.benchmark.evidence,
+        ),
+        "server": _project_model_fields(
+            MeasurementServerTrials,
+            measurement.server.evidence,
+        ),
+        "prompt_text_recorded": False,
+        "output_text_recorded": False,
+    }
+    evidence = MeasurementRawTrialsEvidence.model_validate_json(
+        canonical_measurement_raw_json_bytes(raw_evidence),
+        strict=True,
     )
     payload = canonical_measurement_raw_json_bytes(evidence.model_dump(mode="json"))
     parse_raw_trials_evidence(payload)
@@ -4380,7 +4390,10 @@ def run_measurement(
         _complete_stage(completed, "verify_references")
 
         hardware_payload = _observe_hardware(runtime)
-        hardware = MeasurementHardwareIdentity.model_validate(hardware_payload)
+        hardware = MeasurementHardwareIdentity.model_validate_json(
+            canonical_measurement_raw_json_bytes(hardware_payload),
+            strict=True,
+        )
         expected_uuids = tuple(item.uuid for item in hardware.gpus)
         _complete_stage(completed, "verify_cuda_preflight")
 
