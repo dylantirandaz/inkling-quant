@@ -727,13 +727,7 @@ def _safe_relative_path(value: str) -> PurePosixPath:
     return path
 
 
-def _require_canonical_directory_components(
-    path: Path,
-    *,
-    label: str,
-) -> Path:
-    """Reject a non-directory or symbolic-link component in one absolute path."""
-
+def _canonical_absolute_directory_parts(path: Path, *, label: str) -> PurePosixPath:
     text = path.as_posix()
     posix = PurePosixPath(text)
     if (
@@ -745,6 +739,17 @@ def _require_canonical_directory_components(
         or posix.as_posix() != text
     ):
         raise RuntimeError(f"{label} is not one canonical absolute POSIX directory")
+    return posix
+
+
+def _require_canonical_directory_components(
+    path: Path,
+    *,
+    label: str,
+) -> Path:
+    """Reject a non-directory or symbolic-link component in one absolute path."""
+
+    posix = _canonical_absolute_directory_parts(path, label=label)
     current = Path("/")
     for part in posix.parts[1:]:
         current /= part
@@ -758,10 +763,30 @@ def _require_canonical_directory_components(
     return current
 
 
-def _evidence_path(relative: str) -> Path:
+def _resolved_modal_mount_root(path: Path, *, label: str) -> Path:
+    """Resolve one platform-owned mount alias without trusting descendants."""
+
+    _canonical_absolute_directory_parts(path, label=label)
+    try:
+        mount_info = path.lstat()
+        resolved = path.resolve(strict=True)
+        resolved_info = resolved.lstat()
+    except (FileNotFoundError, OSError, RuntimeError) as error:
+        raise RuntimeError(f"{label} is missing or unsafe") from error
+    if not (
+        stat.S_ISDIR(mount_info.st_mode) or stat.S_ISLNK(mount_info.st_mode)
+    ) or not stat.S_ISDIR(resolved_info.st_mode):
+        raise RuntimeError(f"{label} is missing or unsafe")
+    return _require_canonical_directory_components(
+        resolved,
+        label=f"resolved {label}",
+    )
+
+
+def _evidence_path_binding(relative: str) -> tuple[Path, Path]:
     path = _safe_relative_path(relative)
     try:
-        root = _require_canonical_directory_components(
+        root = _resolved_modal_mount_root(
             EVIDENCE_ROOT,
             label="evidence root",
         )
@@ -778,7 +803,30 @@ def _evidence_path(relative: str) -> Path:
                 raise PublicationCollisionError("evidence path parent is not a directory")
     if not candidate.is_relative_to(root):
         raise PublicationCollisionError("evidence path escaped its mount root")
-    return candidate
+    return root, candidate
+
+
+def _evidence_path(relative: str) -> Path:
+    return _evidence_path_binding(relative)[1]
+
+
+def _create_safe_evidence_parent(path: Path, *, root: Path) -> None:
+    parent = path.parent
+    if not parent.is_relative_to(root):
+        raise PublicationCollisionError("evidence parent escaped its mount root")
+    current = root
+    for part in parent.relative_to(root).parts:
+        current /= part
+        with suppress(FileExistsError):
+            current.mkdir(mode=0o700)
+        try:
+            info = current.lstat()
+        except OSError as error:
+            raise PublicationCollisionError("evidence path has an unreadable ancestor") from error
+        if not stat.S_ISDIR(info.st_mode):
+            raise PublicationCollisionError(
+                "evidence path has a symbolic-link or non-directory ancestor"
+            )
 
 
 def _read_regular_bytes(path: Path, *, maximum_bytes: int | None = None) -> bytes:
@@ -821,8 +869,9 @@ def _rename_noreplace(source: Path, destination: Path) -> None:
     os.rename(source, destination)
 
 
-def _write_once(path: Path, payload: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def _write_once(relative: str, payload: bytes) -> None:
+    root, path = _evidence_path_binding(relative)
+    _create_safe_evidence_parent(path, root=root)
     temporary = path.parent / f".{path.name}.{secrets.token_hex(16)}.tmp"
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -855,7 +904,7 @@ def _commit_and_verify(payloads: Mapping[str, bytes]) -> None:
         raise ValueError("publication requires at least one payload")
     ordered = tuple(sorted(payloads.items()))
     for relative, payload in ordered:
-        _write_once(_evidence_path(relative), payload)
+        _write_once(relative, payload)
     evidence_volume.commit()
     evidence_volume.reload()
     for relative, payload in ordered:
@@ -1774,6 +1823,7 @@ def _write_all(descriptor: int, payload: bytes) -> None:
 def _stage_file_once(
     *,
     source_path: str,
+    resolved_source_path: Path,
     staged_path: Path,
     expected_sha256: str,
     expected_size_bytes: int,
@@ -1781,9 +1831,8 @@ def _stage_file_once(
 ) -> dict[str, Any]:
     """Copy and verify one mounted artifact in the same source-file pass."""
 
-    source = Path(source_path)
     source_descriptor = os.open(
-        source,
+        resolved_source_path,
         os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
     )
     staged_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1904,21 +1953,38 @@ def _stage_subject(
             bundle.matched.config.storage.source_mount_path,
         )
     )
+    resolved_roots = {
+        root: _resolved_modal_mount_root(
+            root,
+            label=f"{root.as_posix()} subject mount",
+        )
+        for root in allowed_roots
+    }
+    resolved_sources: dict[str, Path] = {}
     for source_path in source_paths:
         source = Path(source_path)
+        matching_roots = tuple(
+            root for root in allowed_roots if source == root or source.is_relative_to(root)
+        )
         if (
             not source.is_absolute()
             or "\\" in source_path
+            or "\x00" in source_path
             or PurePosixPath(source_path).as_posix() != source_path
-            or not any(
-                source == allowed or source.is_relative_to(allowed) for allowed in allowed_roots
-            )
+            or any(part in {"", ".", ".."} for part in PurePosixPath(source_path).parts[1:])
+            or len(matching_roots) != 1
         ):
             raise RuntimeError("subject artifact path is outside reviewed read-only mounts")
+        mount_root = matching_roots[0]
+        suffix = source.relative_to(mount_root)
+        resolved_source = resolved_roots[mount_root].joinpath(*suffix.parts)
+        if not resolved_source.is_relative_to(resolved_roots[mount_root]):
+            raise RuntimeError("subject artifact path escaped its resolved read-only mount")
         _require_canonical_directory_components(
-            source.parent,
+            resolved_source.parent,
             label="subject artifact parent",
         )
+        resolved_sources[source_path] = resolved_source
     required_bytes = sum(size for _, _, size in subject.artifacts)
     filesystem = os.statvfs(root)
     free_bytes = filesystem.f_bavail * filesystem.f_frsize
@@ -1939,6 +2005,7 @@ def _stage_subject(
             staged_path = subject_root / Path(source_path).relative_to("/")
             item = _stage_file_once(
                 source_path=source_path,
+                resolved_source_path=resolved_sources[source_path],
                 staged_path=staged_path,
                 expected_sha256=expected_hash,
                 expected_size_bytes=expected_size,
