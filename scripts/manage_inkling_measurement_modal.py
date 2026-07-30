@@ -307,7 +307,8 @@ def _read_control_model(path: Path, model: type[Any]) -> Any:
     if resolved.is_symlink() or not resolved.is_file():
         raise RuntimeError("local control record must be one regular file")
     payload = resolved.read_bytes()
-    value = model.model_validate(strict_measurement_json_object(payload))
+    strict_measurement_json_object(payload)
+    value = model.model_validate_json(payload, strict=True)
     if payload != value.canonical_bytes():
         raise RuntimeError("local control record is not canonical")
     return value
@@ -1244,7 +1245,8 @@ def _bound_attempt_claim(
     claim_payload = live_payload if isinstance(live_payload, bytes) else durable_payload
     if claim_payload is None:
         raise RuntimeError("measurement attempt claim is unavailable")
-    claim = MeasurementAttemptClaim.model_validate(strict_measurement_json_object(claim_payload))
+    strict_measurement_json_object(claim_payload)
+    claim = MeasurementAttemptClaim.model_validate_json(claim_payload, strict=True)
     digest = claim.claim_sha256()
     if claim_payload != claim.canonical_bytes():
         raise RuntimeError("measurement attempt claim is not canonical")
