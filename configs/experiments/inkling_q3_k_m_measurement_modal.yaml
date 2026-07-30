@@ -1,0 +1,285 @@
+schema_version: inkling-measurement-config-v1
+model_id: thinkingmachines/Inkling
+revision: 86b4d430ab871652a707666b89203a866888c5e5
+architecture: InklingForConditionalGeneration
+
+matched_cell_config:
+  path: configs/experiments/inkling_q3_k_m_matched_cell_modal.yaml
+  sha256: d3cbf6ae5abc9b1c798820ffc2d3b8e4181b318078b538312534ce6641ad21f5
+  size_bytes: 7655
+bf16_subject_reference:
+  path: configs/experiments/inkling_bf16_subject_reference.json
+  sha256: 1aa0fc8be7c1a5f6eb4ea480684a660ce443e0830c05668b141d5b88e5a762ff
+  size_bytes: 10234
+  reference_sha256: 3615928f79ae24cdeee9164ac2c4dc3e3ba1999bde74c5b0d631e3aae4f1a53d
+q3_verified_export_reference:
+  path: configs/experiments/inkling_q3_k_m_verified_export.json
+  sha256: 1086fec05c9b6b4400caf9be21cbbbb8e6e5c4138164c5e02af010359f84ad96
+  size_bytes: 9518
+  reference_sha256: 9f0fae0a48058e73aab38c2b4f6c86916b69fd32343e0f7b821c7faac5b33198
+source_adoption_reference:
+  path: configs/experiments/inkling_q3_k_m_source_adoption.json
+  sha256: c156c4d772a8b0a039af97c83971d4042975ea4bec8b2ae57e52cef267e21187
+  size_bytes: 4959
+  reference_sha256: 4d808b2fcd1c8a0398c6aa15371b6522d6cfb276fe0df395ca9a8beb2293f146
+
+base_runtime:
+  repository: https://github.com/danielhanchen/llama.cpp.git
+  commit: a015409e6c27b84f60d688823d4c0126a11571fd
+  instrumentation_schema_version: inkling-llama-smoke-instrumentation-v5
+  instrumentation_patch_path: patches/inkling-smoke-a015409.patch
+  instrumentation_patch_sha256: 005f1f342511fc3fc843bdcc7be814ed8a60e67033b733eb7e7e4af53925be04
+  cuda_image: nvidia/cuda:13.1.2-devel-ubuntu24.04
+  cuda_image_digest: sha256:952e42d23230610a2714c8484f38e9c934ed68e6f9c9c7fac62dcd5f98858a6e
+  platform: linux/amd64
+  binaries:
+    - name: llama-cli
+      path: /opt/llama.cpp/build/bin/llama-cli
+      sha256: 098d8b9c6e57f25b846c5b5b43ded5bb1194cbb3d1ce985f17bbd09c87a82dbc
+      size_bytes: 1246680
+    - name: llama-server
+      path: /opt/llama.cpp/build/bin/llama-server
+      sha256: e960cfe4dcb2f7e541fc0b15bf97a4c1f6feb5fc304267796ef2bdd004cd1b93
+      size_bytes: 17920
+    - name: llama-bench
+      path: /opt/llama.cpp/build/bin/llama-bench
+      sha256: e0844ac337c419ebd8b6cee4902ba13e210a067d6fe47cb652429c71ae97382b
+      size_bytes: 17920
+    - name: llama-perplexity
+      path: /opt/llama.cpp/build/bin/llama-perplexity
+      sha256: d04051888a157ee50a7d6286cffcc78da3a9ca5295c79aa99ea2d92672ebf733
+      size_bytes: 15968
+  cmake_definitions:
+    - GGML_CUDA=ON
+    - GGML_NATIVE=OFF
+    - LLAMA_CURL=OFF
+    - LLAMA_BUILD_UI=OFF
+    - LLAMA_USE_PREBUILT_UI=OFF
+    - CMAKE_CUDA_ARCHITECTURES=103
+    - CMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,/opt/iql-cuda-driver-link
+  server_endpoint: /completion
+  log_verbosity: 4
+  context_size: 8192
+  tensor_split: [1, 1, 1, 1, 1, 1, 1, 1]
+  split_mode: layer
+  gpu_layers: all
+  no_cpu_fallback: true
+  network_access: false
+  trust_remote_code: false
+
+measurement_patch:
+  path: patches/inkling-measurement-a015409.patch
+  sha256: 5896c17b3069e65bde15be276d02a41d6c83b443caf37e350ca24710f4a3a73f
+  size_bytes: 5275
+measurement_patch_apply_after: base_runtime.instrumentation_patch
+measurement_token_nll_schema_version: iql-token-nll-v1
+measurement_binary_identity_policy: rebuild_after_patches_then_hash_and_record
+
+quality:
+  diagnostic:
+    path: configs/experiments/inkling_quality_diagnostic_v1.jsonl
+    sha256: 1c42a23121c2b20aee9845617c37a59410532e69442f9f214ac110b9562538e0
+    size_bytes: 29273
+  diagnostic_item_count: 64
+  diagnostic_repetitions: 1
+  corpus_reference:
+    path: configs/experiments/inkling_wikitext2_raw_test_reference.json
+    sha256: e5c915bc65057601906ad58774ac27deb2b5aafd826146fbe4356f2bd55416ce
+    size_bytes: 1039
+    reference_sha256: 5dfc8c426a1509c28d119857f437365c90a4bd57e229705d60e6fd3c1c65b95d
+  perplexity_context_tokens: 512
+  perplexity_chunks: 64
+  perplexity_scored_tokens: 16320
+  printed_perplexity_absolute_tolerance: 0.0000501
+  prompt_template: Answer the task directly and emit only the response form requested by the task.
+  seeds: [42]
+  temperature: 0.0
+  partial_results_allowed: false
+
+performance:
+  llama_bench:
+    workload_identity:
+      schema_version: inkling-llama-bench-workload-v1
+      dataset_id: llama.cpp/llama-bench-synthetic-token-workload
+      dataset_revision: a015409e6c27b84f60d688823d4c0126a11571fd
+      split: benchmark
+      content_sha256: 8d53b09a9f27a06501bf36420c88f6d00ce3ec2017cc82bf095876c1aa2ee935
+      content_size_bytes: 293
+      ordered_sample_ids: [pp512, pp2048, tg128]
+      seed: 1
+      seed_protocol: c_stdlib_rand_default_seed_1_without_srand
+      prompt_template_sha256: 93f3d303962c2507ce0abe4cea6cda12b7dc58c161c25cec5929267ab09a03ba
+      prompt_template_protocol: c_stdlib_rand_default_seed_1_without_srand_with_optional_bos_first_token
+      execution_mode: single_process_single_model_load_ordered_cases
+      cases:
+        - sample_id: pp512
+          prompt_tokens: 512
+          generation_tokens: 0
+        - sample_id: pp2048
+          prompt_tokens: 2048
+          generation_tokens: 0
+        - sample_id: tg128
+          prompt_tokens: 0
+          generation_tokens: 128
+    repetitions: 5
+    warmup_enabled: true
+    output_format: jsonl
+    batch_size: 2048
+    ubatch_size: 512
+    threads: 16
+    cases:
+      - name: pp512
+        prompt_tokens: 512
+        generation_tokens: 0
+      - name: pp2048
+        prompt_tokens: 2048
+        generation_tokens: 0
+      - name: tg128
+        prompt_tokens: 0
+        generation_tokens: 128
+  server:
+    workload_identity:
+      schema_version: inkling-server-benchmark-workload-v1
+      dataset_id: inkling-quant-lab/synthetic-server-benchmark
+      dataset_revision: inkling-server-benchmark-v1
+      split: benchmark
+      content_sha256: d1a6354e702c03836b7e22d26bb8ce881d58e7717881ae8362c86f2fd187e44b
+      content_size_bytes: 69632
+      ordered_sample_ids: [server_prompt_0001]
+      seed: 42
+      prompt_template_sha256: 95b1bf4365a271be2bc648f2dbbc1792cec4779b86fa3c96aa0cc2f3e2b2587a
+      prompt_template_protocol: repeat_utf8_literal_2048_then_tokenize_without_special_tokens_then_take_first_512_ids
+      prompt_tokens: 512
+      output_tokens: 128
+      temperature: 0.0
+      streaming: true
+      cache_prompt: false
+      return_tokens: true
+      ignore_eos: true
+      execution_mode: llama_server_streaming_completion_concurrency_1_2_4
+    concurrency: [1, 2, 4]
+    load_pair_repetitions: 3
+    single_request_warmups: 2
+    concurrent_batch_warmups: 1
+    measured_batches: 5
+    prompt_tokens: 512
+    output_tokens: 128
+    streaming: true
+    telemetry_interval_seconds: 1.0
+    cold_cache_conditioning: file_level_posix_fadvise_posix_fadv_dontneed_on_all_staged_gguf_files
+    warm_load_protocol: second_same_artifact_process_after_cold_termination_without_requested_cache_conditioning_or_eviction
+    metrics:
+      - cold_server_process_load_seconds
+      - warm_server_process_load_seconds
+      - ttft_seconds
+      - prompt_tokens_per_second
+      - decode_tokens_per_second
+      - aggregate_decode_tokens_per_second
+      - request_end_to_end_latency_seconds
+      - inter_token_latency_p50_seconds
+      - inter_token_latency_p95_seconds
+      - inter_token_latency_p99_seconds
+      - max_sampled_host_rss_bytes
+      - max_sampled_per_gpu_memory_bytes
+      - max_sampled_per_gpu_utilization_percent
+  serialized_size_metrics:
+    - text_checkpoint_size_bytes
+    - multimodal_projector_size_bytes
+    - executable_gguf_bundle_size_bytes
+
+non_inferiority:
+  mean_nll_delta_max_exclusive: 0.1
+  suite_accuracy_loss_max_inclusive: 0.125
+  overall_accuracy_loss_max_inclusive: 0.05
+  bf16_overall_accuracy_min_inclusive: 0.75
+  bf16_suite_accuracy_min_inclusive: 0.5
+  require_all_items_scored: true
+  require_all_suites_interpretable: true
+
+placement:
+  backend: CUDA
+  logical_devices: cuda:0,cuda:1,cuda:2,cuda:3,cuda:4,cuda:5,cuda:6,cuda:7
+  gpu_layers: all
+  cpu_moe_layers: 0
+  split_mode: layer
+  tensor_split: [1, 1, 1, 1, 1, 1, 1, 1]
+  flash_attention: "on"
+  mmap: true
+  projector_offload: true
+  fit: "off"
+  cpu_fallback: false
+
+resources:
+  provider: modal
+  gpu_type: B300
+  gpu_count: 8
+  cpu_cores: 16
+  memory_gib: 64
+  ephemeral_disk_mib: 2097152
+  startup_timeout_seconds: 1800
+  function_timeout_seconds: 86400
+  max_attempts: 1
+
+storage:
+  evidence_volume: inkling-measurement-evidence-v1
+  evidence_volume_version: 1
+  evidence_mount_path: /evidence
+  evidence_read_only: false
+  evidence_create_if_missing: true
+  evidence_append_only_after_terminal: true
+  attempt_registry: inkling-measurement-attempt-registry-v1
+  attempt_registry_append_only: true
+
+execution:
+  remote_execution_policy: fresh_content_addressed_confirmation_required
+  remote_execution_default_enabled: false
+  confirmation_reuse_allowed: false
+  network_access: false
+  subject_mode: sequential_same_allocation
+  subject_order: [bf16, q3]
+  subject_staging: sequential_verified_ephemeral_copy
+  subject_staging_root: /cache/inkling-measurement-subject
+  subject_staging_headroom_mib: 131072
+  release_staged_subject_before_next: true
+  rehash_during_verified_staging_copy: true
+  fresh_process_per_tool_invocation: true
+  bench_cases_share_one_model_load: true
+  server_quality_and_performance_share_one_model_load: true
+  rehash_all_subject_files: true
+  partial_success_allowed: false
+  planned_stages:
+    - verify_references
+    - verify_cuda_preflight
+    - stage_and_rehash_bf16
+    - measure_bf16_quality
+    - measure_bf16_performance
+    - release_bf16
+    - stage_and_rehash_q3
+    - measure_q3_quality
+    - measure_q3_performance
+    - release_q3
+    - compare_and_publish
+
+evidence:
+  record_prompt_text: false
+  record_output_text: false
+  record_token_ids: true
+  record_item_scores: true
+  record_failures: true
+  record_artifact_hashes: true
+  record_runtime_identity: true
+  record_hardware_identity: true
+  record_command_arguments: true
+  record_raw_trial_timings: true
+  immutable_after_success: true
+
+claims:
+  compatibility_scope: single_exact_matrix_cell
+  mtp_included: false
+  mtp_supported: false
+  routing_drift_supported: false
+  routing_drift_status: unsupported_by_pinned_runtime
+  quality_retention_requires_non_inferiority_pass: true
+  speedup_requires_equivalent_matched_trials: true
+  single_run_causation_claim_allowed: false
+  scope_warning: Read the machine-readable record before use. Do not apply a result to a different model, dataset, runtime, software, hardware, or protocol.
