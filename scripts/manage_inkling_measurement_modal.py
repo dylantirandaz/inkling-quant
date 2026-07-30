@@ -884,7 +884,6 @@ def _remote_write_immutable(volume: Any, relative: str, payload: bytes) -> None:
         raise RuntimeError("remote immutable measurement record already exists")
     with volume.batch_upload(force=False) as upload:
         upload.put_file(io.BytesIO(payload), _remote_path(relative), mode=0o400)
-    volume.reload()
     if _remote_read(volume, relative) != payload:
         raise RuntimeError("remote measurement record readback differs from uploaded bytes")
 
@@ -1051,7 +1050,6 @@ def _fresh_remote_resources(
     deployment: MeasurementDeploymentIdentity,
 ) -> tuple[Any, Any]:
     _, registry, volume = _validate_remote_deployment(deployment)
-    volume.reload()
     return registry, volume
 
 
@@ -1127,7 +1125,6 @@ def _assert_remote_attempt_unconsumed(
     present = registry.contains(key)
     if type(present) is not bool:
         raise RuntimeError("Modal attempt registry returned an invalid presence value")
-    volume.reload()
     evidence_roots = (
         f"runs/{run_id}/control/launch-intents",
         f"runs/{run_id}/control/post-spawn-acceptances",
