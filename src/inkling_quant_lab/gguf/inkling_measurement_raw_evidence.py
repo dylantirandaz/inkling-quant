@@ -327,6 +327,42 @@ class MeasurementFiveBatchMetricSummary(_StrictRawModel):
         return self
 
 
+class MeasurementFiveBatchNonnegativeMetricSummary(_StrictRawModel):
+    """Five-batch statistics for a metric whose samples may legitimately be zero."""
+
+    trial_count: Literal[5]
+    samples: tuple[
+        StrictFloat,
+        StrictFloat,
+        StrictFloat,
+        StrictFloat,
+        StrictFloat,
+    ]
+    mean: StrictFloat = Field(ge=0.0)
+    median: StrictFloat = Field(ge=0.0)
+    sample_standard_deviation: StrictFloat = Field(ge=0.0)
+
+    @model_validator(mode="after")
+    def statistics_are_derived(self) -> MeasurementFiveBatchNonnegativeMetricSummary:
+        if any(value < 0.0 for value in self.samples):
+            raise ValueError("server batch metric samples must be nonnegative")
+        expected = (
+            statistics.fmean(self.samples),
+            statistics.median(self.samples),
+            statistics.stdev(self.samples),
+        )
+        observed = (
+            self.mean,
+            self.median,
+            self.sample_standard_deviation,
+        )
+        if any(
+            not _float_equal(item, target) for item, target in zip(observed, expected, strict=True)
+        ):
+            raise ValueError("server batch metric statistics differ from retained samples")
+        return self
+
+
 class MeasurementRepeatedLoadDurations(_StrictRawModel):
     """Ordered real load durations with exact repetition and dispersion."""
 
@@ -532,7 +568,7 @@ class MeasurementPerplexityTrial(MeasurementProcessTimings):
 
     command: tuple[StrictStr, ...] = Field(min_length=1)
     corpus_reference_sha256: Literal[
-        "aa3ce3346a7261a5a13692bd67d25c750b00b1e150feb1ef8478658ed88bc483"
+        "5dfc8c426a1509c28d119857f437365c90a4bd57e229705d60e6fd3c1c65b95d"
     ]
     corpus_sha256: Literal["173c87a53759e0201f33e0ccf978e510c2042d7f2cb78229d9a50d79b9e7dd08"]
     corpus_size_bytes: Literal[1290590]
@@ -1017,9 +1053,9 @@ class _MeasurementServerResponse(_StrictRawModel):
     predicted_ms: StrictFloat = Field(gt=0.0)
     prompt_tokens_per_second: StrictFloat = Field(gt=0.0)
     decode_tokens_per_second: StrictFloat = Field(gt=0.0)
-    inter_token_latency_p50_seconds: StrictFloat = Field(gt=0.0)
-    inter_token_latency_p95_seconds: StrictFloat = Field(gt=0.0)
-    inter_token_latency_p99_seconds: StrictFloat = Field(gt=0.0)
+    inter_token_latency_p50_seconds: StrictFloat = Field(ge=0.0)
+    inter_token_latency_p95_seconds: StrictFloat = Field(ge=0.0)
+    inter_token_latency_p99_seconds: StrictFloat = Field(ge=0.0)
     raw_inter_token_latency_seconds: tuple[StrictFloat, ...] = Field(
         min_length=127,
         max_length=127,
@@ -1062,8 +1098,8 @@ class _MeasurementServerResponse(_StrictRawModel):
         ):
             raise ValueError("server decode rate differs from count and time")
         intervals = self.raw_inter_token_latency_seconds
-        if any(value <= 0.0 for value in intervals):
-            raise ValueError("server inter-token intervals must be positive")
+        if any(value < 0.0 for value in intervals):
+            raise ValueError("server inter-token intervals must be nonnegative")
         if not _float_equal(sum(intervals), last - first, rel_tol=1e-7, abs_tol=1e-8):
             raise ValueError("server inter-token intervals differ from token boundaries")
         expected = (
@@ -1200,9 +1236,9 @@ class MeasurementServerCellBatchMetrics(_StrictRawModel):
     mean_prompt_tokens_per_second: MeasurementFiveBatchMetricSummary
     mean_decode_tokens_per_second: MeasurementFiveBatchMetricSummary
     aggregate_decode_tokens_per_second: MeasurementFiveBatchMetricSummary
-    inter_token_latency_p50_seconds: MeasurementFiveBatchMetricSummary
-    inter_token_latency_p95_seconds: MeasurementFiveBatchMetricSummary
-    inter_token_latency_p99_seconds: MeasurementFiveBatchMetricSummary
+    inter_token_latency_p50_seconds: MeasurementFiveBatchNonnegativeMetricSummary
+    inter_token_latency_p95_seconds: MeasurementFiveBatchNonnegativeMetricSummary
+    inter_token_latency_p99_seconds: MeasurementFiveBatchNonnegativeMetricSummary
 
 
 def _summarize_five_batch_samples(
@@ -1215,6 +1251,24 @@ def _summarize_five_batch_samples(
         tuple(values),
     )
     return MeasurementFiveBatchMetricSummary(
+        trial_count=5,
+        samples=samples,
+        mean=statistics.fmean(samples),
+        median=statistics.median(samples),
+        sample_standard_deviation=statistics.stdev(samples),
+    )
+
+
+def _summarize_five_batch_nonnegative_samples(
+    values: Sequence[float],
+) -> MeasurementFiveBatchNonnegativeMetricSummary:
+    if len(values) != 5:
+        raise ValueError("server batch metric requires exactly five samples")
+    samples = cast(
+        "tuple[float, float, float, float, float]",
+        tuple(values),
+    )
+    return MeasurementFiveBatchNonnegativeMetricSummary(
         trial_count=5,
         samples=samples,
         mean=statistics.fmean(samples),
@@ -1251,9 +1305,9 @@ class MeasurementServerCell(_StrictRawModel):
         "r7_linear_interpolation_over_all_measured_request_intervals"
     ]
     raw_inter_token_interval_count: StrictInt = Field(gt=0)
-    inter_token_latency_p50_seconds: StrictFloat = Field(gt=0.0)
-    inter_token_latency_p95_seconds: StrictFloat = Field(gt=0.0)
-    inter_token_latency_p99_seconds: StrictFloat = Field(gt=0.0)
+    inter_token_latency_p50_seconds: StrictFloat = Field(ge=0.0)
+    inter_token_latency_p95_seconds: StrictFloat = Field(ge=0.0)
+    inter_token_latency_p99_seconds: StrictFloat = Field(ge=0.0)
     resource_sample_summary: MeasurementResourceSampleSummary
 
     @model_validator(mode="after")
@@ -1357,7 +1411,7 @@ def recompute_server_cell_batch_metrics(
         aggregate_decode_tokens_per_second=_summarize_five_batch_samples(
             tuple(batch.aggregate_decode_tokens_per_second for batch in cell.measured_batches)
         ),
-        inter_token_latency_p50_seconds=_summarize_five_batch_samples(
+        inter_token_latency_p50_seconds=_summarize_five_batch_nonnegative_samples(
             tuple(
                 _r7_percentile(
                     tuple(
@@ -1370,7 +1424,7 @@ def recompute_server_cell_batch_metrics(
                 for batch in cell.measured_batches
             )
         ),
-        inter_token_latency_p95_seconds=_summarize_five_batch_samples(
+        inter_token_latency_p95_seconds=_summarize_five_batch_nonnegative_samples(
             tuple(
                 _r7_percentile(
                     tuple(
@@ -1383,7 +1437,7 @@ def recompute_server_cell_batch_metrics(
                 for batch in cell.measured_batches
             )
         ),
-        inter_token_latency_p99_seconds=_summarize_five_batch_samples(
+        inter_token_latency_p99_seconds=_summarize_five_batch_nonnegative_samples(
             tuple(
                 _r7_percentile(
                     tuple(
@@ -2298,9 +2352,9 @@ class MeasurementServerCellSummary(_StrictRawModel):
     mean_decode_tokens_per_second: StrictFloat = Field(gt=0.0)
     mean_aggregate_decode_tokens_per_second: StrictFloat = Field(gt=0.0)
     batch_metrics: MeasurementServerCellBatchMetrics
-    inter_token_latency_p50_seconds: StrictFloat = Field(gt=0.0)
-    inter_token_latency_p95_seconds: StrictFloat = Field(gt=0.0)
-    inter_token_latency_p99_seconds: StrictFloat = Field(gt=0.0)
+    inter_token_latency_p50_seconds: StrictFloat = Field(ge=0.0)
+    inter_token_latency_p95_seconds: StrictFloat = Field(ge=0.0)
+    inter_token_latency_p99_seconds: StrictFloat = Field(ge=0.0)
     resource_sample_summary: MeasurementResourceSampleSummary
 
     @model_validator(mode="after")
@@ -3061,6 +3115,7 @@ __all__ = [
     "MeasurementCudaRuntimeDeviceProbe",
     "MeasurementCudaRuntimePreflight",
     "MeasurementFiveBatchMetricSummary",
+    "MeasurementFiveBatchNonnegativeMetricSummary",
     "MeasurementHardwareIdentity",
     "MeasurementPairingProjectionHashes",
     "MeasurementParsedRawEvidence",

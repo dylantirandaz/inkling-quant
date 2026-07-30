@@ -597,9 +597,12 @@ def validate_measurement_control_plane_provenance(
     """Rebuild and compare provenance against exact local or mounted bytes."""
 
     if isinstance(provenance, bytes):
-        raw = strict_measurement_json_object(provenance)
+        strict_measurement_json_object(provenance)
         try:
-            observed = MeasurementControlPlaneProvenance.model_validate(raw)
+            observed = MeasurementControlPlaneProvenance.model_validate_json(
+                provenance,
+                strict=True,
+            )
         except ValidationError as error:
             raise ValueError("measurement control-plane provenance schema is invalid") from error
         if provenance != observed.canonical_bytes():
@@ -1063,9 +1066,9 @@ def validate_measurement_launch_intent(
 
     if not isinstance(payload, bytes):
         raise TypeError("measurement launch intent must be bytes")
-    raw = strict_measurement_json_object(payload)
+    strict_measurement_json_object(payload)
     try:
-        observed = MeasurementLaunchIntent.model_validate(raw)
+        observed = MeasurementLaunchIntent.model_validate_json(payload, strict=True)
     except ValidationError as error:
         raise ValueError("measurement launch intent schema is invalid") from error
     if payload != observed.canonical_bytes():
@@ -1175,9 +1178,9 @@ def validate_measurement_post_spawn_acceptance(
 
     if not isinstance(payload, bytes):
         raise TypeError("measurement post-spawn acceptance must be bytes")
-    raw = strict_measurement_json_object(payload)
+    strict_measurement_json_object(payload)
     try:
-        observed = MeasurementPostSpawnAcceptance.model_validate(raw)
+        observed = MeasurementPostSpawnAcceptance.model_validate_json(payload, strict=True)
     except ValidationError as error:
         raise ValueError("measurement post-spawn acceptance schema is invalid") from error
     if payload != observed.canonical_bytes():
@@ -1376,9 +1379,9 @@ def validate_measurement_attempt_claim(
 
     if not isinstance(payload, bytes):
         raise TypeError("measurement attempt claim must be bytes")
-    raw = strict_measurement_json_object(payload)
+    strict_measurement_json_object(payload)
     try:
-        observed = MeasurementAttemptClaim.model_validate(raw)
+        observed = MeasurementAttemptClaim.model_validate_json(payload, strict=True)
     except ValidationError as error:
         raise ValueError("measurement attempt claim schema is invalid") from error
     if payload != observed.canonical_bytes():
@@ -2082,6 +2085,56 @@ class MeasurementPairedFiveBatchMetricSummary(_StrictControlModel):
         return self
 
 
+class MeasurementPairedFiveBatchNonnegativeMetricSummary(_StrictControlModel):
+    """Paired five-batch distribution whose samples may legitimately be zero."""
+
+    trial_count_per_subject: Literal[5]
+    bf16_samples: tuple[
+        StrictFloat,
+        StrictFloat,
+        StrictFloat,
+        StrictFloat,
+        StrictFloat,
+    ]
+    q3_samples: tuple[
+        StrictFloat,
+        StrictFloat,
+        StrictFloat,
+        StrictFloat,
+        StrictFloat,
+    ]
+    mean: MeasurementPairedNonnegativeValue
+    median: MeasurementPairedNonnegativeValue
+    sample_standard_deviation: MeasurementPairedNonnegativeValue
+
+    @model_validator(mode="after")
+    def statistics_are_derived(
+        self,
+    ) -> MeasurementPairedFiveBatchNonnegativeMetricSummary:
+        if any(value < 0.0 for value in (*self.bf16_samples, *self.q3_samples)):
+            raise ValueError("paired server batch samples must be nonnegative")
+        for subject, samples in (
+            ("bf16", self.bf16_samples),
+            ("q3", self.q3_samples),
+        ):
+            expected = (
+                statistics.fmean(samples),
+                statistics.median(samples),
+                statistics.stdev(samples),
+            )
+            observed = (
+                getattr(self.mean, subject),
+                getattr(self.median, subject),
+                getattr(self.sample_standard_deviation, subject),
+            )
+            if any(
+                not _float_equal(item, target)
+                for item, target in zip(observed, expected, strict=True)
+            ):
+                raise ValueError("paired server batch statistics differ from retained samples")
+        return self
+
+
 class MeasurementPairedRepeatedLoadDurations(_StrictControlModel):
     """Three real cold or warm process-load trials for both subjects."""
 
@@ -2128,9 +2181,9 @@ class MeasurementServerCellRollup(_StrictControlModel):
     prompt_tokens_per_second: MeasurementPairedFiveBatchMetricSummary
     decode_tokens_per_second: MeasurementPairedFiveBatchMetricSummary
     aggregate_decode_tokens_per_second: MeasurementPairedFiveBatchMetricSummary
-    inter_token_latency_p50_seconds: MeasurementPairedFiveBatchMetricSummary
-    inter_token_latency_p95_seconds: MeasurementPairedFiveBatchMetricSummary
-    inter_token_latency_p99_seconds: MeasurementPairedFiveBatchMetricSummary
+    inter_token_latency_p50_seconds: MeasurementPairedFiveBatchNonnegativeMetricSummary
+    inter_token_latency_p95_seconds: MeasurementPairedFiveBatchNonnegativeMetricSummary
+    inter_token_latency_p99_seconds: MeasurementPairedFiveBatchNonnegativeMetricSummary
     bf16_resource_sample_count: StrictInt = Field(gt=0)
     q3_resource_sample_count: StrictInt = Field(gt=0)
     max_sampled_host_rss_bytes: MeasurementPairedBytes
@@ -2419,14 +2472,14 @@ def parse_measurement_terminal_receipt(
     if not isinstance(payload, bytes):
         raise TypeError("measurement terminal receipt must be bytes")
     _validate_run_id(run_id)
-    raw = strict_measurement_json_object(payload)
+    strict_measurement_json_object(payload)
     model_type: type[MeasurementSuccessTerminalReceipt | MeasurementFailureTerminalReceipt] = (
         MeasurementSuccessTerminalReceipt
         if outcome == "success"
         else MeasurementFailureTerminalReceipt
     )
     try:
-        receipt = model_type.model_validate(raw)
+        receipt = model_type.model_validate_json(payload, strict=True)
     except ValidationError as error:
         raise ValueError("measurement terminal receipt schema is invalid") from error
     if receipt.run_id != run_id:
@@ -2637,6 +2690,7 @@ __all__ = [
     "MeasurementOutcome",
     "MeasurementPairedBytes",
     "MeasurementPairedFiveBatchMetricSummary",
+    "MeasurementPairedFiveBatchNonnegativeMetricSummary",
     "MeasurementPairedGpuBytes",
     "MeasurementPairedGpuUtilization",
     "MeasurementPairedNonnegativeValue",

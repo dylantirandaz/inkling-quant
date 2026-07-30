@@ -977,17 +977,15 @@ def load_diagnostic_items(path: str | Path) -> tuple[DiagnosticItem, ...]:
             if not isinstance(raw, Mapping):
                 raise ValueError(f"line {line_number} root must be a JSON object")
             item = DiagnosticItem.model_validate(raw)
-            if (
-                line
-                != item.model_dump_json(
+            canonical = (
+                item.model_dump_json(
                     by_alias=True,
                     exclude_none=True,
                 )
                 + "\n"
-            ):
-                canonical = _canonical_json(item.model_dump(mode="json", exclude_none=True)) + "\n"
-                if line != canonical:
-                    raise ValueError(f"line {line_number} is not canonical JSON")
+            )
+            if line != canonical:
+                raise ValueError(f"line {line_number} is not canonical diagnostic JSONL")
             items.append(item)
     except (OSError, UnicodeDecodeError, ValueError, ValidationError) as error:
         raise ConfigurationError(

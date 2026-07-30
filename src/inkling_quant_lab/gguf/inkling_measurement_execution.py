@@ -1064,12 +1064,16 @@ def evaluate_diagnostic_response(
     )
 
 
-def _validated_positive_samples(values: Sequence[float], *, label: str) -> tuple[float, ...]:
+def _validated_nonnegative_samples(
+    values: Sequence[float],
+    *,
+    label: str,
+) -> tuple[float, ...]:
     if isinstance(values, (str, bytes)):
         raise ValueError(f"{label} must be a sequence of numbers")
     try:
         samples = tuple(
-            _require_finite_number(value, label=f"{label}[{index}]", positive=True)
+            _require_finite_number(value, label=f"{label}[{index}]", nonnegative=True)
             for index, value in enumerate(values)
         )
     except TypeError as error:
@@ -1082,7 +1086,7 @@ def _validated_positive_samples(values: Sequence[float], *, label: str) -> tuple
 def latency_percentile_ms(values_ms: Sequence[float], percentile: float) -> float:
     """Return a linearly interpolated latency percentile (R-7 method)."""
 
-    samples = tuple(sorted(_validated_positive_samples(values_ms, label="latency_ms")))
+    samples = tuple(sorted(_validated_nonnegative_samples(values_ms, label="latency_ms")))
     percentile_value = _require_finite_number(percentile, label="percentile")
     if not 0.0 <= percentile_value <= 100.0:
         raise ValueError("percentile must be from 0 through 100")
@@ -1097,7 +1101,7 @@ def latency_percentile_ms(values_ms: Sequence[float], percentile: float) -> floa
 
 @dataclass(frozen=True, slots=True)
 class LatencyStatistics:
-    """Summary of one non-empty set of positive latency samples in milliseconds."""
+    """Summary of one non-empty set of non-negative latency samples in milliseconds."""
 
     sample_count: int
     minimum_ms: float
@@ -1118,7 +1122,7 @@ class LatencyStatistics:
             ("p95_ms", self.p95_ms),
             ("p99_ms", self.p99_ms),
         ):
-            _require_finite_number(value, label=label, positive=True)
+            _require_finite_number(value, label=label, nonnegative=True)
         _require_finite_number(
             self.population_standard_deviation_ms,
             label="population_standard_deviation_ms",
@@ -1129,9 +1133,9 @@ class LatencyStatistics:
 
 
 def summarize_latency_ms(values_ms: Sequence[float]) -> LatencyStatistics:
-    """Validate and summarize positive latency samples in milliseconds."""
+    """Validate and summarize non-negative latency samples in milliseconds."""
 
-    samples = _validated_positive_samples(values_ms, label="latency_ms")
+    samples = _validated_nonnegative_samples(values_ms, label="latency_ms")
     return LatencyStatistics(
         sample_count=len(samples),
         minimum_ms=min(samples),

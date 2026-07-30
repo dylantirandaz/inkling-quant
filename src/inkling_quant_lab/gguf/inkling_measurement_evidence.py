@@ -32,6 +32,7 @@ from inkling_quant_lab.gguf.inkling_measurement_control import (
     MeasurementLlamaBenchWorkloadIdentity,
     MeasurementPairedBytes,
     MeasurementPairedFiveBatchMetricSummary,
+    MeasurementPairedFiveBatchNonnegativeMetricSummary,
     MeasurementPairedGpuBytes,
     MeasurementPairedGpuUtilization,
     MeasurementPairedNonnegativeValue,
@@ -49,6 +50,7 @@ from inkling_quant_lab.gguf.inkling_measurement_control import (
 from inkling_quant_lab.gguf.inkling_measurement_raw_evidence import (
     MeasurementBackendAuditEvidence,
     MeasurementFiveBatchMetricSummary,
+    MeasurementFiveBatchNonnegativeMetricSummary,
     MeasurementParsedRawEvidence,
     MeasurementRepeatedLoadDurations,
     MeasurementSubjectPerformanceSummary,
@@ -576,6 +578,29 @@ def _paired_five_batch_metric(
     )
 
 
+def _paired_five_batch_nonnegative_metric(
+    bf16: MeasurementFiveBatchNonnegativeMetricSummary,
+    q3: MeasurementFiveBatchNonnegativeMetricSummary,
+) -> MeasurementPairedFiveBatchNonnegativeMetricSummary:
+    return MeasurementPairedFiveBatchNonnegativeMetricSummary(
+        trial_count_per_subject=5,
+        bf16_samples=bf16.samples,
+        q3_samples=q3.samples,
+        mean=MeasurementPairedNonnegativeValue(
+            bf16=bf16.mean,
+            q3=q3.mean,
+        ),
+        median=MeasurementPairedNonnegativeValue(
+            bf16=bf16.median,
+            q3=q3.median,
+        ),
+        sample_standard_deviation=MeasurementPairedNonnegativeValue(
+            bf16=bf16.sample_standard_deviation,
+            q3=q3.sample_standard_deviation,
+        ),
+    )
+
+
 def _paired_load_durations(
     bf16: MeasurementRepeatedLoadDurations,
     q3: MeasurementRepeatedLoadDurations,
@@ -690,15 +715,15 @@ def build_measurement_performance_rollup(
                 baseline.batch_metrics.aggregate_decode_tokens_per_second,
                 candidate.batch_metrics.aggregate_decode_tokens_per_second,
             ),
-            inter_token_latency_p50_seconds=_paired_five_batch_metric(
+            inter_token_latency_p50_seconds=_paired_five_batch_nonnegative_metric(
                 baseline.batch_metrics.inter_token_latency_p50_seconds,
                 candidate.batch_metrics.inter_token_latency_p50_seconds,
             ),
-            inter_token_latency_p95_seconds=_paired_five_batch_metric(
+            inter_token_latency_p95_seconds=_paired_five_batch_nonnegative_metric(
                 baseline.batch_metrics.inter_token_latency_p95_seconds,
                 candidate.batch_metrics.inter_token_latency_p95_seconds,
             ),
-            inter_token_latency_p99_seconds=_paired_five_batch_metric(
+            inter_token_latency_p99_seconds=_paired_five_batch_nonnegative_metric(
                 baseline.batch_metrics.inter_token_latency_p99_seconds,
                 candidate.batch_metrics.inter_token_latency_p99_seconds,
             ),

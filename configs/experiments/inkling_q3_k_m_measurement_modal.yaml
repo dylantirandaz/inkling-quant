@@ -84,9 +84,9 @@ quality:
   diagnostic_repetitions: 1
   corpus_reference:
     path: configs/experiments/inkling_wikitext2_raw_test_reference.json
-    sha256: cf69adc64e4be2efc792c94d81a54ee1d3b1ed519b5dc3e77fb9ddd88936e273
+    sha256: e5c915bc65057601906ad58774ac27deb2b5aafd826146fbe4356f2bd55416ce
     size_bytes: 1039
-    reference_sha256: aa3ce3346a7261a5a13692bd67d25c750b00b1e150feb1ef8478658ed88bc483
+    reference_sha256: 5dfc8c426a1509c28d119857f437365c90a4bd57e229705d60e6fd3c1c65b95d
   perplexity_context_tokens: 512
   perplexity_chunks: 64
   perplexity_scored_tokens: 16320

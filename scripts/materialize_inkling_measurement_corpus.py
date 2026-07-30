@@ -16,6 +16,7 @@ from typing import Any, Final
 
 SCHEMA_VERSION: Final = "inkling-wikitext2-raw-test-reference-v2"
 REFERENCE_HASH_DOMAIN: Final = b"inkling-wikitext2-raw-test-reference-v2\0"
+MATERIALIZER_RELATIVE_PATH: Final = "scripts/materialize_inkling_measurement_corpus.py"
 MAX_ARCHIVE_BYTES: Final = 8 * 1024 * 1024
 SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
 
@@ -151,7 +152,7 @@ def materialize(reference_path: Path, output_path: Path) -> None:
         reference.get("materializer_path"),
         label="materializer path",
     )
-    if not materializer.endswith("/materialize_inkling_measurement_corpus.py"):
+    if materializer != MATERIALIZER_RELATIVE_PATH:
         raise ValueError("corpus reference names a different materializer")
     if _sha256(Path(__file__).read_bytes()) != _expected_hash(
         reference.get("materializer_sha256"),

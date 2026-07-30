@@ -2925,8 +2925,12 @@ def _stream_completion(
         raise RuntimeError("streaming completion did not return exactly 128 token events")
     ttft = token_times[0] - started
     inter_token = tuple(later - earlier for earlier, later in pairwise(token_times))
-    if ttft <= 0 or any(value <= 0 or not math.isfinite(value) for value in inter_token):
-        raise RuntimeError("streaming latency samples are not finite and positive")
+    if (
+        ttft <= 0
+        or not math.isfinite(ttft)
+        or any(value < 0 or not math.isfinite(value) for value in inter_token)
+    ):
+        raise RuntimeError("streaming inter-token latency samples are not finite and non-negative")
     latency = summarize_latency_ms(tuple(value * 1000.0 for value in inter_token))
     prompt_n = final_timings.get("prompt_n")
     predicted_n = final_timings.get("predicted_n")
