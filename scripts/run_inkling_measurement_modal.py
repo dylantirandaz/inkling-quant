@@ -2175,18 +2175,25 @@ class ResourceMonitor:
             ],
         }
 
-    def _host_rss(self) -> int:
+    def _host_rss(self) -> int | None:
         status_path = Path(f"/proc/{self._pid}/status")
         try:
             text = status_path.read_text(encoding="utf-8")
         except FileNotFoundError:
-            return 0
-        matches = re.findall(r"^VmRSS:\\s+([0-9]+) kB$", text, flags=re.MULTILINE)
-        if len(matches) != 1:
-            raise RuntimeError("child process RSS is unavailable")
-        return int(matches[0]) * 1024
+            return None
+        matches = re.findall(r"^VmRSS:\s+([0-9]+)\s+kB$", text, flags=re.MULTILINE)
+        if len(matches) == 1:
+            return int(matches[0]) * 1024
+        states = re.findall(
+            r"^State:\s+([A-Za-z])\s+\([^)]+\)$",
+            text,
+            flags=re.MULTILINE,
+        )
+        if len(states) == 1 and states[0] in {"Z", "X"}:
+            return None
+        raise RuntimeError("child process RSS is unavailable")
 
-    def _sample(self) -> None:
+    def _sample(self) -> bool:
         output = subprocess.run(
             [
                 "nvidia-smi",
@@ -2203,11 +2210,14 @@ class ResourceMonitor:
             output,
             expected_uuids=self._expected_uuids,
         )
+        host_rss = self._host_rss()
+        if host_rss is None:
+            return False
         self._samples.append(
             {
                 "requested_sampling_interval_seconds": 1.0,
                 "sampled_at_monotonic_seconds": time.monotonic(),
-                "host_rss_bytes": self._host_rss(),
+                "host_rss_bytes": host_rss,
                 "gpus": [
                     {
                         "cuda_ordinal": cuda_ordinal,
@@ -2217,11 +2227,13 @@ class ResourceMonitor:
                 ],
             }
         )
+        return True
 
     def _run(self) -> None:
         try:
             while not self._stop.is_set():
-                self._sample()
+                if not self._sample():
+                    return
                 self._stop.wait(1.0)
         except BaseException as error:
             self._error = error
