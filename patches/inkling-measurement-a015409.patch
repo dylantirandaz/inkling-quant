@@ -55,21 +55,87 @@
                          logit_history.data() + start + seq*n_ctx + first,
                          prob_history.data()  + start + seq*n_ctx + first);
              }
-@@ -650,6 +659,61 @@
-     const double ppl = exp(nll);
-     nll2 -= nll * nll;
-     if (nll2 > 0) {
-+        const char * token_nll_path = std::getenv("IQL_MEASUREMENT_TOKEN_NLL_PATH");
-+        if (token_nll_path != nullptr) {
-+            if (token_nll_path[0] == '\0') {
-+                LOG_ERR("IQL_MEASUREMENT_TOKEN_NLL_PATH must not be empty\n");
-+                return {tokens, -1, logit_history, prob_history};
+@@ -645,15 +654,122 @@
+     }
+     LOG("\n");
+
+-    nll2 /= count;
+-    nll /= count;
++    auto measurement_failure = [&](const char * code) -> results_perplexity {
++        LOG_ERR("IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=%s\n", code);
++        llama_batch_free(batch);
++        return {tokens, -1, logit_history, prob_history};
++    };
++
++    const char * token_nll_path = std::getenv("IQL_MEASUREMENT_TOKEN_NLL_PATH");
++    if (token_nll_path != nullptr) {
++        if (token_nll_path[0] == '\0') {
++            return measurement_failure("empty_path");
++        }
++        if (count <= 1) {
++            return measurement_failure("insufficient_tokens");
++        }
++
++        long double stable_nll_sum = 0.0L;
++        size_t observed = 0;
++        for (int chunk_index = 0; chunk_index < n_chunk; ++chunk_index) {
++            const int start = chunk_index*n_ctx;
++            for (int source_index = first; source_index < n_ctx - 1; ++source_index) {
++                const double token_nll = nll_history[start + source_index];
++                if (!std::isfinite(token_nll) || token_nll < 0.0) {
++                    return measurement_failure("invalid_token_nll");
++                }
++                stable_nll_sum += static_cast<long double>(token_nll);
++                ++observed;
 +            }
++        }
++        if (observed != static_cast<size_t>(count)) {
++            return measurement_failure("record_count");
++        }
++
++        const long double stable_nll = stable_nll_sum/static_cast<long double>(count);
++        long double squared_deviation_sum = 0.0L;
++        for (int chunk_index = 0; chunk_index < n_chunk; ++chunk_index) {
++            const int start = chunk_index*n_ctx;
++            for (int source_index = first; source_index < n_ctx - 1; ++source_index) {
++                const long double deviation =
++                    static_cast<long double>(nll_history[start + source_index]) - stable_nll;
++                squared_deviation_sum += deviation*deviation;
++            }
++        }
++
++        const long double stable_nll2 = squared_deviation_sum/static_cast<long double>(count);
++        if (!std::isfinite(stable_nll) || !std::isfinite(stable_nll2)) {
++            return measurement_failure("invalid_statistics");
++        }
++        nll = static_cast<double>(stable_nll);
++        nll2 = static_cast<double>(stable_nll2);
++    } else {
++        nll2 /= count;
++        nll /= count;
++        nll2 -= nll*nll;
++    }
++
+     const double ppl = exp(nll);
+-    nll2 -= nll * nll;
+-    if (nll2 > 0) {
++    if (token_nll_path != nullptr &&
++            (!std::isfinite(nll) || !std::isfinite(nll2) || nll2 < 0.0 ||
++             !std::isfinite(ppl) || ppl <= 0.0)) {
++        return measurement_failure("invalid_statistics");
++    }
++
++    if (nll2 > 0 || token_nll_path != nullptr) {
++        const double ppl_uncertainty = sqrt(nll2/(count-1))*ppl;
++        if (token_nll_path != nullptr &&
++                (!std::isfinite(ppl_uncertainty) || ppl_uncertainty < 0.0)) {
++            return measurement_failure("invalid_uncertainty");
++        }
++        if (token_nll_path != nullptr) {
 +
 +            std::ofstream token_nll_stream(token_nll_path, std::ios::out | std::ios::trunc);
 +            if (!token_nll_stream.is_open()) {
-+                LOG_ERR("failed to open token NLL output\n");
-+                return {tokens, -1, logit_history, prob_history};
++                return measurement_failure("open_output");
 +            }
 +
 +            token_nll_stream
@@ -87,10 +153,6 @@
 +                    const int history_index = start + source_index;
 +                    const int token_index = history_index + 1;
 +                    const double token_nll = nll_history[history_index];
-+                    if (!std::isfinite(token_nll)) {
-+                        LOG_ERR("token NLL output contains a non-finite value\n");
-+                        return {tokens, -1, logit_history, prob_history};
-+                    }
 +                    token_nll_stream
 +                        << "{\"chunk_index\":" << chunk_index
 +                        << ",\"token_index\":" << token_index
@@ -103,20 +165,55 @@
 +
 +            token_nll_stream.flush();
 +            if (!token_nll_stream.good() || emitted != static_cast<size_t>(count)) {
-+                LOG_ERR("failed to write complete token NLL output\n");
-+                return {tokens, -1, logit_history, prob_history};
++                return measurement_failure("write_output");
 +            }
 +            token_nll_stream.close();
 +            if (token_nll_stream.fail()) {
-+                LOG_ERR("failed to close token NLL output\n");
-+                return {tokens, -1, logit_history, prob_history};
++                return measurement_failure("close_output");
 +            }
 +            LOG_INF("IQL_MEASUREMENT_TOKEN_NLL_V1 count=%d\n", count);
 +        }
 +
-         nll2 = sqrt(nll2/(count-1));
-         LOG_INF("Final estimate: PPL = %.4lf +/- %.5lf\n", ppl, nll2*ppl);
+-        nll2 = sqrt(nll2/(count-1));
+-        LOG_INF("Final estimate: PPL = %.4lf +/- %.5lf\n", ppl, nll2*ppl);
++        LOG_INF("Final estimate: PPL = %.4lf +/- %.5lf\n", ppl, ppl_uncertainty);
      } else {
+         LOG_ERR("Unexpected negative standard deviation of log(prob)\n");
++        llama_batch_free(batch);
++        return {tokens, -1, logit_history, prob_history};
+     }
+
+     llama_batch_free(batch);
+@@ -2076,7 +2192,8 @@
+         LOG_INF("%s\n", common_params_get_system_info(params).c_str());
+     }
+
+-    struct results_perplexity results;
++    struct results_perplexity results = {};
++    int result_code = 0;
+     if (params.hellaswag) {
+         hellaswag_score(ctx, params);
+     } else if (params.winogrande) {
+@@ -2087,6 +2204,10 @@
+         kl_divergence(ctx, params);
+     } else {
+         results = perplexity(ctx, params, n_ctx);
++        if (!std::isfinite(results.ppl_value) || results.ppl_value <= 0.0) {
++            LOG_ERR("IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=measurement_failed\n");
++            result_code = 1;
++        }
+     }
+
+     LOG("\n");
+@@ -2094,6 +2215,7 @@
+     common_memory_breakdown_print(ctx);
+
+     llama_backend_free();
++    common_log_flush(common_log_main());
+
+-    return 0;
++    return result_code;
+ }
 --- a/tools/server/server-context.cpp
 +++ b/tools/server/server-context.cpp
 @@ -1849,5 +1849,9 @@

@@ -69,8 +69,8 @@ base_runtime:
 
 measurement_patch:
   path: patches/inkling-measurement-a015409.patch
-  sha256: 5896c17b3069e65bde15be276d02a41d6c83b443caf37e350ca24710f4a3a73f
-  size_bytes: 5275
+  sha256: 2758f3dda9a6d954793705f750feb517193cf77545cc7f92c68ad44edd12c29f
+  size_bytes: 8660
 measurement_patch_apply_after: base_runtime.instrumentation_patch
 measurement_token_nll_schema_version: iql-token-nll-v1
 measurement_binary_identity_policy: rebuild_after_patches_then_hash_and_record

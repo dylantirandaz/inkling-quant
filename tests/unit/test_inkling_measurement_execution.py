@@ -28,6 +28,7 @@ from inkling_quant_lab.gguf.inkling_measurement_execution import (
     build_llama_server_command,
     diagnostic_expected_normalized_sha256,
     evaluate_diagnostic_response,
+    extract_llama_perplexity_machine_failure,
     normalize_exact_text,
     parse_llama_bench_jsonl,
     parse_llama_perplexity_final,
@@ -322,6 +323,42 @@ def test_perplexity_parser_accepts_one_finite_final_estimate() -> None:
 
 
 @pytest.mark.parametrize(
+    ("stdout", "stderr", "expected"),
+    (
+        (
+            "",
+            "IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=invalid_statistics\n",
+            "IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=invalid_statistics",
+        ),
+        (
+            "IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=invalid_statistics\n",
+            "IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=measurement_failed\n",
+            "IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=invalid_statistics",
+        ),
+        (
+            "IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=measurement_failed\n",
+            "",
+            "IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=measurement_failed",
+        ),
+        ("ordinary failure output", "", None),
+        ("IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=unknown\n", "", None),
+        (
+            "IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=open_output\n",
+            "IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=write_output\n",
+            None,
+        ),
+        ("prefix IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=open_output", "", None),
+    ),
+)
+def test_perplexity_machine_failure_extractor_is_bounded_to_safe_codes(
+    stdout: str,
+    stderr: str,
+    expected: str | None,
+) -> None:
+    assert extract_llama_perplexity_machine_failure(stdout, stderr) == expected
+
+
+@pytest.mark.parametrize(
     ("output", "match"),
     (
         ("loading model", "observed 0"),
@@ -330,6 +367,13 @@ def test_perplexity_parser_accepts_one_finite_final_estimate() -> None:
             "observed 2",
         ),
         ("fatal: CUDA initialization failed\nFinal estimate: PPL = 5 +/- 0.1", "failure"),
+        ("Unexpected negative standard deviation of log(prob)", "failure"),
+        ("IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=invalid_statistics", "failure"),
+        ("Final estimate: PPL = inf +/- inf", "malformed"),
+        (
+            "Final estimate: PPL = 5 +/- 0.1\nFinal estimate: PPL = inf +/- inf",
+            "malformed",
+        ),
         ("Final estimate: PPL = 0 +/- 0.1", "positive"),
     ),
 )

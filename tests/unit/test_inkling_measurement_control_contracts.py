@@ -199,8 +199,8 @@ def _runtime_identity(**overrides: Any) -> MeasurementRuntimeIdentity:
             ),
             MeasurementAppliedPatch(
                 path="patches/inkling-measurement-a015409.patch",
-                sha256="5896c17b3069e65bde15be276d02a41d6c83b443caf37e350ca24710f4a3a73f",
-                size_bytes=5_275,
+                sha256="2758f3dda9a6d954793705f750feb517193cf77545cc7f92c68ad44edd12c29f",
+                size_bytes=8_660,
             ),
         ),
         "base_pre_measurement_patch_executables": (

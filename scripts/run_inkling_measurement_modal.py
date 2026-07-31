@@ -208,6 +208,7 @@ from inkling_quant_lab.gguf.inkling_measurement_execution import (  # noqa: E402
     build_llama_perplexity_command,
     build_llama_server_command,
     evaluate_diagnostic_response,
+    extract_llama_perplexity_machine_failure,
     parse_llama_bench_jsonl,
     parse_llama_perplexity_final,
     summarize_latency_ms,
@@ -2340,7 +2341,11 @@ def _run_captured(
     stdout = stdout_bytes.decode("utf-8", errors="strict")
     stderr = stderr_bytes.decode("utf-8", errors="strict")
     if process.returncode != 0:
-        raise RuntimeError(f"{PurePosixPath(command[0]).name} returned nonzero")
+        failure = f"{PurePosixPath(command[0]).name} returned nonzero"
+        marker = extract_llama_perplexity_machine_failure(stdout, stderr)
+        if marker is not None:
+            failure = f"{failure}: {marker}"
+        raise RuntimeError(failure)
     return CommandResult(
         command=exact_command,
         process_id=process.pid,

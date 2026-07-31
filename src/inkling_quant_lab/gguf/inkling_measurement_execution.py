@@ -43,12 +43,32 @@ _PERPLEXITY_FINAL_RE: Final = re.compile(
     rf"\+/- ({_FINITE_NUMBER_PATTERN})$",
     re.MULTILINE,
 )
+_PERPLEXITY_FINAL_PREFIX_RE: Final = re.compile(r"^Final estimate: PPL = .+$", re.MULTILINE)
+_PERPLEXITY_MACHINE_FAILURE_LINE_RE: Final = re.compile(
+    r"IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=([a-z0-9_]+)\Z"
+)
+_PERPLEXITY_MACHINE_FAILURE_CODES: Final = frozenset(
+    {
+        "close_output",
+        "empty_path",
+        "insufficient_tokens",
+        "invalid_statistics",
+        "invalid_token_nll",
+        "invalid_uncertainty",
+        "measurement_failed",
+        "open_output",
+        "record_count",
+        "write_output",
+    }
+)
 _PERPLEXITY_FAILURE_RE: Final = re.compile(
-    r"(?im)^.*(?:"
-    r"\berror:|\bfailed to\b|\bfatal:|\bexception\b|\btraceback\b|"
+    r"(?im)^(?:"
+    r"Unexpected negative standard deviation of log\(prob\)|"
+    r"IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=[a-z0-9_]+|"
+    r".*(?:\berror:|\bfailed to\b|\bfatal:|\bexception\b|\btraceback\b|"
     r"\bsegmentation fault\b|\bout of memory\b|\bno usable GPU\b|"
-    r"\bCUDA error\b"
-    r").*$"
+    r"\bCUDA error\b).*"
+    r")$"
 )
 _BENCH_KEYS: Final = frozenset(
     {
@@ -120,6 +140,26 @@ class PerplexityOutputError(ValueError):
 
 class StrictJsonError(ValueError):
     """Raised when JSON is ambiguous or outside the JSON data model."""
+
+
+def extract_llama_perplexity_machine_failure(stdout: str, stderr: str) -> str | None:
+    """Return one safe failure marker without exposing arbitrary tool output."""
+
+    if type(stdout) is not str or type(stderr) is not str:
+        raise TypeError("llama-perplexity stdout and stderr must be text")
+    codes: list[str] = []
+    for stream in (stdout, stderr):
+        for line in stream.splitlines():
+            match = _PERPLEXITY_MACHINE_FAILURE_LINE_RE.fullmatch(line)
+            if match is not None:
+                codes.append(match.group(1))
+    if not codes or any(code not in _PERPLEXITY_MACHINE_FAILURE_CODES for code in codes):
+        return None
+    specific_codes = frozenset(code for code in codes if code != "measurement_failed")
+    if len(specific_codes) > 1:
+        return None
+    code = next(iter(specific_codes), "measurement_failed")
+    return f"IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code={code}"
 
 
 def _require_exact_int(
@@ -822,7 +862,10 @@ def parse_llama_perplexity_final(output: str) -> PerplexityResult:
         raise PerplexityOutputError(
             f"llama-perplexity reported a failure diagnostic: {failure.group(0).strip()}"
         )
+    final_lines = tuple(_PERPLEXITY_FINAL_PREFIX_RE.finditer(output))
     matches = tuple(_PERPLEXITY_FINAL_RE.finditer(output))
+    if len(final_lines) != len(matches):
+        raise PerplexityOutputError("llama-perplexity final estimate is malformed")
     if len(matches) != 1:
         raise PerplexityOutputError(
             f"llama-perplexity must emit one final estimate; observed {len(matches)}"
