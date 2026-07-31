@@ -16,9 +16,11 @@ from inkling_quant_lab.gguf.inkling_matched import (
 from inkling_quant_lab.gguf.inkling_matched_execution import (
     ExactCudaBackendAuditEvidence,
     ExactCudaPlacementPolicy,
+    ExactCudaTextBackendAuditEvidence,
     build_matched_cuda_placement_policy,
     expected_cuda_identities,
     parse_exact_cuda_backend_audit,
+    parse_exact_text_cuda_backend_audit,
     parse_matched_cuda_backend_audit,
 )
 from inkling_quant_lab.gguf.inkling_smoke import parse_backend_audit_evidence_v2
@@ -142,6 +144,20 @@ def _audit_log(
                 backend_indices=audio_indices,
                 first_compute=30,
             ),
+        )
+    )
+
+
+def _text_audit_log(
+    *,
+    text_indices: Sequence[int] = tuple(range(GPU_COUNT)),
+) -> str:
+    return "\n".join(
+        _graph_block(
+            graph_uid=1,
+            graph_owner="text",
+            backend_indices=text_indices,
+            first_compute=10,
         )
     )
 
@@ -299,6 +315,60 @@ def test_exact_cuda_backend_audit_accepts_the_eight_gpu_matched_cell() -> None:
     assert evidence.projector_graphs_cuda0_only is True
     assert evidence.all_compute_operations_accelerated is True
     assert evidence.no_cpu_model_graph_fallback is True
+
+
+def test_exact_text_cuda_backend_audit_accepts_one_full_cell_text_graph() -> None:
+    policy = _policy()
+    evidence = parse_exact_text_cuda_backend_audit(
+        _text_audit_log(),
+        policy=policy,
+    )
+
+    assert isinstance(evidence, ExactCudaTextBackendAuditEvidence)
+    assert evidence.schema_version == "inkling-exact-text-cuda-backend-audit-v1"
+    assert evidence.policy == policy
+    assert evidence.observed_graphs == 1
+    assert evidence.compute_operations == evidence.gpu_operations == 108
+    assert tuple(row.graph_owner for row in evidence.graphs) == ("text",)
+    assert evidence.exact_cuda_identity_inventory is True
+    assert evidence.text_full_cell_observed is True
+    assert evidence.all_compute_operations_accelerated is True
+    assert evidence.no_cpu_model_graph_fallback is True
+
+
+def test_exact_text_cuda_backend_audit_rejects_multimodal_graphs() -> None:
+    with pytest.raises((ValidationError, ValueError)):
+        parse_exact_text_cuda_backend_audit(
+            _audit_log(),
+            policy=_policy(),
+        )
+
+
+def test_exact_multimodal_cuda_backend_audit_rejects_text_only_graphs() -> None:
+    with pytest.raises((ValidationError, ValueError)):
+        _parse(_text_audit_log())
+
+
+def test_exact_text_cuda_backend_audit_rejects_missing_cuda_identity() -> None:
+    with pytest.raises((ValidationError, ValueError)):
+        parse_exact_text_cuda_backend_audit(
+            _text_audit_log(text_indices=tuple(range(GPU_COUNT - 1))),
+            policy=_policy(),
+        )
+
+
+def test_exact_text_cuda_backend_audit_rejects_a_cpu_node_marker() -> None:
+    log_text = (
+        _text_audit_log() + "\n" + "IQL_SMOKE_CPU_NODE_V2 graph_uid=1 graph_owner=text "
+        "backend_index=8 device_type=cpu ordinal=0 op=MUL_MAT "
+        "name_len=4 name_hex=6e6f6465"
+    )
+
+    with pytest.raises(ValueError):
+        parse_exact_text_cuda_backend_audit(
+            log_text,
+            policy=_policy(),
+        )
 
 
 @pytest.mark.parametrize(

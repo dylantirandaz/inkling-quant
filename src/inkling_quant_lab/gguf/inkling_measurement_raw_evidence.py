@@ -708,8 +708,8 @@ class MeasurementHardwareGpu(_StrictRawModel):
 
     cuda_ordinal: StrictInt = Field(ge=0, le=7)
     uuid: StrictStr = Field(pattern=_GPU_UUID_PATTERN)
-    name: Literal["NVIDIA B300"]
-    memory_total_mib: Literal[274113]
+    name: Literal["NVIDIA B300 SXM6 AC"]
+    memory_total_mib: Literal[275040]
     driver_version: StrictStr = Field(pattern=r"^[0-9]+(?:\.[0-9]+)+$")
     compute_capability: Literal["10.3"]
 
@@ -2032,7 +2032,7 @@ def _validate_executed_command_scope(
         or len({case.model_parameter_count for case in bench_cases}) != 1
     ):
         raise ValueError("llama-bench cases report different loaded model identities")
-    expected_gpu_info = ", ".join("NVIDIA B300" for _ in range(8))
+    expected_gpu_info = ", ".join(gpu.name for gpu in raw_trials.hardware_identity.gpus)
     if any(case.gpu_info != expected_gpu_info for case in bench_cases):
         raise ValueError("llama-bench GPU report differs from the exact eight-B300 cell")
 

@@ -26,6 +26,7 @@ from inkling_quant_lab.config import StrictFrozenModel
 from inkling_quant_lab.gguf.inkling_matched_execution import (
     ExactCudaPlacementPolicy,
     parse_exact_cuda_backend_audit,
+    parse_exact_text_cuda_backend_audit,
 )
 from inkling_quant_lab.gguf.inkling_measurement_control import (
     MeasurementBenchCaseRollup,
@@ -820,7 +821,12 @@ def build_measurement_placement_summaries(
     policy_sha256 = measurement_evidence_sha256(policy.model_dump(mode="json"))
     summaries: list[MeasurementPlacementSummary] = []
     for workload in backend_audit.workloads:
-        parsed = parse_exact_cuda_backend_audit(workload.log, policy=policy)
+        parser = (
+            parse_exact_cuda_backend_audit
+            if workload.workload == "server_quality_and_performance"
+            else parse_exact_text_cuda_backend_audit
+        )
+        parsed = parser(workload.log, policy=policy)
         if not parsed.exact_cuda_identity_inventory:
             raise ValueError("backend audit CUDA identity inventory is incomplete")
         if not parsed.text_full_cell_observed:

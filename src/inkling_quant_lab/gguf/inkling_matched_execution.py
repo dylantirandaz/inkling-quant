@@ -55,7 +55,8 @@ _MARKER_PREFIX: Final = "IQL_SMOKE_"
 _GRAPH_MARKER_V2: Final = "IQL_SMOKE_BACKEND_GRAPH_V2"
 _IDENTITY_MARKER_V2: Final = "IQL_SMOKE_BACKEND_IDENTITY_V2"
 _CPU_NODE_MARKER_V2: Final = "IQL_SMOKE_CPU_NODE_V2"
-_REQUIRED_GRAPH_OWNERS: Final = frozenset({"text", "vision", "audio"})
+_TEXT_ONLY_GRAPH_OWNERS: Final = frozenset({"text"})
+_MULTIMODAL_GRAPH_OWNERS: Final = frozenset({"text", "vision", "audio"})
 
 
 class ExactCudaPlacementPolicy(StrictFrozenModel):
@@ -177,105 +178,154 @@ class ExactCudaBackendAuditEvidence(StrictFrozenModel):
 
     @model_validator(mode="after")
     def exact_cuda_placement(self) -> ExactCudaBackendAuditEvidence:
-        if not all(
-            (
-                self.exact_cuda_identity_inventory,
-                self.text_full_cell_observed,
-                self.projector_graphs_cuda0_only,
-                self.all_compute_operations_accelerated,
-                self.no_cpu_model_graph_fallback,
-            )
-        ):
-            raise ValueError("backend audit proof fields must all be true")
-
-        expected_order = expected_cuda_identities(self.policy.gpu_count)
-        if self.expected_identities != expected_order:
-            raise ValueError("backend audit expected CUDA identities differ from its policy")
-        expected = set(expected_order)
-        cuda0_identity = expected_order[0]
-
-        if self.observed_graphs != len(self.graphs):
-            raise ValueError("backend graph count differs from its graph records")
-        graph_uids = tuple(row.graph_uid for row in self.graphs)
-        if len(graph_uids) != len(set(graph_uids)):
-            raise ValueError("backend audit contains duplicate graph identities")
-        if {row.graph_owner for row in self.graphs} != _REQUIRED_GRAPH_OWNERS:
-            raise ValueError("backend audit does not cover text, vision, and audio graph owners")
-
-        identity_keys = tuple((row.graph_uid, row.backend_index) for row in self.identities)
-        if len(identity_keys) != len(set(identity_keys)):
-            raise ValueError("backend audit contains duplicate backend identities")
-        if {row.graph_uid for row in self.identities} != set(graph_uids):
-            raise ValueError("backend identities do not cover the exact graph set")
-        if any(row.graph_owner == "unknown" for row in self.identities):
-            raise ValueError("backend identity contains an unknown graph owner")
-        if any(row.device_type != "gpu" for row in self.identities):
-            raise ValueError("backend audit used a non-CUDA accelerator")
-
-        identities_by_graph: dict[int, list[ExactCudaIdentityAuditRow]] = {}
-        for identity in self.identities:
-            identities_by_graph.setdefault(identity.graph_uid, []).append(identity)
-
-        text_full_cell_observed = False
-        category_totals = {
-            "gpu": 0,
-            "cpu": 0,
-            "accel": 0,
-            "other": 0,
-            "unassigned": 0,
-        }
-        for graph in self.graphs:
-            if (
-                graph.cpu != 0
-                or graph.accel != 0
-                or graph.other != 0
-                or graph.unassigned != 0
-                or graph.gpu != graph.compute
-            ):
-                raise ValueError("backend graph contains a forbidden device category")
-
-            graph_identities = tuple(identities_by_graph[graph.graph_uid])
-            if any(row.graph_owner != graph.graph_owner for row in graph_identities):
-                raise ValueError("backend graph and identity owner fields differ")
-            if tuple(row.backend_index for row in graph_identities) != tuple(
-                sorted(row.backend_index for row in graph_identities)
-            ):
-                raise ValueError("backend identities are not in CUDA ordinal order")
-            observed = {
-                (row.backend_index, row.backend_name, row.device_name) for row in graph_identities
-            }
-            if (
-                len(graph_identities) != len(observed)
-                or not observed.issubset(expected)
-                or cuda0_identity not in observed
-            ):
-                raise ValueError(
-                    "backend graph does not prove the exact CUDA index and device identities"
-                )
-            if graph.graph_owner == "text":
-                text_full_cell_observed |= observed == expected
-            elif observed != {cuda0_identity}:
-                raise ValueError("vision and audio graphs must use CUDA0 only")
-
-            if sum(row.compute for row in graph_identities) != graph.compute:
-                raise ValueError("backend identity counts do not equal graph compute count")
-            category_totals["gpu"] += sum(row.compute for row in graph_identities)
-
-        if not text_full_cell_observed:
-            raise ValueError("backend audit does not prove one full-cell text graph")
-
-        aggregate = {
-            "gpu": self.gpu_operations,
-            "cpu": self.cpu_operations,
-            "accel": self.accelerator_operations,
-            "other": self.other_operations,
-            "unassigned": self.unassigned_operations,
-        }
-        if category_totals != aggregate:
-            raise ValueError("backend aggregate counts differ from graph evidence")
-        if sum(graph.compute for graph in self.graphs) != self.compute_operations:
-            raise ValueError("backend aggregate compute count differs from graph evidence")
+        _validate_exact_cuda_placement_evidence(
+            self,
+            required_graph_owners=_MULTIMODAL_GRAPH_OWNERS,
+        )
         return self
+
+
+class ExactCudaTextBackendAuditEvidence(StrictFrozenModel):
+    """Exact CUDA graph evidence for a text-only llama.cpp workload."""
+
+    schema_version: Literal["inkling-exact-text-cuda-backend-audit-v1"]
+    policy: ExactCudaPlacementPolicy
+    expected_identities: tuple[CudaBackendIdentity, ...]
+    observed_graphs: StrictInt = Field(gt=0, le=_MAX_AUDIT_GRAPH_ROWS)
+    compute_operations: StrictInt = Field(gt=0)
+    gpu_operations: StrictInt = Field(gt=0)
+    accelerator_operations: StrictInt = Field(ge=0, le=0)
+    cpu_operations: StrictInt = Field(ge=0, le=0)
+    other_operations: StrictInt = Field(ge=0, le=0)
+    unassigned_operations: StrictInt = Field(ge=0, le=0)
+    graphs: tuple[ExactCudaGraphAuditRow, ...] = Field(
+        min_length=1,
+        max_length=_MAX_AUDIT_GRAPH_ROWS,
+    )
+    identities: tuple[ExactCudaIdentityAuditRow, ...] = Field(
+        min_length=1,
+        max_length=_MAX_AUDIT_IDENTITY_ROWS,
+    )
+    exact_cuda_identity_inventory: StrictBool
+    text_full_cell_observed: StrictBool
+    projector_graphs_cuda0_only: StrictBool
+    all_compute_operations_accelerated: StrictBool
+    no_cpu_model_graph_fallback: StrictBool
+
+    @model_validator(mode="after")
+    def exact_cuda_placement(self) -> ExactCudaTextBackendAuditEvidence:
+        _validate_exact_cuda_placement_evidence(
+            self,
+            required_graph_owners=_TEXT_ONLY_GRAPH_OWNERS,
+        )
+        return self
+
+
+def _validate_exact_cuda_placement_evidence(
+    evidence: ExactCudaBackendAuditEvidence | ExactCudaTextBackendAuditEvidence,
+    *,
+    required_graph_owners: frozenset[str],
+) -> None:
+    """Validate fields shared by exact multimodal and text-only CUDA records."""
+
+    if not all(
+        (
+            evidence.exact_cuda_identity_inventory,
+            evidence.text_full_cell_observed,
+            evidence.projector_graphs_cuda0_only,
+            evidence.all_compute_operations_accelerated,
+            evidence.no_cpu_model_graph_fallback,
+        )
+    ):
+        raise ValueError("backend audit proof fields must all be true")
+
+    expected_order = expected_cuda_identities(evidence.policy.gpu_count)
+    if evidence.expected_identities != expected_order:
+        raise ValueError("backend audit expected CUDA identities differ from its policy")
+    expected = set(expected_order)
+    cuda0_identity = expected_order[0]
+
+    if evidence.observed_graphs != len(evidence.graphs):
+        raise ValueError("backend graph count differs from its graph records")
+    graph_uids = tuple(row.graph_uid for row in evidence.graphs)
+    if len(graph_uids) != len(set(graph_uids)):
+        raise ValueError("backend audit contains duplicate graph identities")
+    if frozenset(row.graph_owner for row in evidence.graphs) != required_graph_owners:
+        raise ValueError("backend audit graph owners differ from the closed workload scope")
+
+    identity_keys = tuple((row.graph_uid, row.backend_index) for row in evidence.identities)
+    if len(identity_keys) != len(set(identity_keys)):
+        raise ValueError("backend audit contains duplicate backend identities")
+    if {row.graph_uid for row in evidence.identities} != set(graph_uids):
+        raise ValueError("backend identities do not cover the exact graph set")
+    if any(row.graph_owner == "unknown" for row in evidence.identities):
+        raise ValueError("backend identity contains an unknown graph owner")
+    if any(row.device_type != "gpu" for row in evidence.identities):
+        raise ValueError("backend audit used a non-CUDA accelerator")
+
+    identities_by_graph: dict[int, list[ExactCudaIdentityAuditRow]] = {}
+    for identity in evidence.identities:
+        identities_by_graph.setdefault(identity.graph_uid, []).append(identity)
+
+    text_full_cell_observed = False
+    category_totals = {
+        "gpu": 0,
+        "cpu": 0,
+        "accel": 0,
+        "other": 0,
+        "unassigned": 0,
+    }
+    for graph in evidence.graphs:
+        if (
+            graph.cpu != 0
+            or graph.accel != 0
+            or graph.other != 0
+            or graph.unassigned != 0
+            or graph.gpu != graph.compute
+        ):
+            raise ValueError("backend graph contains a forbidden device category")
+
+        graph_identities = tuple(identities_by_graph[graph.graph_uid])
+        if any(row.graph_owner != graph.graph_owner for row in graph_identities):
+            raise ValueError("backend graph and identity owner fields differ")
+        if tuple(row.backend_index for row in graph_identities) != tuple(
+            sorted(row.backend_index for row in graph_identities)
+        ):
+            raise ValueError("backend identities are not in CUDA ordinal order")
+        observed = {
+            (row.backend_index, row.backend_name, row.device_name) for row in graph_identities
+        }
+        if (
+            len(graph_identities) != len(observed)
+            or not observed.issubset(expected)
+            or cuda0_identity not in observed
+        ):
+            raise ValueError(
+                "backend graph does not prove the exact CUDA index and device identities"
+            )
+        if graph.graph_owner == "text":
+            text_full_cell_observed |= observed == expected
+        elif observed != {cuda0_identity}:
+            raise ValueError("vision and audio graphs must use CUDA0 only")
+
+        if sum(row.compute for row in graph_identities) != graph.compute:
+            raise ValueError("backend identity counts do not equal graph compute count")
+        category_totals["gpu"] += sum(row.compute for row in graph_identities)
+
+    if not text_full_cell_observed:
+        raise ValueError("backend audit does not prove one full-cell text graph")
+
+    aggregate = {
+        "gpu": evidence.gpu_operations,
+        "cpu": evidence.cpu_operations,
+        "accel": evidence.accelerator_operations,
+        "other": evidence.other_operations,
+        "unassigned": evidence.unassigned_operations,
+    }
+    if category_totals != aggregate:
+        raise ValueError("backend aggregate counts differ from graph evidence")
+    if sum(graph.compute for graph in evidence.graphs) != evidence.compute_operations:
+        raise ValueError("backend aggregate compute count differs from graph evidence")
 
 
 def _validate_audit_input_bounds(log_text: str) -> None:
@@ -302,12 +352,12 @@ def _validate_audit_input_bounds(log_text: str) -> None:
                 raise ValueError("backend audit exceeds the CPU-node marker limit")
 
 
-def parse_exact_cuda_backend_audit(
+def _parse_exact_cuda_backend_audit_fields(
     log_text: str,
     *,
     policy: ExactCudaPlacementPolicy,
-) -> ExactCudaBackendAuditEvidence:
-    """Parse V2 markers and validate them against one explicit CUDA policy."""
+) -> dict[str, object]:
+    """Parse common V2 marker fields for one explicit CUDA policy."""
 
     _validate_audit_input_bounds(log_text)
     rows = parse_backend_audit_rows_v2(log_text)
@@ -318,24 +368,53 @@ def parse_exact_cuda_backend_audit(
         ExactCudaIdentityAuditRow.model_validate(row.model_dump(mode="python"))
         for row in rows.identities
     )
-    return ExactCudaBackendAuditEvidence(
-        schema_version="inkling-exact-cuda-backend-audit-v1",
-        policy=policy,
-        expected_identities=expected_cuda_identities(policy.gpu_count),
-        observed_graphs=len(graphs),
-        compute_operations=sum(row.compute for row in graphs),
-        gpu_operations=sum(row.gpu for row in graphs),
-        accelerator_operations=sum(row.accel for row in graphs),
-        cpu_operations=sum(row.cpu for row in graphs),
-        other_operations=sum(row.other for row in graphs),
-        unassigned_operations=sum(row.unassigned for row in graphs),
-        graphs=graphs,
-        identities=identities,
-        exact_cuda_identity_inventory=True,
-        text_full_cell_observed=True,
-        projector_graphs_cuda0_only=True,
-        all_compute_operations_accelerated=True,
-        no_cpu_model_graph_fallback=True,
+    return {
+        "policy": policy,
+        "expected_identities": expected_cuda_identities(policy.gpu_count),
+        "observed_graphs": len(graphs),
+        "compute_operations": sum(row.compute for row in graphs),
+        "gpu_operations": sum(row.gpu for row in graphs),
+        "accelerator_operations": sum(row.accel for row in graphs),
+        "cpu_operations": sum(row.cpu for row in graphs),
+        "other_operations": sum(row.other for row in graphs),
+        "unassigned_operations": sum(row.unassigned for row in graphs),
+        "graphs": graphs,
+        "identities": identities,
+        "exact_cuda_identity_inventory": True,
+        "text_full_cell_observed": True,
+        "projector_graphs_cuda0_only": True,
+        "all_compute_operations_accelerated": True,
+        "no_cpu_model_graph_fallback": True,
+    }
+
+
+def parse_exact_cuda_backend_audit(
+    log_text: str,
+    *,
+    policy: ExactCudaPlacementPolicy,
+) -> ExactCudaBackendAuditEvidence:
+    """Parse a multimodal workload's V2 markers against one CUDA policy."""
+
+    return ExactCudaBackendAuditEvidence.model_validate(
+        {
+            "schema_version": "inkling-exact-cuda-backend-audit-v1",
+            **_parse_exact_cuda_backend_audit_fields(log_text, policy=policy),
+        }
+    )
+
+
+def parse_exact_text_cuda_backend_audit(
+    log_text: str,
+    *,
+    policy: ExactCudaPlacementPolicy,
+) -> ExactCudaTextBackendAuditEvidence:
+    """Parse a text-only workload's V2 markers against one CUDA policy."""
+
+    return ExactCudaTextBackendAuditEvidence.model_validate(
+        {
+            "schema_version": "inkling-exact-text-cuda-backend-audit-v1",
+            **_parse_exact_cuda_backend_audit_fields(log_text, policy=policy),
+        }
     )
 
 
@@ -579,8 +658,8 @@ class MatchedNvidiaSmiGpuEvidence(StrictFrozenModel):
 
     cuda_ordinal: StrictInt = Field(ge=0, le=7)
     uuid: StrictStr = Field(pattern=_GPU_UUID_PATTERN)
-    name: Literal["NVIDIA B300"]
-    memory_total_mib: Literal[274113]
+    name: Literal["NVIDIA B300 SXM6 AC"]
+    memory_total_mib: Literal[275040]
     driver_version: StrictStr = Field(pattern=r"^[0-9]+(?:\.[0-9]+)+$")
     compute_capability: Literal["10.3"]
 
@@ -1825,6 +1904,7 @@ __all__ = [
     "ExactCudaGraphAuditRow",
     "ExactCudaIdentityAuditRow",
     "ExactCudaPlacementPolicy",
+    "ExactCudaTextBackendAuditEvidence",
     "MatchedArtifactHashObservation",
     "MatchedCapacityInputs",
     "MatchedCudaPeerEdgeEvidence",
@@ -1858,6 +1938,7 @@ __all__ = [
     "matched_subject_smoke_receipt_sha256",
     "order_matched_nvidia_smi_identity_by_cuda_uuid",
     "parse_exact_cuda_backend_audit",
+    "parse_exact_text_cuda_backend_audit",
     "parse_matched_cuda_backend_audit",
     "parse_matched_nvidia_smi_identity_csv",
     "parse_matched_nvidia_smi_monitor_csv",

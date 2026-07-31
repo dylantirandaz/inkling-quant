@@ -595,8 +595,8 @@ def _raw_hardware_identity() -> MeasurementHardwareIdentity:
         MeasurementHardwareGpu(
             cuda_ordinal=ordinal,
             uuid=_gpu_uuid(ordinal),
-            name="NVIDIA B300",
-            memory_total_mib=274_113,
+            name="NVIDIA B300 SXM6 AC",
+            memory_total_mib=275_040,
             driver_version="580.1",
             compute_capability="10.3",
         )
@@ -1254,7 +1254,7 @@ def _raw_trials(token_nll_payload: bytes) -> MeasurementRawTrialsEvidence:
             standard_deviation_nanoseconds=0,
             average_tokens_per_second=float(prompt_tokens + generated_tokens),
             standard_deviation_tokens_per_second=0.0,
-            gpu_info=", ".join("NVIDIA B300" for _ in range(8)),
+            gpu_info=", ".join("NVIDIA B300 SXM6 AC" for _ in range(8)),
             backends="CUDA",
         )
         for case, prompt_tokens, generated_tokens in bench_specs

@@ -122,6 +122,7 @@ from inkling_quant_lab.gguf.inkling_matched_execution import (  # noqa: E402
     enumerate_matched_cuda_peer_topology,
     order_matched_nvidia_smi_identity_by_cuda_uuid,
     parse_exact_cuda_backend_audit,
+    parse_exact_text_cuda_backend_audit,
     parse_matched_nvidia_smi_identity_csv,
     parse_matched_nvidia_smi_monitor_csv,
 )
@@ -2098,9 +2099,9 @@ def _observe_hardware(runtime: MeasurementRuntimeIdentity) -> dict[str, Any]:
     if tuple(item.cuda_ordinal for item in ordered) != tuple(range(8)):
         raise RuntimeError("allocation is not exact CUDA ordinals zero through seven")
     if any(
-        item.name != "NVIDIA B300"
+        item.name != "NVIDIA B300 SXM6 AC"
         or item.compute_capability != "10.3"
-        or item.memory_total_mib < 274_113
+        or item.memory_total_mib != 275_040
         for item in ordered
     ):
         raise RuntimeError("allocation does not provide the exact eight-B300 cell")
@@ -2207,7 +2208,13 @@ class ResourceMonitor:
                 "requested_sampling_interval_seconds": 1.0,
                 "sampled_at_monotonic_seconds": time.monotonic(),
                 "host_rss_bytes": self._host_rss(),
-                "gpus": [item.model_dump(mode="json") for item in gpu_samples],
+                "gpus": [
+                    {
+                        "cuda_ordinal": cuda_ordinal,
+                        **item.model_dump(mode="json"),
+                    }
+                    for cuda_ordinal, item in enumerate(gpu_samples)
+                ],
             }
         )
 
@@ -2797,7 +2804,7 @@ def _perplexity_measurement(
     )
     combined = ppl_run.stdout + CAPTURED_TOOL_LOG_DELIMITER + ppl_run.stderr
     ppl = parse_llama_perplexity_final(combined)
-    ppl_placement = parse_exact_cuda_backend_audit(
+    ppl_placement = parse_exact_text_cuda_backend_audit(
         combined,
         policy=placement_policy,
     )
@@ -3150,7 +3157,7 @@ def _benchmark_cases(
     if tuple(item["case"] for item in records) != BENCH_CASES:
         raise RuntimeError("llama-bench cases are incomplete or out of order")
     combined = run.stdout + CAPTURED_TOOL_LOG_DELIMITER + run.stderr
-    placement = parse_exact_cuda_backend_audit(
+    placement = parse_exact_text_cuda_backend_audit(
         combined,
         policy=build_matched_cuda_placement_policy(bundle.matched.config),
     )

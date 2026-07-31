@@ -426,15 +426,18 @@ def _graph_block(
     return (*identities, graph)
 
 
-def _exact_cuda_audit_log() -> str:
+def _exact_cuda_audit_log(*, multimodal: bool) -> str:
+    text_graph = _graph_block(
+        graph_uid=1,
+        graph_owner="text",
+        backend_indices=tuple(range(8)),
+        first_compute=10,
+    )
+    if not multimodal:
+        return "\n".join(text_graph)
     return "\n".join(
         (
-            *_graph_block(
-                graph_uid=1,
-                graph_owner="text",
-                backend_indices=tuple(range(8)),
-                first_compute=10,
-            ),
+            *text_graph,
             *_graph_block(
                 graph_uid=2,
                 graph_owner="vision",
@@ -466,10 +469,17 @@ def _bindings() -> MeasurementAttemptBindings:
     )
 
 
-def _backend_audit(*, cpu_text_graph: bool = False) -> MeasurementBackendAuditEvidence:
+def _backend_audit(
+    *,
+    cpu_text_graph: bool = False,
+    swap_workload_scopes: bool = False,
+) -> MeasurementBackendAuditEvidence:
     workloads = []
     for process_id, workload in enumerate(MEASUREMENT_RAW_WORKLOAD_ORDER, start=1):
-        audit_log = _exact_cuda_audit_log()
+        multimodal = workload == "server_quality_and_performance"
+        if swap_workload_scopes:
+            multimodal = not multimodal
+        audit_log = _exact_cuda_audit_log(multimodal=multimodal)
         if cpu_text_graph and workload == "perplexity":
             audit_log = audit_log.replace(
                 "scope=non_view_compute compute=108 gpu=108 cpu=0",
@@ -626,9 +636,9 @@ def test_placement_builder_replays_all_retained_logs_and_rejects_cpu_graphs() ->
     )
 
     assert tuple(item.workload for item in summaries) == MEASUREMENT_RAW_WORKLOAD_ORDER
-    assert all(item.observed_graphs == 3 for item in summaries)
-    assert all(item.compute_operations == 158 for item in summaries)
-    assert all(item.cuda_operations == 158 for item in summaries)
+    assert tuple(item.observed_graphs for item in summaries) == (1, 3, 1)
+    assert tuple(item.compute_operations for item in summaries) == (108, 158, 108)
+    assert tuple(item.cuda_operations for item in summaries) == (108, 158, 108)
     assert all(item.cpu_operations == 0 for item in summaries)
     assert all(len(item.cuda_identities) == 8 for item in summaries)
     assert summaries[0].backend_audit_content_sha256 == audit_sha256
@@ -643,5 +653,12 @@ def test_placement_builder_replays_all_retained_logs_and_rejects_cpu_graphs() ->
         build_measurement_placement_summaries(
             _backend_audit(cpu_text_graph=True),
             backend_audit_content_sha256=_digest("cpu-audit"),
+            policy=_placement_policy(),
+        )
+
+    with pytest.raises(ValueError, match="workload scope"):
+        build_measurement_placement_summaries(
+            _backend_audit(swap_workload_scopes=True),
+            backend_audit_content_sha256=_digest("swapped-scope-audit"),
             policy=_placement_policy(),
         )

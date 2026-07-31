@@ -543,7 +543,9 @@ def test_artifact_load_parser_binds_the_runtime_subject_paths() -> None:
 
 
 def _identity_csv() -> str:
-    return "\n".join(f"{_uuid(index)}, NVIDIA B300, 274113, 590.44, 10.3" for index in range(8))
+    return "\n".join(
+        f"{_uuid(index)}, NVIDIA B300 SXM6 AC, 275040, 590.44, 10.3" for index in range(8)
+    )
 
 
 def test_eight_gpu_identity_monitor_and_capacity_inputs_are_exact() -> None:
@@ -565,7 +567,7 @@ def test_eight_gpu_identity_monitor_and_capacity_inputs_are_exact() -> None:
 
     capacity = build_matched_capacity_inputs(gpus)
     assert capacity.gpu_count == 8
-    assert capacity.observed_gpu_memory_bytes == (274_113 * 1024 * 1024,) * 8
+    assert capacity.observed_gpu_memory_bytes == (275_040 * 1024 * 1024,) * 8
     assert capacity.observed_total_gpu_memory_bytes == sum(capacity.observed_gpu_memory_bytes)
 
 
@@ -573,7 +575,8 @@ def test_eight_gpu_identity_monitor_and_capacity_inputs_are_exact() -> None:
     "payload",
     (
         "\n".join(_identity_csv().splitlines()[:7]),
-        _identity_csv().replace("NVIDIA B300", "NVIDIA H100", 1),
+        _identity_csv().replace("NVIDIA B300 SXM6 AC", "NVIDIA H100", 1),
+        _identity_csv().replace("275040", "274113", 1),
         _identity_csv().replace("10.3", "9.0", 1),
     ),
 )

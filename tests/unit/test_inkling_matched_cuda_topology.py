@@ -26,9 +26,11 @@ def _uuid(index: int) -> str:
 
 def _identity_csv(*, reverse: bool = False, replace_last: bool = False) -> str:
     indices = tuple(reversed(range(8))) if reverse else tuple(range(8))
-    rows = [f"{_uuid(index)}, NVIDIA B300, 274113, 590.44, 10.3" for index in indices]
+    rows = [f"{_uuid(index)}, NVIDIA B300 SXM6 AC, 275040, 590.44, 10.3" for index in indices]
     if replace_last:
-        rows[-1] = "GPU-ffffffff-ffff-ffff-ffff-ffffffffffff, NVIDIA B300, 274113, 590.44, 10.3"
+        rows[-1] = (
+            "GPU-ffffffff-ffff-ffff-ffff-ffffffffffff, NVIDIA B300 SXM6 AC, 275040, 590.44, 10.3"
+        )
     return "\n".join(rows)
 
 
