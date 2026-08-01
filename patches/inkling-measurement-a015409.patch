@@ -62,7 +62,7 @@
 -    nll2 /= count;
 -    nll /= count;
 +    auto measurement_failure = [&](const char * code) -> results_perplexity {
-+        LOG_ERR("IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=%s\n", code);
++        LOG("IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=%s\n", code);
 +        llama_batch_free(batch);
 +        return {tokens, -1, logit_history, prob_history};
 +    };
@@ -171,12 +171,12 @@
 +            if (token_nll_stream.fail()) {
 +                return measurement_failure("close_output");
 +            }
-+            LOG_INF("IQL_MEASUREMENT_TOKEN_NLL_V1 count=%d\n", count);
++            LOG("IQL_MEASUREMENT_TOKEN_NLL_V1 count=%d\n", count);
 +        }
 +
 -        nll2 = sqrt(nll2/(count-1));
 -        LOG_INF("Final estimate: PPL = %.4lf +/- %.5lf\n", ppl, nll2*ppl);
-+        LOG_INF("Final estimate: PPL = %.4lf +/- %.5lf\n", ppl, ppl_uncertainty);
++        LOG("Final estimate: PPL = %.4lf +/- %.5lf\n", ppl, ppl_uncertainty);
      } else {
          LOG_ERR("Unexpected negative standard deviation of log(prob)\n");
 +        llama_batch_free(batch);
@@ -199,7 +199,7 @@
      } else {
          results = perplexity(ctx, params, n_ctx);
 +        if (!std::isfinite(results.ppl_value) || results.ppl_value <= 0.0) {
-+            LOG_ERR("IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=measurement_failed\n");
++            LOG("IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=measurement_failed\n");
 +            result_code = 1;
 +        }
      }

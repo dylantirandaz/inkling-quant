@@ -1630,8 +1630,8 @@ class MeasurementRuntimeIdentity(_StrictControlModel):
             ),
             (
                 "patches/inkling-measurement-a015409.patch",
-                "2758f3dda9a6d954793705f750feb517193cf77545cc7f92c68ad44edd12c29f",
-                8660,
+                "3de1b72d8dc67350f2aaacc58cef62a49eeba38fce3f20cb8d8c7740548843bf",
+                8644,
             ),
         )
         observed_patches = tuple(

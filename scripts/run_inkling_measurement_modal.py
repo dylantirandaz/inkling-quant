@@ -1115,7 +1115,35 @@ measurement_image = (
         ),
         f"git -C {LLAMA_CPP_ROOT} apply --check {MEASUREMENT_PATCH_REMOTE}",
         f"git -C {LLAMA_CPP_ROOT} apply {MEASUREMENT_PATCH_REMOTE}",
-        (f"cmake --build {LLAMA_CPP_ROOT}/build --parallel 16 --target " + " ".join(BUILD_TARGETS)),
+        # common_init prefixes INFO/ERROR logs. Machine records use level-NONE LOG.
+        (
+            "python -c 'from pathlib import Path; "
+            'source=Path("/opt/llama.cpp/tools/perplexity/perplexity.cpp").read_text('
+            'encoding="utf-8"); '
+            'required=("LOG(\\\"IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=%s",'
+            '"LOG(\\\"IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=measurement_failed",'
+            '"LOG(\\\"IQL_MEASUREMENT_TOKEN_NLL_V1 count=%d",'
+            '"LOG(\\\"Final estimate: PPL = %.4lf +/- %.5lf"); '
+            'forbidden=("LOG_ERR(\\\"IQL_MEASUREMENT_PERPLEXITY_ERROR_V1",'
+            '"LOG_INF(\\\"IQL_MEASUREMENT_TOKEN_NLL_V1",'
+            '"LOG_INF(\\\"Final estimate: PPL = %.4lf +/- %.5lf"); '
+            "assert all(source.count(item)==1 for item in required) and "
+            "not any(item in source for item in forbidden), "
+            '"measurement protocol source is not exactly unprefixed"\''
+        ),
+        (
+            f"cmake --build {LLAMA_CPP_ROOT}/build --clean-first --parallel 16 --target "
+            + " ".join(BUILD_TARGETS)
+        ),
+        (
+            "python -c 'from pathlib import Path; "
+            'binary=Path("/opt/llama.cpp/build/bin/libllama-perplexity-impl.so").read_bytes(); '
+            'markers=(b"IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=%s",'
+            'b"IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=measurement_failed",'
+            'b"IQL_MEASUREMENT_TOKEN_NLL_V1 count=%d"); '
+            "assert all(marker in binary for marker in markers), "
+            '"patched perplexity DSO lacks the measurement protocol"\''
+        ),
         "unlink /opt/iql-cuda-driver-link/libcuda.so.1",
         "rmdir /opt/iql-cuda-driver-link",
         (f'test "$(git -C {LLAMA_CPP_ROOT} rev-parse HEAD)" = "{PINNED_LLAMA_CPP_COMMIT}"'),
