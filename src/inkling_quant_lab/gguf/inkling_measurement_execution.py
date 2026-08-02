@@ -311,6 +311,7 @@ def build_llama_bench_command(spec: LlamaBenchCommandSpec) -> tuple[str, ...]:
 
     return (
         PINNED_LLAMA_BENCH_BINARY,
+        "-v",
         "-m",
         spec.model_path,
         "-p",
@@ -386,6 +387,8 @@ def build_llama_perplexity_command(
 
     return (
         PINNED_LLAMA_PERPLEXITY_BINARY,
+        "--log-verbosity",
+        "4",
         "-m",
         spec.model_path,
         "-f",

@@ -173,7 +173,8 @@ def test_exact_command_builders_pin_all_gpu_execution_arguments() -> None:
         )
     )
 
-    assert bench[0] == PINNED_LLAMA_BENCH_BINARY
+    assert bench[:2] == (PINNED_LLAMA_BENCH_BINARY, "-v")
+    assert bench.count("-v") == 1
     assert bench[bench.index("-ngl") : bench.index("-ngl") + 2] == ("-ngl", "-2")
     assert bench[bench.index("-dev") : bench.index("-dev") + 2] == (
         "-dev",
@@ -185,7 +186,12 @@ def test_exact_command_builders_pin_all_gpu_execution_arguments() -> None:
     )
     assert "--no-host" in bench
 
-    assert perplexity[0] == PINNED_LLAMA_PERPLEXITY_BINARY
+    assert perplexity[:3] == (
+        PINNED_LLAMA_PERPLEXITY_BINARY,
+        "--log-verbosity",
+        "4",
+    )
+    assert perplexity.count("--log-verbosity") == 1
     assert perplexity[perplexity.index("-ngl") : perplexity.index("-ngl") + 2] == ("-ngl", "all")
     assert perplexity[perplexity.index("-dev") : perplexity.index("-dev") + 2] == (
         "-dev",
