@@ -47,8 +47,10 @@ CudaBackendIdentity: TypeAlias = tuple[StrictInt, StrictStr, StrictStr]
 
 _MAX_CUDA_GPU_COUNT: Final = 64
 _MAX_AUDIT_LOG_CHARACTERS: Final = 16 * 1024 * 1024
-_MAX_AUDIT_GRAPH_ROWS: Final = 1_024
-_MAX_AUDIT_IDENTITY_ROWS: Final = 8_192
+# The reviewed server protocol schedules more than 6,000 graphs. Keep every
+# graph and all eight matched-cell CUDA identities while retaining finite bounds.
+_MAX_AUDIT_GRAPH_ROWS: Final = 8_192
+_MAX_AUDIT_IDENTITY_ROWS: Final = 8 * _MAX_AUDIT_GRAPH_ROWS
 _MAX_AUDIT_CPU_ROWS: Final = 1_024
 _MAX_BACKEND_IDENTIFIER_CHARACTERS: Final = 64
 _MARKER_PREFIX: Final = "IQL_SMOKE_"

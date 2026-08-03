@@ -162,6 +162,36 @@ def _text_audit_log(
     )
 
 
+def _audit_log_above_legacy_limits(*, text_graph_count: int = 1_025) -> str:
+    text_blocks = (
+        line
+        for graph_uid in range(1, text_graph_count + 1)
+        for line in _graph_block(
+            graph_uid=graph_uid,
+            graph_owner="text",
+            backend_indices=tuple(range(GPU_COUNT)),
+            first_compute=1,
+        )
+    )
+    return "\n".join(
+        (
+            *text_blocks,
+            *_graph_block(
+                graph_uid=text_graph_count + 1,
+                graph_owner="vision",
+                backend_indices=(0,),
+                first_compute=20,
+            ),
+            *_graph_block(
+                graph_uid=text_graph_count + 2,
+                graph_owner="audio",
+                backend_indices=(0,),
+                first_compute=30,
+            ),
+        )
+    )
+
+
 def _replace_once(log_text: str, old: str, new: str) -> str:
     assert log_text.count(old) == 1
     return log_text.replace(old, new, 1)
@@ -315,6 +345,31 @@ def test_exact_cuda_backend_audit_accepts_the_eight_gpu_matched_cell() -> None:
     assert evidence.projector_graphs_cuda0_only is True
     assert evidence.all_compute_operations_accelerated is True
     assert evidence.no_cpu_model_graph_fallback is True
+
+
+def test_exact_cuda_backend_audit_accepts_all_rows_above_legacy_limits() -> None:
+    text_graph_count = 1_025
+    evidence = _parse(_audit_log_above_legacy_limits(text_graph_count=text_graph_count))
+
+    assert evidence.observed_graphs == text_graph_count + 2
+    assert len(evidence.identities) == text_graph_count * GPU_COUNT + 2
+    assert evidence.compute_operations == evidence.gpu_operations
+    assert evidence.cpu_operations == 0
+
+
+def test_exact_cuda_backend_audit_checks_forbidden_marker_after_legacy_limit() -> None:
+    text_graph_count = 1_025
+    cpu_marker = (
+        "IQL_SMOKE_CPU_NODE_V2 "
+        f"graph_uid={text_graph_count + 2} graph_owner=audio "
+        "backend_index=8 device_type=cpu ordinal=0 op=MUL_MAT "
+        "name_len=4 name_hex=6e6f6465"
+    )
+
+    with pytest.raises(ValueError, match="CPU model graph operation"):
+        _parse(
+            _audit_log_above_legacy_limits(text_graph_count=text_graph_count) + "\n" + cpu_marker
+        )
 
 
 def test_exact_text_cuda_backend_audit_accepts_one_full_cell_text_graph() -> None:
