@@ -103,7 +103,7 @@ def _bench_record(
         "use_mmap": True,
         "use_direct_io": False,
         "embeddings": False,
-        "no_op_offload": False,
+        "no_op_offload": 0,
         "no_host": True,
         "fit_target": 0,
         "fit_min_ctx": 0,
@@ -291,6 +291,14 @@ def test_llama_bench_parser_accepts_exact_three_record_output() -> None:
         (
             _bench_output(mutation_index=0, mutate={"backends": "CPU"}),
             "CUDA backend",
+        ),
+        (
+            _bench_output(mutation_index=0, mutate={"no_op_offload": False}),
+            "field no_op_offload",
+        ),
+        (
+            _bench_output(mutation_index=0, mutate={"no_op_offload": 1}),
+            "field no_op_offload",
         ),
         (
             _bench_output(mutation_index=0, mutate={"samples_ts": [999.0] * 5}),

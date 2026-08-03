@@ -714,7 +714,7 @@ def _require_bench_record_binding(
         "use_mmap": True,
         "use_direct_io": False,
         "embeddings": False,
-        "no_op_offload": False,
+        "no_op_offload": 0,
         "no_host": True,
         "fit_target": 0,
         "fit_min_ctx": 0,
