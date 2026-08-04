@@ -37,6 +37,7 @@ The workflow records this omission and does not hide it.
 
 The final verification checked the export structure, file set, sizes, and checksums.
 It did not measure the quality of the quantized Inkling model.
+The matched measurement below did this work later.
 
 An external immutable receipt records a controlled smoke-test pass for the final Q3 export.
 The test loaded all 49 text files and the BF16 projector.
@@ -51,7 +52,7 @@ and internal canonical seal
 The receipt did not capture the host CPU model.
 The repository therefore does not publish this observation as a supported compatibility cell.
 The observed pass applies only to the recorded model, files, runtime, software, and two B300 GPUs.
-It does not prove quality retention or deployment speed.
+That smoke pass does not prove quality retention or deployment speed.
 
 The project also records the retained 49-file BF16 control.
 The BF16 text files contain 1,894,278,547,552 bytes.
@@ -75,7 +76,7 @@ The validator requires one text graph to use CUDA0 through CUDA7.
 It requires each vision and audio graph to use CUDA0 only.
 It rejects CPU model graph work and unexpected CUDA identities.
 CPU-only unit tests cover the validator.
-The repository has not run the matched cell.
+The repository has not run this separate matched smoke-test cell.
 The runner and its unit tests do not prove that Inkling can run on eight GPUs.
 A valid immutable rollup receipt from the confirmed run is the required evidence.
 
@@ -85,9 +86,37 @@ It compares the exact BF16 and Q3 subjects with the same runtime, hardware, data
 prompts, tokenization, and decoding settings.
 It measures token negative log-likelihood, perplexity, diagnostic accuracy, load time, latency,
 throughput, memory, GPU use, and file size.
-This plan has not run.
-No quality-retention or speed result exists until the confirmed Modal run publishes
-a valid immutable receipt.
+
+The confirmed measurement completed on eight NVIDIA B300 GPUs.
+The [immutable terminal receipt](docs/experiments/inkling-q3-k-m-measurement-8xb300.json)
+contains the full recorded result and the exact experiment scope.
+The Git file is byte-for-byte equal to the downloaded receipt.
+Its file SHA-256 is
+`c2350ba71c5211e404d4b3701118496f1321ce8ab7e9af37d00a91048190dc6d`.
+Its domain-separated content SHA-256 is
+`ea11084d2cb80b5d97cc9c4412dfbf73be361ac5d9824439cbf39d63cde7f4b3`.
+
+| Measure | BF16 | Q3 | Result |
+|---|---:|---:|---|
+| Mean token NLL | 1.225250 | 1.324502 | Q3 delta was 0.099252. The limit was less than 0.1. |
+| Perplexity | 3.4050 | 3.7603 | Recorded for the same 16,320 paired token positions. |
+| Diagnostic accuracy | 5 of 64 | 7 of 64 | The Q3 comparison gate passed. The BF16 absolute floor failed. |
+| Text file size | 1,894,278,547,552 bytes | 451,035,400,288 bytes | Q3 used 23.81% of the BF16 bytes. |
+| Cold readiness median | 1,309.68 seconds | 127.34 seconds | Three trials per subject. This used file-level cache advice, not a global cache flush. |
+| `llama-bench` generation | 21.083 tokens/s | 24.845 tokens/s | Q3 was 1.178 times faster for the `tg128` case. |
+| `llama-bench` prompt processing | 697.788 tokens/s | 199.327 tokens/s | Q3 was slower for the `pp512` case. |
+
+The Q3-versus-BF16 NLL and accuracy comparison gates passed.
+The final quality-retention result is false because the BF16 control failed the required
+absolute accuracy floors.
+This diagnostic set therefore cannot support a quality-retention claim.
+Q3 decode speed was higher, but prompt processing and time to first token were slower.
+The receipt supports only the recorded metric-specific comparisons.
+It does not support a general speedup or a single-run causation claim.
+
+The receipt binds three lower-level subject and comparison records by content hash and size.
+Those records remain in Modal storage and are not yet copied into this repository.
+The receipt records no prompt text or model output text.
 
 The Git repository does not contain the model files.
 The files are too large for Git, and the project does not upload model weights by default.
@@ -262,6 +291,7 @@ These tracked files define the workflow:
 - [Matched measurement configuration](configs/experiments/inkling_q3_k_m_measurement_modal.yaml)
 - [Matched measurement Modal manager](scripts/manage_inkling_measurement_modal.py)
 - [Matched measurement Modal runner](scripts/run_inkling_measurement_modal.py)
+- [Matched measurement result](docs/experiments/inkling-q3-k-m-measurement-8xb300.json)
 
 ## Configuration
 
@@ -375,12 +405,15 @@ The main paths are:
 ## Limits
 
 The final Inkling export does not include MTP tensors.
-The project has not measured final Inkling quality or inference speed.
+The completed measurement applies only to the exact recorded model, runtime, software,
+hardware, data, and protocol.
+It did not pass the final quality-retention gate because the BF16 control failed the
+absolute accuracy floors.
 Most hardware-specific backends support only the tested model and software matrix.
 The CPU reference quantizers prove behavior and file contracts, not deployment performance.
 
-Read each machine-readable experiment record before you use its result.
-Do not apply a result to a different model, dataset, runtime, or hardware system.
+Read the machine-readable record before use.
+Do not apply a result to a different model, dataset, runtime, software, hardware, or protocol.
 
 ## License
 
