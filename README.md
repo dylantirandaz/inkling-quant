@@ -114,9 +114,15 @@ Q3 decode speed was higher, but prompt processing and time to first token were s
 The receipt supports only the recorded metric-specific comparisons.
 It does not support a general speedup or a single-run causation claim.
 
-The receipt binds three lower-level subject and comparison records by content hash and size.
-Those records remain in Modal storage and are not yet copied into this repository.
-The receipt records no prompt text or model output text.
+The receipt binds these compact records by content hash and size:
+
+- [BF16 subject record](docs/experiments/runs/inkling-measurement-86b4d430-f8a46be54642-7a833315da67/records/bf16_subject/3a14421eedd37578895a63a7dc9b5a7d30b8ab9eaecd19e46680b26c747799f1.json)
+- [Q3 subject record](docs/experiments/runs/inkling-measurement-86b4d430-f8a46be54642-7a833315da67/records/q3_subject/7187e91deefb3aa5c77930d37a32b5f6c0ccf5fd639bc6f0047fa0e9755a8521.json)
+- [Comparison record](docs/experiments/runs/inkling-measurement-86b4d430-f8a46be54642-7a833315da67/records/comparison/382ddedbc75886a31e7ac1b10c98d102e64b1b525cf8bcad8ba0028575cc5a1f.json)
+
+The raw evidence stays unchanged on the Modal volume.
+It is not stored in Git history.
+The records contain no prompt text or model output text.
 
 The Git repository does not contain the model files.
 The files are too large for Git, and the project does not upload model weights by default.
