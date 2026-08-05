@@ -1,0 +1,248 @@
+schema_version: inkling-bf16-interface-diagnostic-config-v1
+model_id: thinkingmachines/Inkling
+revision: 86b4d430ab871652a707666b89203a866888c5e5
+architecture: InklingForConditionalGeneration
+
+bf16_subject_reference:
+  path: configs/experiments/inkling_bf16_subject_reference.json
+  sha256: 1aa0fc8be7c1a5f6eb4ea480684a660ce443e0830c05668b141d5b88e5a762ff
+  size_bytes: 10234
+  reference_sha256: 3615928f79ae24cdeee9164ac2c4dc3e3ba1999bde74c5b0d631e3aae4f1a53d
+source_adoption_reference:
+  path: configs/experiments/inkling_q3_k_m_source_adoption.json
+  sha256: c156c4d772a8b0a039af97c83971d4042975ea4bec8b2ae57e52cef267e21187
+  size_bytes: 4959
+  reference_sha256: 4d808b2fcd1c8a0398c6aa15371b6522d6cfb276fe0df395ca9a8beb2293f146
+diagnostic_dataset:
+  path: configs/experiments/inkling_quality_diagnostic_v1.jsonl
+  sha256: 1c42a23121c2b20aee9845617c37a59410532e69442f9f214ac110b9562538e0
+  size_bytes: 29273
+
+source_assets:
+  config:
+    path: /source/snapshot/config.json
+    sha256: 58720f145bcecef9a7ab2b419ab346e7c634af8d2f3e7362e900d00f789ea46c
+    size_bytes: 2415
+  chat_template:
+    path: /source/snapshot/chat_template.jinja
+    sha256: 0aa1aa0c729d90176dcaa00c440c8faffca2957ffb2cc4b79456ee6d02bcf43b
+    size_bytes: 6294
+  tokenizer_json:
+    path: /source/snapshot/tokenizer.json
+    sha256: 9fb6333a7db8fe5da90728e741e4a3ee4ac2ae12c5dd4958cc6f31688787d3c2
+    size_bytes: 27875797
+  tokenizer_config:
+    path: /source/snapshot/tokenizer_config.json
+    sha256: 2e36c9748a2081abb935b2e745ee22e82efa32589c2500df7e5bc0f93145cd77
+    size_bytes: 12111
+  eos_token_id: 200006
+  comparison_token_id: 199999
+  eos_special_token: <|content_model_end_sampling|>
+  comparison_special_token: <|endoftext|>
+
+runtime:
+  repository: https://github.com/danielhanchen/llama.cpp.git
+  commit: a015409e6c27b84f60d688823d4c0126a11571fd
+  instrumentation_schema_version: inkling-llama-smoke-instrumentation-v5
+  instrumentation_patch_path: patches/inkling-smoke-a015409.patch
+  instrumentation_patch_sha256: 005f1f342511fc3fc843bdcc7be814ed8a60e67033b733eb7e7e4af53925be04
+  cuda_image: nvidia/cuda:13.1.2-devel-ubuntu24.04
+  cuda_image_digest: sha256:952e42d23230610a2714c8484f38e9c934ed68e6f9c9c7fac62dcd5f98858a6e
+  platform: linux/amd64
+  binaries:
+    - name: llama-cli
+      path: /opt/llama.cpp/build/bin/llama-cli
+      sha256: 098d8b9c6e57f25b846c5b5b43ded5bb1194cbb3d1ce985f17bbd09c87a82dbc
+      size_bytes: 1246680
+    - name: llama-server
+      path: /opt/llama.cpp/build/bin/llama-server
+      sha256: e960cfe4dcb2f7e541fc0b15bf97a4c1f6feb5fc304267796ef2bdd004cd1b93
+      size_bytes: 17920
+    - name: llama-bench
+      path: /opt/llama.cpp/build/bin/llama-bench
+      sha256: e0844ac337c419ebd8b6cee4902ba13e210a067d6fe47cb652429c71ae97382b
+      size_bytes: 17920
+    - name: llama-perplexity
+      path: /opt/llama.cpp/build/bin/llama-perplexity
+      sha256: d04051888a157ee50a7d6286cffcc78da3a9ca5295c79aa99ea2d92672ebf733
+      size_bytes: 15968
+  cmake_definitions:
+    - GGML_CUDA=ON
+    - GGML_NATIVE=OFF
+    - LLAMA_CURL=OFF
+    - LLAMA_BUILD_UI=OFF
+    - LLAMA_USE_PREBUILT_UI=OFF
+    - CMAKE_CUDA_ARCHITECTURES=103
+    - CMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,/opt/iql-cuda-driver-link
+  server_endpoint: /completion
+  log_verbosity: 4
+  context_size: 8192
+  tensor_split: [1, 1, 1, 1, 1, 1, 1, 1]
+  split_mode: layer
+  gpu_layers: all
+  no_cpu_fallback: true
+  network_access: false
+  trust_remote_code: false
+
+runtime_measurement_patch:
+  path: patches/inkling-measurement-a015409.patch
+  sha256: 3de1b72d8dc67350f2aaacc58cef62a49eeba38fce3f20cb8d8c7740548843bf
+  size_bytes: 8644
+runtime_measurement_patch_apply_after: runtime.instrumentation_patch
+runtime_binary_identity_policy: rebuild_after_patches_then_hash_and_record
+
+protocol:
+  item_ids: [text_01, text_02, text_03, text_04]
+  cells:
+    - name: raw_original
+      prompt_mode: raw
+      cap_mode: original
+      max_new_tokens_override: null
+      reasoning_effort: none
+    - name: raw_64
+      prompt_mode: raw
+      cap_mode: fixed_64
+      max_new_tokens_override: 64
+      reasoning_effort: none
+    - name: chat_original
+      prompt_mode: chat_template
+      cap_mode: original
+      max_new_tokens_override: null
+      reasoning_effort: none
+    - name: chat_64
+      prompt_mode: chat_template
+      cap_mode: fixed_64
+      max_new_tokens_override: 64
+      reasoning_effort: none
+  request_order: cell_major_then_item_order
+  request_count: 16
+  requests_sequential: true
+  one_server_load: true
+  server_endpoint: /completion
+  apply_template_endpoint: /apply-template
+  tokenize_endpoint: /tokenize
+  properties_endpoint: /props
+  raw_instruction: Answer the task directly and emit only the response form requested by the task.
+  raw_prompt_protocol: instruction_then_lf_then_item_prompt
+  chat_template_protocol: system_reasoning_effort_none_then_user_then_generation_prompt
+  tokenize_add_special: false
+  tokenize_parse_special: true
+  temperature: -1.0
+  seed: 42
+  cache_prompt: false
+  stream: false
+  return_tokens: true
+  ignore_eos: false
+  stop: []
+  timings_per_token: true
+  score_whole_output: true
+  score_extracted_content_text: true
+  final_extraction_protocol: last_content_text_segment_before_content_model_end_sampling_or_end
+  source_config_eos_must_equal: 200006
+  runtime_eog_classification_required: true
+  forced_eog_probe_required: true
+  forced_comparison_token_probe_required: true
+
+placement:
+  backend: CUDA
+  logical_devices: cuda:0,cuda:1,cuda:2,cuda:3,cuda:4,cuda:5,cuda:6,cuda:7
+  gpu_layers: all
+  cpu_moe_layers: 0
+  split_mode: layer
+  tensor_split: [1, 1, 1, 1, 1, 1, 1, 1]
+  flash_attention: "on"
+  mmap: true
+  fit: "off"
+  cpu_fallback: false
+
+resources:
+  provider: modal
+  gpu_type: B300
+  gpu_count: 8
+  compute_capability: "10.3"
+  cpu_cores: 16
+  memory_gib: 64
+  ephemeral_disk_mib: 2097152
+  startup_timeout_seconds: 1800
+  function_timeout_seconds: 86400
+  max_containers: 1
+  max_attempts: 1
+  network_access: false
+  cpu_fallback_allowed: false
+
+storage:
+  bf16_volume: inkling-work-v1
+  bf16_volume_version: 1
+  bf16_run_subpath: runs/inkling-q3km-86b4d430-a015409e-ffd466dd93-8083cf41e1
+  bf16_mount_path: /baseline
+  bf16_read_only: true
+  bf16_create_if_missing: false
+  source_volume: inkling-source-v1
+  source_volume_version: 1
+  source_run_subpath: runs/inkling-q3km-86b4d430-a015409e-551ab8f240-bcc168525e
+  source_snapshot_subpath: snapshot
+  source_mount_path: /source
+  source_read_only: true
+  source_create_if_missing: false
+  evidence_volume: inkling-measurement-evidence-v1
+  evidence_volume_version: 1
+  evidence_mount_path: /evidence
+  evidence_read_only: false
+  evidence_create_if_missing: true
+  evidence_append_only_after_terminal: true
+  attempt_registry: inkling-measurement-attempt-registry-v1
+  attempt_registry_append_only: true
+
+execution:
+  remote_execution_policy: fresh_content_addressed_confirmation_required
+  remote_execution_default_enabled: false
+  confirmation_reuse_allowed: false
+  network_access: false
+  subject: bf16
+  subject_staging: verified_ephemeral_copy
+  subject_staging_root: /cache/inkling-bf16-interface-diagnostic
+  subject_staging_headroom_mib: 131072
+  rehash_during_verified_staging_copy: true
+  release_staged_subject: true
+  partial_success_allowed: false
+  planned_stages:
+    - verify_references
+    - verify_cuda_preflight
+    - stage_and_rehash_bf16
+    - bf16_interface_diagnostic
+    - verify_gpu_placement
+    - release_bf16
+    - publish
+
+evidence:
+  record_prompt_text: false
+  record_output_text: false
+  private_raw_record_token_ids: true
+  compact_receipt_token_ids: false
+  record_item_scores: true
+  record_stop_and_cap_fields: true
+  record_artifact_hashes: true
+  record_runtime_identity_hash: true
+  record_hardware_identity_hash: true
+  record_command_hash: true
+  record_server_timings: true
+  record_exact_command: true
+  record_resource_sample_summary: true
+  record_server_log_hash_and_size_only: true
+  immutable_after_terminal: true
+
+claims:
+  diagnostic_only: true
+  compatibility_scope: single_exact_matrix_cell
+  quality_retention_claim_allowed: false
+  quality_claim_allowed: false
+  speedup_claim_allowed: false
+  performance_claim_allowed: false
+  mtp_included: false
+  mtp_supported: false
+  routing_drift_supported: false
+  single_run_causation_claim_allowed: false
+  scope_warning: >-
+    This is a BF16 prompt-interface diagnostic, not a quality-retention or performance comparison.
+    Read the machine-readable record before use and do not apply it to a different model, runtime,
+    hardware, or protocol.

@@ -1,8 +1,9 @@
-"""Run one reviewed, matched BF16-versus-Q3 Inkling measurement on Modal.
+"""Run one reviewed Inkling measurement data path on Modal.
 
-This is the paid GPU data plane.  It is deployed and called only by
-``manage_inkling_measurement_modal.py``.  Both subjects run sequentially on the
-same eight-B300 allocation.  No model computation has a CPU substitute.
+This is the paid GPU data plane.  It is deployed and called only by the
+matching reviewed measurement or diagnostic manager.  The deployment mode
+exposes either the matched BF16-versus-Q3 measurement or the isolated BF16
+prompt-interface diagnostic.  No model computation has a CPU substitute.
 """
 
 from __future__ import annotations
@@ -40,10 +41,14 @@ LOCAL_PROJECT_ROOT: Final = Path(__file__).resolve().parents[1]
 LOCAL_SRC_ROOT: Final = LOCAL_PROJECT_ROOT / "src"
 REMOTE_PROJECT_ROOT: Final = Path("/root/iql_project")
 REMOTE_PROVENANCE_PATH: Final = Path("/root/iql-measurement-control-provenance.json")
+REMOTE_DIAGNOSTIC_PROVENANCE_PATH: Final = Path(
+    "/root/iql-bf16-interface-diagnostic-control-provenance.json"
+)
 LLAMA_CPP_ROOT: Final = Path("/opt/llama.cpp")
 BUILD_BIN_ROOT: Final = LLAMA_CPP_ROOT / "build/bin"
 EVIDENCE_ROOT: Final = Path("/evidence")
 SUBJECT_STAGING_ROOT: Final = Path("/cache/inkling-measurement-subject")
+DIAGNOSTIC_STAGING_ROOT: Final = Path("/cache/inkling-bf16-interface-diagnostic")
 SUBJECT_STAGING_HEADROOM_BYTES: Final = 128 * 1024 * 1024 * 1024
 BASE_PATCH_REMOTE: Final = REMOTE_PROJECT_ROOT / "patches/inkling-smoke-a015409.patch"
 MEASUREMENT_PATCH_REMOTE: Final = REMOTE_PROJECT_ROOT / "patches/inkling-measurement-a015409.patch"
@@ -104,6 +109,11 @@ SERVER_READY_TIMEOUT_SECONDS: Final = 3_600.0
 REQUEST_TIMEOUT_SECONDS: Final = 900.0
 MAX_HTTP_BYTES: Final = 32 * 1024 * 1024
 MAX_LOG_BYTES: Final = 128 * 1024 * 1024
+DIAGNOSTIC_SERVER_PORT: Final = 19_183
+DIAGNOSTIC_FORCED_LOGIT_BIAS: Final = 1_000_000_000.0
+DIAGNOSTIC_CONTENT_TEXT_MARKER: Final = "<|content_text|>"
+DIAGNOSTIC_END_MESSAGE_MARKER: Final = "<|end_message|>"
+DIAGNOSTIC_END_SAMPLING_MARKER: Final = "<|content_model_end_sampling|>"
 RUN_ID_RE: Final = re.compile(r"^[a-z0-9][a-z0-9._-]{0,95}$")
 SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
 CUDA_RUNTIME_SONAME_RE: Final = re.compile(r"^libcudart\.so(?:\.[0-9]+)*$")
@@ -116,7 +126,57 @@ CUDA_RUNTIME_PREFLIGHT_CHILD_MAX_OUTPUT_BYTES: Final = 1024 * 1024
 if str(LOCAL_SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(LOCAL_SRC_ROOT))
 
+from inkling_quant_lab.gguf.inkling_bf16_interface_diagnostic import (  # noqa: E402
+    DIAGNOSTIC_ATTEMPT_REGISTRY_NAME,
+    DIAGNOSTIC_COMPARISON_TOKEN_ID,
+    DIAGNOSTIC_CONTROL_RECORD_MAX_BYTES,
+    DIAGNOSTIC_EOS_TOKEN_ID,
+    DIAGNOSTIC_FUNCTION_NAME,
+    DIAGNOSTIC_PLANNED_STAGES,
+    DiagnosticAttemptClaim,
+    DiagnosticControlPlaneProvenance,
+    DiagnosticEogEvidence,
+    DiagnosticEogTokenProbe,
+    DiagnosticFailureTerminalReceipt,
+    DiagnosticLaunchIntent,
+    DiagnosticPostSpawnAcceptance,
+    DiagnosticPrivateRawEvidence,
+    DiagnosticPrivateRawReference,
+    DiagnosticPrivateTrial,
+    DiagnosticStageName,
+    DiagnosticSuccessTerminalReceipt,
+    DiagnosticTerminalReceiptReference,
+    InklingBF16InterfaceDiagnosticBundle,
+    build_diagnostic_attempt_claim,
+    build_diagnostic_post_spawn_acceptance,
+    build_diagnostic_private_raw_reference,
+    build_diagnostic_rollup,
+    build_diagnostic_server_command,
+    build_diagnostic_terminal_receipt_reference,
+    canonical_diagnostic_json_bytes,
+    claim_diagnostic_attempt,
+    diagnostic_app_name,
+    diagnostic_attempt_claim_path,
+    diagnostic_launch_intent_path,
+    diagnostic_post_spawn_acceptance_path,
+    diagnostic_protocol_sha256,
+    diagnostic_rollup_sha256,
+    diagnostic_runtime_identity_sha256,
+    diagnostic_workload_sha256,
+    load_bf16_interface_diagnostic_bundle,
+    parse_diagnostic_private_raw_evidence,
+    parse_diagnostic_terminal_receipt,
+    strict_diagnostic_json_object,
+    validate_diagnostic_attempt_claim,
+    validate_diagnostic_control_plane_provenance,
+    validate_diagnostic_launch_intent,
+    validate_diagnostic_post_spawn_acceptance,
+    validate_diagnostic_private_raw_reference,
+    validate_diagnostic_private_trials,
+    validate_diagnostic_terminal_receipt_reference,
+)
 from inkling_quant_lab.gguf.inkling_matched_execution import (  # noqa: E402
+    ExactCudaPlacementPolicy,
     build_matched_cuda_placement_policy,
     build_matched_server_environment,
     enumerate_matched_cuda_peer_topology,
@@ -200,6 +260,7 @@ from inkling_quant_lab.gguf.inkling_measurement_evidence import (  # noqa: E402
     validate_measurement_raw_blob_reference,
 )
 from inkling_quant_lab.gguf.inkling_measurement_execution import (  # noqa: E402
+    DiagnosticScoreEvidence,
     LlamaBenchCommandSpec,
     LlamaPerplexityCommandSpec,
     LlamaServerCommandSpec,
@@ -218,11 +279,13 @@ from inkling_quant_lab.gguf.inkling_measurement_raw_evidence import (  # noqa: E
     MeasurementAttemptBindings,
     MeasurementBackendAuditEvidence,
     MeasurementCudaRuntimePreflight,
+    MeasurementDiagnosticTimings,
     MeasurementHardwareIdentity,
     MeasurementLlamaBenchTrials,
     MeasurementPairingProjectionHashes,
     MeasurementPerplexityTrial,
     MeasurementRawTrialsEvidence,
+    MeasurementResourceSampleSummary,
     MeasurementServerTrials,
     MeasurementSubjectPerformanceSummary,
     MeasurementSubjectQualitySummary,
@@ -239,8 +302,11 @@ from inkling_quant_lab.gguf.inkling_measurement_raw_evidence import (  # noqa: E
     validate_pairing_projection_hashes,
 )
 from inkling_quant_lab.gguf.inkling_smoke import (  # noqa: E402
+    BackendCpuPlacementError,
+    TextArtifactLoadEvidence,
     parse_artifact_load_evidence,
     parse_loader_offload_evidence,
+    parse_text_artifact_load_evidence,
 )
 
 SERVER_AUDIT_ENVIRONMENT: Final = {
@@ -248,6 +314,9 @@ SERVER_AUDIT_ENVIRONMENT: Final = {
     # patch.  They enable placement evidence; this runner is not a smoke path.
     "IQL_SMOKE_BACKEND_AUDIT": "1",
     "LLAMA_MEDIA_MARKER": MEASUREMENT_MEDIA_MARKER,
+}
+DIAGNOSTIC_SERVER_AUDIT_ENVIRONMENT: Final = {
+    "IQL_SMOKE_BACKEND_AUDIT": "1",
 }
 
 
@@ -264,6 +333,15 @@ class _FileHash:
 class InvocationBinding:
     intent: MeasurementLaunchIntent
     acceptance: MeasurementPostSpawnAcceptance
+    claim_sha256: str
+    call_id: str
+
+
+@dataclass(frozen=True)
+class DiagnosticInvocationBinding:
+    intent: DiagnosticLaunchIntent
+    acceptance: DiagnosticPostSpawnAcceptance
+    claim: DiagnosticAttemptClaim
     claim_sha256: str
     call_id: str
 
@@ -303,6 +381,60 @@ class SubjectSpec:
     shard_paths: tuple[str, ...]
     projector_path: str
     artifacts: tuple[tuple[str, str, int], ...]
+
+
+@dataclass(frozen=True)
+class DiagnosticSubjectSpec:
+    model_path: str
+    shard_paths: tuple[str, ...]
+    artifacts: tuple[tuple[str, str, int], ...]
+
+
+@dataclass(frozen=True)
+class DiagnosticSourceEvidence:
+    source_config_sha256: str
+    asset_manifest_sha256: str
+    official_chat_template: str
+
+
+@dataclass(frozen=True)
+class DiagnosticCompletionResult:
+    content: str
+    tokens: tuple[int, ...]
+    tokens_evaluated: int
+    tokens_predicted: int
+    stop: bool
+    stop_type: Literal["eos", "limit"]
+    truncated: bool
+    response_sha256: str
+    duration_seconds: float
+    timings: MeasurementDiagnosticTimings
+
+
+@dataclass(frozen=True)
+class DiagnosticServerResult:
+    trials: tuple[DiagnosticPrivateTrial, ...]
+    eog: DiagnosticEogEvidence
+    text_artifact_load: TextArtifactLoadEvidence
+    command: tuple[str, ...]
+    command_sha256: str
+    server_log_sha256: str
+    server_log_size_bytes: int
+    server_log_text: str
+    server_process_id: int
+    resource_sample_summary: MeasurementResourceSampleSummary
+    started_at_utc: str
+    completed_at_utc: str
+
+
+@dataclass
+class DiagnosticServerProcess:
+    process: subprocess.Popen[bytes]
+    command: tuple[str, ...]
+    log_path: Path
+    started_at_utc: str
+    started_monotonic: float
+    monitor: ResourceMonitor
 
 
 @dataclass
@@ -940,7 +1072,7 @@ def _validate_supporting_reference(
     validate_measurement_supporting_record_reference(payload, expected=reference)
 
 
-def _load_local_deployment() -> tuple[InklingMeasurementBundle, str, Path]:
+def _load_local_measurement_deployment() -> tuple[InklingMeasurementBundle, str, Path]:
     bundle = load_measurement_bundle(LOCAL_PROJECT_ROOT)
     control_sha = os.environ.get("IQL_MEASUREMENT_CONTROL_PLANE_SHA256")
     provenance_text = os.environ.get("IQL_MEASUREMENT_CONTROL_PLANE_PROVENANCE_PATH")
@@ -974,48 +1106,159 @@ def _load_local_deployment() -> tuple[InklingMeasurementBundle, str, Path]:
     return bundle, control_sha, provenance_path
 
 
-if modal.is_local():
-    _LOCAL_BUNDLE, _CONTROL_SHA256, _LOCAL_PROVENANCE = _load_local_deployment()
-else:
-    _LOCAL_BUNDLE = load_measurement_bundle(REMOTE_PROJECT_ROOT)
-    _CONTROL_SHA256 = os.environ["IQL_MEASUREMENT_CONTROL_PLANE_SHA256"]
-    _LOCAL_PROVENANCE = REMOTE_PROVENANCE_PATH
+def _load_local_diagnostic_deployment() -> tuple[
+    InklingBF16InterfaceDiagnosticBundle,
+    str,
+    Path,
+]:
+    bundle = load_bf16_interface_diagnostic_bundle(LOCAL_PROJECT_ROOT)
+    control_sha = os.environ.get("IQL_BF16_DIAGNOSTIC_CONTROL_PLANE_SHA256")
+    provenance_text = os.environ.get("IQL_BF16_DIAGNOSTIC_CONTROL_PLANE_PROVENANCE_PATH")
+    if (
+        not isinstance(control_sha, str)
+        or SHA256_RE.fullmatch(control_sha) is None
+        or not provenance_text
+    ):
+        raise RuntimeError(
+            "deploy this paid runner diagnostic only through "
+            "manage_inkling_bf16_interface_diagnostic_modal.py"
+        )
+    provenance_path = Path(provenance_text)
+    payload = provenance_path.read_bytes()
+    strict_diagnostic_json_object(
+        payload,
+        maximum_bytes=DIAGNOSTIC_CONTROL_RECORD_MAX_BYTES,
+    )
+    provenance = DiagnosticControlPlaneProvenance.model_validate_json(
+        payload,
+        strict=True,
+    )
+    if payload != provenance.canonical_bytes():
+        raise RuntimeError("local diagnostic provenance is not canonical")
+    files = {item.path: (LOCAL_PROJECT_ROOT / item.path).read_bytes() for item in provenance.files}
+    observed = validate_diagnostic_control_plane_provenance(
+        payload,
+        reviewed_commit_sha=provenance.reviewed_commit_sha,
+        reviewed_tree_sha=provenance.reviewed_tree_sha,
+        files=files,
+        required_paths=tuple(item.path for item in provenance.files),
+    )
+    if observed.control_plane_sha256 != control_sha:
+        raise RuntimeError("local diagnostic control-plane identity drifted")
+    return bundle, control_sha, provenance_path
 
-app = modal.App(measurement_app_name(_CONTROL_SHA256))
+
+_MEASUREMENT_CONTROL_SHA = os.environ.get("IQL_MEASUREMENT_CONTROL_PLANE_SHA256")
+_DIAGNOSTIC_CONTROL_SHA = os.environ.get("IQL_BF16_DIAGNOSTIC_CONTROL_PLANE_SHA256")
+if bool(_MEASUREMENT_CONTROL_SHA) == bool(_DIAGNOSTIC_CONTROL_SHA):
+    raise RuntimeError("select exactly one paid runner deployment mode")
+_DIAGNOSTIC_MODE: Final = bool(_DIAGNOSTIC_CONTROL_SHA)
+
+_LOCAL_BUNDLE: InklingMeasurementBundle | None
+_LOCAL_DIAGNOSTIC_BUNDLE: InklingBF16InterfaceDiagnosticBundle | None
+_CONTROL_SHA256: str
+_LOCAL_PROVENANCE: Path
+
+if modal.is_local():
+    if _DIAGNOSTIC_MODE:
+        (
+            _LOCAL_DIAGNOSTIC_BUNDLE,
+            _CONTROL_SHA256,
+            _LOCAL_PROVENANCE,
+        ) = _load_local_diagnostic_deployment()
+        _LOCAL_BUNDLE = None
+    else:
+        _LOCAL_BUNDLE, _CONTROL_SHA256, _LOCAL_PROVENANCE = _load_local_measurement_deployment()
+        _LOCAL_DIAGNOSTIC_BUNDLE = None
+else:
+    if _DIAGNOSTIC_MODE:
+        _LOCAL_DIAGNOSTIC_BUNDLE = load_bf16_interface_diagnostic_bundle(REMOTE_PROJECT_ROOT)
+        _LOCAL_BUNDLE = None
+        _CONTROL_SHA256 = os.environ["IQL_BF16_DIAGNOSTIC_CONTROL_PLANE_SHA256"]
+        _LOCAL_PROVENANCE = REMOTE_DIAGNOSTIC_PROVENANCE_PATH
+    else:
+        _LOCAL_BUNDLE = load_measurement_bundle(REMOTE_PROJECT_ROOT)
+        _LOCAL_DIAGNOSTIC_BUNDLE = None
+        _CONTROL_SHA256 = os.environ["IQL_MEASUREMENT_CONTROL_PLANE_SHA256"]
+        _LOCAL_PROVENANCE = REMOTE_PROVENANCE_PATH
+
+app = modal.App(
+    diagnostic_app_name(_CONTROL_SHA256)
+    if _DIAGNOSTIC_MODE
+    else measurement_app_name(_CONTROL_SHA256)
+)
+
+_evidence_create_if_missing: bool
+if _LOCAL_DIAGNOSTIC_BUNDLE is not None:
+    _storage = _LOCAL_DIAGNOSTIC_BUNDLE.config.storage
+    _bf16_volume_name = _storage.bf16_volume
+    _bf16_volume_version = _storage.bf16_volume_version
+    _bf16_run_subpath = _storage.bf16_run_subpath
+    _source_volume_name = _storage.source_volume
+    _source_volume_version = _storage.source_volume_version
+    _source_run_subpath = _storage.source_run_subpath
+    _evidence_volume_name = _storage.evidence_volume
+    _evidence_volume_version = _storage.evidence_volume_version
+    _evidence_create_if_missing = _storage.evidence_create_if_missing
+    final_volume: modal.Volume | None = None
+elif _LOCAL_BUNDLE is not None:
+    _matched_storage = _LOCAL_BUNDLE.matched.config.storage
+    _bf16_volume_name = _matched_storage.bf16_volume
+    _bf16_volume_version = _matched_storage.bf16_volume_version
+    _bf16_run_subpath = _matched_storage.bf16_run_subpath
+    _source_volume_name = _matched_storage.source_volume
+    _source_volume_version = _matched_storage.source_volume_version
+    _source_run_subpath = _matched_storage.source_run_subpath
+    _evidence_volume_name = _LOCAL_BUNDLE.config.storage.evidence_volume
+    _evidence_volume_version = _LOCAL_BUNDLE.config.storage.evidence_volume_version
+    _evidence_create_if_missing = False
+    final_volume = modal.Volume.from_name(
+        _matched_storage.final_volume,
+        environment_name="inkling-quant",
+        create_if_missing=False,
+        version=_matched_storage.final_volume_version,
+    ).with_mount_options(
+        sub_path=_matched_storage.final_run_subpath,
+        read_only=True,
+    )
+else:
+    raise RuntimeError("paid runner deployment lacks its validated bundle")
 
 baseline_volume = modal.Volume.from_name(
-    _LOCAL_BUNDLE.matched.config.storage.bf16_volume,
+    _bf16_volume_name,
     environment_name="inkling-quant",
     create_if_missing=False,
-    version=_LOCAL_BUNDLE.matched.config.storage.bf16_volume_version,
+    version=_bf16_volume_version,
 ).with_mount_options(
-    sub_path=_LOCAL_BUNDLE.matched.config.storage.bf16_run_subpath,
-    read_only=True,
-)
-final_volume = modal.Volume.from_name(
-    _LOCAL_BUNDLE.matched.config.storage.final_volume,
-    environment_name="inkling-quant",
-    create_if_missing=False,
-    version=_LOCAL_BUNDLE.matched.config.storage.final_volume_version,
-).with_mount_options(
-    sub_path=_LOCAL_BUNDLE.matched.config.storage.final_run_subpath,
+    sub_path=_bf16_run_subpath,
     read_only=True,
 )
 source_volume = modal.Volume.from_name(
-    _LOCAL_BUNDLE.matched.config.storage.source_volume,
+    _source_volume_name,
     environment_name="inkling-quant",
     create_if_missing=False,
-    version=_LOCAL_BUNDLE.matched.config.storage.source_volume_version,
+    version=_source_volume_version,
 ).with_mount_options(
-    sub_path=_LOCAL_BUNDLE.matched.config.storage.source_run_subpath,
+    sub_path=_source_run_subpath,
     read_only=True,
 )
 evidence_volume = modal.Volume.from_name(
-    _LOCAL_BUNDLE.config.storage.evidence_volume,
+    _evidence_volume_name,
     environment_name="inkling-quant",
-    create_if_missing=False,
-    version=_LOCAL_BUNDLE.config.storage.evidence_volume_version,
+    create_if_missing=_evidence_create_if_missing,
+    version=_evidence_volume_version,
 )
+
+_FUNCTION_VOLUMES: dict[
+    str | PurePosixPath,
+    modal.Volume | modal.CloudBucketMount,
+] = {
+    "/baseline": baseline_volume,
+    "/source": source_volume,
+    "/evidence": evidence_volume,
+}
+if final_volume is not None:
+    _FUNCTION_VOLUMES["/final"] = final_volume
 
 measurement_image = (
     modal.Image.from_registry(PINNED_CUDA_IMAGE, add_python="3.12")
@@ -1050,14 +1293,20 @@ measurement_image = (
     )
     .add_local_file(
         str(_LOCAL_PROVENANCE),
-        str(REMOTE_PROVENANCE_PATH),
+        str(REMOTE_DIAGNOSTIC_PROVENANCE_PATH if _DIAGNOSTIC_MODE else REMOTE_PROVENANCE_PATH),
         copy=True,
     )
     .run_commands(
-        (
-            f"python {REMOTE_PROJECT_ROOT / CORPUS_MATERIALIZER_RELATIVE_PATH} "
-            f"--reference {REMOTE_PROJECT_ROOT / CORPUS_REFERENCE_RELATIVE_PATH} "
-            f"--output {MATERIALIZED_CORPUS_PATH}"
+        *(
+            ()
+            if _DIAGNOSTIC_MODE
+            else (
+                (
+                    f"python {REMOTE_PROJECT_ROOT / CORPUS_MATERIALIZER_RELATIVE_PATH} "
+                    f"--reference {REMOTE_PROJECT_ROOT / CORPUS_REFERENCE_RELATIVE_PATH} "
+                    f"--output {MATERIALIZED_CORPUS_PATH}"
+                ),
+            )
         ),
         f"git init {LLAMA_CPP_ROOT}",
         (
@@ -1120,13 +1369,13 @@ measurement_image = (
             "python -c 'from pathlib import Path; "
             'source=Path("/opt/llama.cpp/tools/perplexity/perplexity.cpp").read_text('
             'encoding="utf-8"); '
-            'required=("LOG(\\\"IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=%s",'
-            '"LOG(\\\"IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=measurement_failed",'
-            '"LOG(\\\"IQL_MEASUREMENT_TOKEN_NLL_V1 count=%d",'
-            '"LOG(\\\"Final estimate: PPL = %.4lf +/- %.5lf"); '
-            'forbidden=("LOG_ERR(\\\"IQL_MEASUREMENT_PERPLEXITY_ERROR_V1",'
-            '"LOG_INF(\\\"IQL_MEASUREMENT_TOKEN_NLL_V1",'
-            '"LOG_INF(\\\"Final estimate: PPL = %.4lf +/- %.5lf"); '
+            'required=("LOG(\\"IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=%s",'
+            '"LOG(\\"IQL_MEASUREMENT_PERPLEXITY_ERROR_V1 code=measurement_failed",'
+            '"LOG(\\"IQL_MEASUREMENT_TOKEN_NLL_V1 count=%d",'
+            '"LOG(\\"Final estimate: PPL = %.4lf +/- %.5lf"); '
+            'forbidden=("LOG_ERR(\\"IQL_MEASUREMENT_PERPLEXITY_ERROR_V1",'
+            '"LOG_INF(\\"IQL_MEASUREMENT_TOKEN_NLL_V1",'
+            '"LOG_INF(\\"Final estimate: PPL = %.4lf +/- %.5lf"); '
             "assert all(source.count(item)==1 for item in required) and "
             "not any(item in source for item in forbidden), "
             '"measurement protocol source is not exactly unprefixed"\''
@@ -1155,7 +1404,11 @@ measurement_image = (
             "HF_HUB_DISABLE_TELEMETRY": "1",
             "HF_HUB_OFFLINE": "1",
             "TRANSFORMERS_OFFLINE": "1",
-            "IQL_MEASUREMENT_CONTROL_PLANE_SHA256": _CONTROL_SHA256,
+            (
+                "IQL_BF16_DIAGNOSTIC_CONTROL_PLANE_SHA256"
+                if _DIAGNOSTIC_MODE
+                else "IQL_MEASUREMENT_CONTROL_PLANE_SHA256"
+            ): _CONTROL_SHA256,
         }
     )
 )
@@ -1368,7 +1621,17 @@ def _tool_version(command: Sequence[str]) -> str:
     return text
 
 
-def _runtime_identity(bundle: InklingMeasurementBundle) -> MeasurementRuntimeIdentity:
+def _runtime_identity(
+    bundle: InklingMeasurementBundle | InklingBF16InterfaceDiagnosticBundle,
+) -> MeasurementRuntimeIdentity:
+    if isinstance(bundle, InklingBF16InterfaceDiagnosticBundle):
+        base_runtime = bundle.config.runtime
+        measurement_patch_path = bundle.config.runtime_measurement_patch.path
+        measurement_patch_sha256 = bundle.config.runtime_measurement_patch.sha256
+    else:
+        base_runtime = bundle.config.base_runtime
+        measurement_patch_path = bundle.config.measurement_patch.path
+        measurement_patch_sha256 = bundle.config.measurement_patch.sha256
     commit = subprocess.run(
         ["git", "-C", LLAMA_CPP_ROOT.as_posix(), "rev-parse", "HEAD"],
         check=True,
@@ -1393,16 +1656,16 @@ def _runtime_identity(bundle: InklingMeasurementBundle) -> MeasurementRuntimeIde
     patch_hashes = (
         _stable_file_identity(
             BASE_PATCH_REMOTE,
-            displayed_path=bundle.config.base_runtime.instrumentation_patch_path,
+            displayed_path=base_runtime.instrumentation_patch_path,
         ),
         _stable_file_identity(
             MEASUREMENT_PATCH_REMOTE,
-            displayed_path=bundle.config.measurement_patch.path,
+            displayed_path=measurement_patch_path,
         ),
     )
     if (
-        patch_hashes[0].sha256 != bundle.config.base_runtime.instrumentation_patch_sha256
-        or patch_hashes[1].sha256 != bundle.config.measurement_patch.sha256
+        patch_hashes[0].sha256 != base_runtime.instrumentation_patch_sha256
+        or patch_hashes[1].sha256 != measurement_patch_sha256
     ):
         raise RuntimeError("runtime patch identity differs from the reviewed configuration")
     patches = tuple(
@@ -1420,7 +1683,7 @@ def _runtime_identity(bundle: InklingMeasurementBundle) -> MeasurementRuntimeIde
             sha256=item.sha256,
             size_bytes=item.size_bytes,
         )
-        for item in bundle.config.base_runtime.binaries
+        for item in base_runtime.binaries
     )
     manifest_sha256 = measurement_runtime_manifest_sha256(
         build_bin_root=BUILD_BIN_ROOT.as_posix(),
@@ -1428,11 +1691,11 @@ def _runtime_identity(bundle: InklingMeasurementBundle) -> MeasurementRuntimeIde
         symlinks=symlinks,
     )
     return MeasurementRuntimeIdentity(
-        repository=bundle.config.base_runtime.repository,
+        repository=base_runtime.repository,
         repository_commit=PINNED_LLAMA_CPP_COMMIT,
-        cuda_image=bundle.config.base_runtime.cuda_image,
-        cuda_image_digest=bundle.config.base_runtime.cuda_image_digest,
-        platform=bundle.config.base_runtime.platform,
+        cuda_image=base_runtime.cuda_image,
+        cuda_image_digest=base_runtime.cuda_image_digest,
+        platform=base_runtime.platform,
         patches_applied_in_order=cast(
             "tuple[MeasurementAppliedPatch, MeasurementAppliedPatch]",
             patches,
@@ -2166,6 +2429,10 @@ class ResourceMonitor:
     def start(self) -> None:
         self._thread.start()
 
+    @property
+    def process_id(self) -> int:
+        return self._pid
+
     def stop(self) -> dict[str, Any]:
         self._stop.set()
         self._thread.join(timeout=30)
@@ -2529,11 +2796,30 @@ def _start_server(
             process,
             work_deadline=work_deadline,
         )
-    except BaseException:
-        with suppress(ProcessLookupError):
-            process.kill()
-        process.wait(timeout=30)
-        monitor.stop()
+    except BaseException as error:
+        try:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=30)
+        except BaseException as cleanup_error:
+            error.add_note(
+                f"server readiness process cleanup also failed: {type(cleanup_error).__name__}"
+            )
+        try:
+            monitor.stop()
+        except BaseException as cleanup_error:
+            error.add_note(
+                "server readiness resource-monitor cleanup also failed: "
+                f"{type(cleanup_error).__name__}"
+            )
+        try:
+            log_path.unlink()
+        except FileNotFoundError:
+            pass
+        except BaseException as cleanup_error:
+            error.add_note(
+                f"server readiness log cleanup also failed: {type(cleanup_error).__name__}"
+            )
         raise
     return ServerProcess(
         process=process,
@@ -4452,25 +4738,1508 @@ def _validate_paid_attempt_scope(
         raise RuntimeError("mounted evidence Volume differs from the deployment seal")
 
 
-@app.function(
-    image=measurement_image,
-    gpu="B300:8",
-    cpu=16,
-    memory=65_536,
-    ephemeral_disk=2_097_152,
-    retries=0,
-    timeout=FUNCTION_TIMEOUT_SECONDS,
-    startup_timeout=1_800,
-    max_containers=1,
-    single_use_containers=True,
-    block_network=True,
-    volumes={
-        "/baseline": baseline_volume,
-        "/final": final_volume,
-        "/source": source_volume,
-        "/evidence": evidence_volume,
-    },
-)
+def _validate_remote_diagnostic_provenance(
+    expected_sha256: str,
+) -> DiagnosticControlPlaneProvenance:
+    payload = _read_regular_bytes(
+        REMOTE_DIAGNOSTIC_PROVENANCE_PATH,
+        maximum_bytes=DIAGNOSTIC_CONTROL_RECORD_MAX_BYTES,
+    )
+    strict_diagnostic_json_object(
+        payload,
+        maximum_bytes=DIAGNOSTIC_CONTROL_RECORD_MAX_BYTES,
+    )
+    provenance = DiagnosticControlPlaneProvenance.model_validate_json(
+        payload,
+        strict=True,
+    )
+    files = {
+        item.path: _read_regular_bytes(
+            REMOTE_PROJECT_ROOT / item.path,
+            maximum_bytes=item.size_bytes,
+        )
+        for item in provenance.files
+    }
+    observed = validate_diagnostic_control_plane_provenance(
+        payload,
+        reviewed_commit_sha=provenance.reviewed_commit_sha,
+        reviewed_tree_sha=provenance.reviewed_tree_sha,
+        files=files,
+        required_paths=tuple(item.path for item in provenance.files),
+    )
+    if observed.control_plane_sha256 != expected_sha256:
+        raise RuntimeError("deployed diagnostic control plane differs from authorization")
+    return observed
+
+
+def _load_diagnostic_intent(
+    run_id: str,
+    intent_sha256: str,
+) -> DiagnosticLaunchIntent:
+    relative = diagnostic_launch_intent_path(run_id, intent_sha256)
+    payload = _read_regular_bytes(
+        _evidence_path(relative),
+        maximum_bytes=DIAGNOSTIC_CONTROL_RECORD_MAX_BYTES,
+    )
+    strict_diagnostic_json_object(
+        payload,
+        maximum_bytes=DIAGNOSTIC_CONTROL_RECORD_MAX_BYTES,
+    )
+    intent = DiagnosticLaunchIntent.model_validate_json(payload, strict=True)
+    validate_diagnostic_launch_intent(
+        payload,
+        expected=intent,
+        intent_sha256=intent_sha256,
+        evidence_path=relative,
+    )
+    return intent
+
+
+def _wait_for_diagnostic_acceptance(
+    intent: DiagnosticLaunchIntent,
+    *,
+    call_id: str,
+) -> DiagnosticPostSpawnAcceptance:
+    relative = diagnostic_post_spawn_acceptance_path(
+        intent.run_id,
+        intent.intent_sha256(),
+    )
+    deadline = time.monotonic() + ACCEPTANCE_TIMEOUT_SECONDS
+    while True:
+        evidence_volume.reload()
+        try:
+            payload = _read_regular_bytes(
+                _evidence_path(relative),
+                maximum_bytes=DIAGNOSTIC_CONTROL_RECORD_MAX_BYTES,
+            )
+            break
+        except FileNotFoundError:
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    "diagnostic post-spawn acceptance was not published in time"
+                ) from None
+            time.sleep(0.25)
+    strict_diagnostic_json_object(
+        payload,
+        maximum_bytes=DIAGNOSTIC_CONTROL_RECORD_MAX_BYTES,
+    )
+    raw = DiagnosticPostSpawnAcceptance.model_validate_json(payload, strict=True)
+    expected = build_diagnostic_post_spawn_acceptance(
+        intent,
+        accepted_at_utc=raw.accepted_at_utc,
+        call_id=call_id,
+    )
+    validate_diagnostic_post_spawn_acceptance(
+        payload,
+        expected=expected,
+        acceptance_sha256=raw.acceptance_sha256(),
+        evidence_path=relative,
+    )
+    return raw
+
+
+def _claim_diagnostic_attempt(
+    intent: DiagnosticLaunchIntent,
+    acceptance: DiagnosticPostSpawnAcceptance,
+    invocation: tuple[str, str, str],
+) -> DiagnosticInvocationBinding:
+    call_id, input_id, task_id = invocation
+    registry = modal.Dict.from_id(intent.deployment.attempt_registry_id)
+    registry.hydrate()
+    info = registry.info()
+    created = cast(object, info.created_at)
+    if isinstance(created, datetime):
+        if created.tzinfo is None:
+            raise RuntimeError("diagnostic attempt registry time has no time zone")
+        created_at = created.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    elif isinstance(created, (int, float)) and not isinstance(created, bool):
+        created_at = datetime.fromtimestamp(float(created), UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    else:
+        raise RuntimeError("diagnostic attempt registry creation time is unavailable")
+    if (
+        registry.object_id != intent.deployment.attempt_registry_id
+        or info.name != DIAGNOSTIC_ATTEMPT_REGISTRY_NAME
+        or created_at != intent.deployment.attempt_registry_created_at_utc
+    ):
+        raise RuntimeError("sealed diagnostic attempt registry identity changed")
+    claim = build_diagnostic_attempt_claim(
+        intent,
+        acceptance,
+        claimed_at_utc=_utc_now(),
+        input_id=input_id,
+        task_id=task_id,
+    )
+    claim_sha256 = claim_diagnostic_attempt(registry, claim)
+    relative = diagnostic_attempt_claim_path(intent.run_id, claim_sha256)
+    _commit_and_verify({relative: claim.canonical_bytes()})
+    validate_diagnostic_attempt_claim(
+        _read_regular_bytes(
+            _evidence_path(relative),
+            maximum_bytes=DIAGNOSTIC_CONTROL_RECORD_MAX_BYTES,
+        ),
+        expected=claim,
+        claim_sha256=claim_sha256,
+        evidence_path=relative,
+    )
+    return DiagnosticInvocationBinding(
+        intent=intent,
+        acceptance=acceptance,
+        claim=claim,
+        claim_sha256=claim_sha256,
+        call_id=call_id,
+    )
+
+
+def _validate_diagnostic_paid_attempt_scope(
+    *,
+    bundle: InklingBF16InterfaceDiagnosticBundle,
+    provenance: DiagnosticControlPlaneProvenance,
+    intent: DiagnosticLaunchIntent,
+) -> None:
+    deployment = intent.deployment
+    config = bundle.config
+    if (
+        provenance.control_plane_sha256 != _CONTROL_SHA256
+        or intent.reviewed_inputs.control_plane != provenance
+        or deployment.control_plane_sha256 != _CONTROL_SHA256
+        or deployment.app_name != diagnostic_app_name(_CONTROL_SHA256)
+        or deployment.environment_name != "inkling-quant"
+        or deployment.function_name != DIAGNOSTIC_FUNCTION_NAME
+        or deployment.attempt_registry_name != DIAGNOSTIC_ATTEMPT_REGISTRY_NAME
+        or deployment.attempt_registry_name != config.storage.attempt_registry
+        or deployment.evidence_volume_name != config.storage.evidence_volume
+        or config.storage.evidence_mount_path != EVIDENCE_ROOT.as_posix()
+        or intent.resources != config.resources
+        or intent.reviewed_inputs.resources != config.resources
+        or intent.reviewed_inputs.resolved_config_sha256 != config.config_hash()
+        or intent.subject != "bf16"
+        or not intent.one_atomic_attempt
+        or not intent.one_server_load
+        or intent.sequential_request_count != 16
+        or not intent.rehash_all_subject_files
+        or intent.partial_success_allowed
+        or not intent.diagnostic_execution_allowed
+        or config.execution.planned_stages != DIAGNOSTIC_PLANNED_STAGES
+    ):
+        raise RuntimeError("paid diagnostic scope differs from the sealed reviewed deployment")
+
+    deployed_function = modal.Function.from_name(
+        deployment.app_name,
+        DIAGNOSTIC_FUNCTION_NAME,
+        environment_name=deployment.environment_name,
+    )
+    deployed_function.hydrate()
+    if deployed_function.object_id != deployment.function_id:
+        raise RuntimeError("running diagnostic Function differs from the deployment seal")
+
+    evidence_volume.hydrate()
+    if evidence_volume.object_id != deployment.evidence_volume_id:
+        raise RuntimeError("mounted diagnostic evidence Volume differs from deployment seal")
+
+
+def _diagnostic_binding_fields(
+    binding: DiagnosticInvocationBinding,
+    *,
+    completed_at_utc: str,
+) -> dict[str, Any]:
+    reviewed = binding.intent.reviewed_inputs
+    return {
+        "run_id": binding.intent.run_id,
+        "control_plane_sha256": reviewed.control_plane.control_plane_sha256,
+        "reviewed_config_file_sha256": reviewed.diagnostic_config.sha256,
+        "resolved_config_sha256": reviewed.resolved_config_sha256,
+        "launch_intent_sha256": binding.intent.intent_sha256(),
+        "post_spawn_acceptance_sha256": binding.acceptance.acceptance_sha256(),
+        "call_id": binding.call_id,
+        "attempt_claim_sha256": binding.claim_sha256,
+        "completed_at_utc": completed_at_utc,
+    }
+
+
+def _complete_diagnostic_stage(
+    completed: list[DiagnosticStageName],
+    stage: DiagnosticStageName,
+) -> None:
+    if len(completed) >= len(DIAGNOSTIC_PLANNED_STAGES):
+        raise RuntimeError("diagnostic stage list is already complete")
+    if stage != DIAGNOSTIC_PLANNED_STAGES[len(completed)]:
+        raise RuntimeError("diagnostic stage completion is out of checked order")
+    completed.append(stage)
+
+
+def _is_diagnostic_stage(value: str) -> TypeGuard[DiagnosticStageName]:
+    return value in DIAGNOSTIC_PLANNED_STAGES
+
+
+def _publish_diagnostic_private_raw(
+    raw: DiagnosticPrivateRawEvidence,
+    *,
+    bundle: InklingBF16InterfaceDiagnosticBundle,
+) -> tuple[DiagnosticPrivateRawEvidence, DiagnosticPrivateRawReference]:
+    payload = raw.canonical_bytes()
+    parsed = parse_diagnostic_private_raw_evidence(payload, run_id=raw.run_id)
+    validate_diagnostic_private_trials(parsed, bundle=bundle)
+    if parsed != raw:
+        raise RuntimeError("diagnostic private evidence changed during canonical parsing")
+    reference = build_diagnostic_private_raw_reference(
+        payload,
+        evidence_root=EVIDENCE_ROOT.as_posix(),
+        run_id=raw.run_id,
+    )
+    validate_diagnostic_private_raw_reference(payload, expected=reference)
+    _commit_and_verify({reference.relative_path: payload})
+    readback = _read_regular_bytes(
+        _evidence_path(reference.relative_path),
+        maximum_bytes=reference.size_bytes,
+    )
+    validate_diagnostic_private_raw_reference(readback, expected=reference)
+    committed = parse_diagnostic_private_raw_evidence(readback, run_id=raw.run_id)
+    validate_diagnostic_private_trials(committed, bundle=bundle)
+    if committed != raw:
+        raise RuntimeError("committed diagnostic private evidence differs from exact result")
+    return committed, reference
+
+
+def _publish_diagnostic_terminal_receipt(
+    receipt: DiagnosticSuccessTerminalReceipt | DiagnosticFailureTerminalReceipt,
+    *,
+    outcome: Literal["success", "failure"],
+) -> DiagnosticTerminalReceiptReference:
+    payload = canonical_diagnostic_json_bytes(receipt.model_dump(mode="json"))
+    parsed = parse_diagnostic_terminal_receipt(
+        payload,
+        run_id=receipt.run_id,
+        outcome=outcome,
+    )
+    if parsed != receipt:
+        raise RuntimeError("diagnostic terminal receipt changed during canonical parsing")
+    reference = build_diagnostic_terminal_receipt_reference(
+        payload,
+        evidence_root=EVIDENCE_ROOT.as_posix(),
+        run_id=receipt.run_id,
+        outcome=outcome,
+    )
+    validate_diagnostic_terminal_receipt_reference(payload, expected=reference)
+    _commit_and_verify({reference.relative_path: payload})
+    readback = _read_regular_bytes(
+        _evidence_path(reference.relative_path),
+        maximum_bytes=reference.size_bytes,
+    )
+    validate_diagnostic_terminal_receipt_reference(readback, expected=reference)
+    if (
+        parse_diagnostic_terminal_receipt(
+            readback,
+            run_id=receipt.run_id,
+            outcome=outcome,
+        )
+        != receipt
+    ):
+        raise RuntimeError("committed diagnostic terminal receipt differs from exact result")
+    return reference
+
+
+def _diagnostic_subject_spec(
+    bundle: InklingBF16InterfaceDiagnosticBundle,
+) -> DiagnosticSubjectSpec:
+    artifacts = tuple(
+        (
+            (Path(bundle.config.storage.bf16_mount_path) / artifact.path).as_posix(),
+            artifact.sha256,
+            artifact.size_bytes,
+        )
+        for artifact in bundle.bf16.bf16_shards
+    )
+    if len(artifacts) != 49 or sum(item[2] for item in artifacts) != (bundle.bf16.bf16_total_bytes):
+        raise RuntimeError("diagnostic BF16 artifact inventory is incomplete")
+    paths = tuple(item[0] for item in artifacts)
+    return DiagnosticSubjectSpec(
+        model_path=paths[0],
+        shard_paths=paths,
+        artifacts=artifacts,
+    )
+
+
+def _prepare_diagnostic_staging_root(
+    bundle: InklingBF16InterfaceDiagnosticBundle,
+) -> Path:
+    execution = bundle.config.execution
+    if (
+        execution.subject_staging_root != DIAGNOSTIC_STAGING_ROOT.as_posix()
+        or execution.subject_staging_headroom_mib * 1024 * 1024 != SUBJECT_STAGING_HEADROOM_BYTES
+        or not execution.release_staged_subject
+    ):
+        raise RuntimeError("diagnostic staging configuration differs from the fixed protocol")
+    parent = DIAGNOSTIC_STAGING_ROOT.parent
+    if not os.path.lexists(parent):
+        os.mkdir(parent, 0o700)
+    _require_canonical_directory_components(
+        parent,
+        label="diagnostic staging parent",
+    )
+    if not os.path.lexists(DIAGNOSTIC_STAGING_ROOT):
+        os.mkdir(DIAGNOSTIC_STAGING_ROOT, 0o700)
+    return _require_canonical_directory_components(
+        DIAGNOSTIC_STAGING_ROOT,
+        label="diagnostic staging root",
+    )
+
+
+def _stage_diagnostic_subject(
+    subject: DiagnosticSubjectSpec,
+    *,
+    bundle: InklingBF16InterfaceDiagnosticBundle,
+    work_deadline: float,
+) -> DiagnosticSubjectSpec:
+    """Copy and rehash only the forty-nine BF16 shards to ephemeral storage."""
+
+    root = _prepare_diagnostic_staging_root(bundle)
+    subject_root = root / "bf16"
+    if os.path.lexists(subject_root):
+        raise RuntimeError("diagnostic BF16 staging directory already exists")
+    source_paths = tuple(path for path, _, _ in subject.artifacts)
+    if len(source_paths) != 49 or len(set(source_paths)) != 49:
+        raise RuntimeError("diagnostic BF16 inventory contains duplicate or missing paths")
+    mount = Path(bundle.config.storage.bf16_mount_path)
+    resolved_mount = _resolved_modal_mount_root(
+        mount,
+        label="diagnostic BF16 read-only mount",
+    )
+    resolved_sources: dict[str, Path] = {}
+    for source_path in source_paths:
+        source = Path(source_path)
+        if (
+            not source.is_absolute()
+            or "\\" in source_path
+            or "\x00" in source_path
+            or PurePosixPath(source_path).as_posix() != source_path
+            or any(part in {"", ".", ".."} for part in PurePosixPath(source_path).parts[1:])
+            or not source.is_relative_to(mount)
+        ):
+            raise RuntimeError("diagnostic shard path is outside the BF16 read-only mount")
+        suffix = source.relative_to(mount)
+        resolved_source = resolved_mount.joinpath(*suffix.parts)
+        if not resolved_source.is_relative_to(resolved_mount):
+            raise RuntimeError("diagnostic shard path escaped its resolved read-only mount")
+        _require_canonical_directory_components(
+            resolved_source.parent,
+            label="diagnostic BF16 shard parent",
+        )
+        resolved_sources[source_path] = resolved_source
+    required_bytes = sum(size for _, _, size in subject.artifacts)
+    if required_bytes != bundle.bf16.bf16_total_bytes:
+        raise RuntimeError("diagnostic BF16 byte total differs from the reviewed reference")
+    filesystem = os.statvfs(root)
+    free_bytes = filesystem.f_bavail * filesystem.f_frsize
+    if free_bytes < required_bytes + SUBJECT_STAGING_HEADROOM_BYTES:
+        raise RuntimeError("ephemeral disk lacks BF16 bytes plus the required 128 GiB headroom")
+    staged_by_source: dict[str, str] = {}
+    subject_root.mkdir(mode=0o700)
+    try:
+        for source_path, expected_hash, expected_size in subject.artifacts:
+            _remaining_work_timeout(
+                work_deadline,
+                1.0,
+                label="diagnostic BF16 staging",
+            )
+            staged_path = subject_root / Path(source_path).relative_to(mount)
+            _stage_file_once(
+                source_path=source_path,
+                resolved_source_path=resolved_sources[source_path],
+                staged_path=staged_path,
+                expected_sha256=expected_hash,
+                expected_size_bytes=expected_size,
+                work_deadline=work_deadline,
+            )
+            staged_by_source[source_path] = staged_path.as_posix()
+    except BaseException:
+        with suppress(OSError):
+            shutil.rmtree(subject_root)
+        raise
+    model_path = staged_by_source.get(subject.model_path)
+    shard_paths = tuple(staged_by_source.get(path, "") for path in subject.shard_paths)
+    if model_path is None or any(not path for path in shard_paths):
+        shutil.rmtree(subject_root)
+        raise RuntimeError("staged diagnostic subject does not bind all forty-nine shards")
+    return DiagnosticSubjectSpec(
+        model_path=model_path,
+        shard_paths=shard_paths,
+        artifacts=tuple(
+            (staged_by_source[path], sha256, size_bytes)
+            for path, sha256, size_bytes in subject.artifacts
+        ),
+    )
+
+
+def _release_diagnostic_subject(subject: DiagnosticSubjectSpec) -> None:
+    root = _require_canonical_directory_components(
+        DIAGNOSTIC_STAGING_ROOT,
+        label="diagnostic staging root",
+    )
+    subject_root = root / "bf16"
+    staged_paths = {path for path, _, _ in subject.artifacts}
+    if (
+        len(staged_paths) != 49
+        or not all(Path(path).is_relative_to(subject_root) for path in staged_paths)
+        or not subject_root.exists()
+        or subject_root.is_symlink()
+        or subject_root.resolve(strict=True) != subject_root
+        or subject_root.parent != root
+    ):
+        raise RuntimeError("diagnostic BF16 directory is not safe to release")
+    shutil.rmtree(subject_root)
+    if os.path.lexists(subject_root):
+        raise RuntimeError("diagnostic BF16 directory remained after release")
+
+
+def _verify_diagnostic_source_assets(
+    bundle: InklingBF16InterfaceDiagnosticBundle,
+) -> DiagnosticSourceEvidence:
+    source_assets = bundle.config.source_assets
+    mount = Path(bundle.config.storage.source_mount_path)
+    resolved_mount = _resolved_modal_mount_root(
+        mount,
+        label="diagnostic source read-only mount",
+    )
+    identities = (
+        source_assets.config,
+        source_assets.chat_template,
+        source_assets.tokenizer_json,
+        source_assets.tokenizer_config,
+    )
+    payloads: dict[str, bytes] = {}
+    for identity in identities:
+        source = Path(identity.path)
+        if (
+            not source.is_absolute()
+            or "\\" in identity.path
+            or "\x00" in identity.path
+            or PurePosixPath(identity.path).as_posix() != identity.path
+            or not source.is_relative_to(mount)
+        ):
+            raise RuntimeError("diagnostic source asset is outside its read-only mount")
+        resolved = resolved_mount.joinpath(*source.relative_to(mount).parts)
+        if not resolved.is_relative_to(resolved_mount):
+            raise RuntimeError("diagnostic source asset escaped its resolved mount")
+        _require_canonical_directory_components(
+            resolved.parent,
+            label="diagnostic source asset parent",
+        )
+        payload = _read_regular_bytes(resolved, maximum_bytes=identity.size_bytes)
+        if len(payload) != identity.size_bytes or _sha256_bytes(payload) != identity.sha256:
+            raise RuntimeError("diagnostic source asset differs from its reviewed identity")
+        payloads[identity.path] = payload
+
+    config_payload = payloads[source_assets.config.path]
+    source_config = strict_diagnostic_json_object(
+        config_payload,
+        maximum_bytes=source_assets.config.size_bytes,
+    )
+    if source_config.get("eos_token_id") != DIAGNOSTIC_EOS_TOKEN_ID:
+        raise RuntimeError("source config EOS token differs from the diagnostic protocol")
+
+    tokenizer_payload = payloads[source_assets.tokenizer_json.path]
+    tokenizer = strict_diagnostic_json_object(
+        tokenizer_payload,
+        maximum_bytes=source_assets.tokenizer_json.size_bytes,
+    )
+    added_tokens = tokenizer.get("added_tokens")
+    if not isinstance(added_tokens, list):
+        raise RuntimeError("source tokenizer added-token inventory is unavailable")
+    expected_special_tokens = {
+        DIAGNOSTIC_EOS_TOKEN_ID: source_assets.eos_special_token,
+        DIAGNOSTIC_COMPARISON_TOKEN_ID: source_assets.comparison_special_token,
+    }
+    expected_special_token_text = frozenset(expected_special_tokens.values())
+    observed_special_tokens: dict[int, str] = {}
+    for entry in added_tokens:
+        if not isinstance(entry, dict):
+            raise RuntimeError("source tokenizer added-token inventory is malformed")
+        token_id = entry.get("id")
+        content = entry.get("content")
+        expected_id = type(token_id) is int and token_id in expected_special_tokens
+        expected_content = isinstance(content, str) and content in expected_special_token_text
+        if not expected_id and not expected_content:
+            continue
+        if type(token_id) is not int or not isinstance(content, str):
+            raise RuntimeError("source tokenizer special-token mapping is malformed")
+        if expected_special_tokens.get(token_id) != content or entry.get("special") is not True:
+            raise RuntimeError("source tokenizer special-token mapping differs from the protocol")
+        if token_id in observed_special_tokens:
+            raise RuntimeError("source tokenizer repeats a protocol special-token ID")
+        observed_special_tokens[token_id] = content
+    if observed_special_tokens != expected_special_tokens:
+        raise RuntimeError("source tokenizer lacks an exact protocol special-token mapping")
+
+    tokenizer_config_payload = payloads[source_assets.tokenizer_config.path]
+    tokenizer_config = strict_diagnostic_json_object(
+        tokenizer_config_payload,
+        maximum_bytes=source_assets.tokenizer_config.size_bytes,
+    )
+    added_tokens_decoder = tokenizer_config.get("added_tokens_decoder")
+    if not isinstance(added_tokens_decoder, dict):
+        raise RuntimeError("source tokenizer config added-token decoder is unavailable")
+    for token_id, content in expected_special_tokens.items():
+        decoder_entry = added_tokens_decoder.get(str(token_id))
+        if (
+            not isinstance(decoder_entry, dict)
+            or decoder_entry.get("content") != content
+            or decoder_entry.get("special") is not True
+        ):
+            raise RuntimeError(
+                "source tokenizer config special-token mapping differs from the protocol"
+            )
+    extra_special_tokens = tokenizer_config.get("extra_special_tokens")
+    if not isinstance(extra_special_tokens, dict) or (
+        extra_special_tokens.get("content_model_end_sampling") != source_assets.eos_special_token
+        or extra_special_tokens.get("endoftext") != source_assets.comparison_special_token
+    ):
+        raise RuntimeError("source tokenizer config special-token aliases differ from the protocol")
+    try:
+        official_chat_template = payloads[source_assets.chat_template.path].decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise RuntimeError("official source chat template is not strict UTF-8") from error
+    asset_manifest = {
+        "schema_version": "inkling-bf16-interface-source-assets-v1",
+        "assets": [identity.model_dump(mode="json") for identity in identities],
+    }
+    return DiagnosticSourceEvidence(
+        source_config_sha256=_sha256_bytes(config_payload),
+        asset_manifest_sha256=_sha256_bytes(canonical_diagnostic_json_bytes(asset_manifest)),
+        official_chat_template=official_chat_template,
+    )
+
+
+def _diagnostic_server_command(
+    subject: DiagnosticSubjectSpec,
+    *,
+    port: int,
+) -> tuple[str, ...]:
+    """Build the one exact model-only BF16 diagnostic server command."""
+
+    if port != DIAGNOSTIC_SERVER_PORT:
+        raise ValueError("diagnostic server port differs from the fixed protocol")
+    model_path = Path(subject.model_path)
+    if (
+        not model_path.is_absolute()
+        or "\\" in subject.model_path
+        or "\x00" in subject.model_path
+        or PurePosixPath(subject.model_path).as_posix() != subject.model_path
+        or subject.model_path != subject.shard_paths[0]
+        or len(subject.shard_paths) != 49
+    ):
+        raise ValueError("diagnostic model path is not the staged first BF16 shard")
+    command = build_diagnostic_server_command(subject.model_path)
+    if command[0] != COMMAND_BINARIES["llama-server"]:
+        raise RuntimeError("diagnostic server command uses the wrong executable")
+    return command
+
+
+def _start_diagnostic_server(
+    *,
+    subject: DiagnosticSubjectSpec,
+    expected_uuids: Sequence[str],
+    work_deadline: float,
+) -> DiagnosticServerProcess:
+    command = _diagnostic_server_command(subject, port=DIAGNOSTIC_SERVER_PORT)
+    log_path = Path(f"/tmp/iql-bf16-interface-diagnostic-{DIAGNOSTIC_SERVER_PORT}.log")
+    with suppress(FileNotFoundError):
+        log_path.unlink()
+    environment = build_matched_server_environment(
+        os.environ,
+        audit_environment=DIAGNOSTIC_SERVER_AUDIT_ENVIRONMENT,
+    )
+    started_at_utc = _utc_now()
+    started_monotonic = time.monotonic()
+    descriptor = os.open(
+        log_path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    process: subprocess.Popen[bytes] | None = None
+    monitor: ResourceMonitor | None = None
+    monitor_started = False
+    try:
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=descriptor,
+                stderr=subprocess.STDOUT,
+                env=environment,
+                shell=False,
+            )
+        finally:
+            os.close(descriptor)
+        monitor = ResourceMonitor(process.pid, expected_uuids)
+        monitor.start()
+        monitor_started = True
+        _wait_server_ready(
+            DIAGNOSTIC_SERVER_PORT,
+            process,
+            work_deadline=work_deadline,
+        )
+        if process is None or monitor is None:
+            raise RuntimeError("diagnostic server lifecycle did not initialize")
+    except BaseException as error:
+        try:
+            if process is not None and process.poll() is None:
+                process.kill()
+        except BaseException as cleanup_error:
+            error.add_note(
+                "diagnostic server kill after readiness failure also failed: "
+                f"{type(cleanup_error).__name__}"
+            )
+        try:
+            if process is not None:
+                process.wait(timeout=30)
+        except BaseException as cleanup_error:
+            error.add_note(
+                "diagnostic server wait after readiness failure also failed: "
+                f"{type(cleanup_error).__name__}"
+            )
+        try:
+            if monitor is not None and monitor_started:
+                monitor.stop()
+        except BaseException as cleanup_error:
+            error.add_note(
+                "diagnostic resource-monitor cleanup after readiness failure also failed: "
+                f"{type(cleanup_error).__name__}"
+            )
+        try:
+            log_path.unlink()
+        except FileNotFoundError:
+            pass
+        except BaseException as cleanup_error:
+            error.add_note(
+                "diagnostic server-log cleanup after readiness failure also failed: "
+                f"{type(cleanup_error).__name__}"
+            )
+        raise
+    return DiagnosticServerProcess(
+        process=process,
+        command=command,
+        log_path=log_path,
+        started_at_utc=started_at_utc,
+        started_monotonic=started_monotonic,
+        monitor=monitor,
+    )
+
+
+def _stop_diagnostic_server(
+    server: DiagnosticServerProcess,
+) -> tuple[str, dict[str, Any], float]:
+    primary_error: BaseException | None = None
+    try:
+        if server.process.poll() is None:
+            server.process.terminate()
+            try:
+                server.process.wait(timeout=120)
+            except subprocess.TimeoutExpired:
+                server.process.kill()
+                server.process.wait(timeout=30)
+    except BaseException as error:
+        primary_error = error
+    telemetry: dict[str, Any] | None = None
+    try:
+        telemetry = server.monitor.stop()
+    except BaseException as error:
+        if primary_error is None:
+            primary_error = error
+        else:
+            primary_error.add_note(
+                f"diagnostic resource-monitor cleanup also failed: {type(error).__name__}"
+            )
+    finished_monotonic = time.monotonic()
+    log_payload: bytes | None = None
+    try:
+        log_payload = _read_regular_bytes(server.log_path, maximum_bytes=MAX_LOG_BYTES)
+    except BaseException as error:
+        if primary_error is None:
+            primary_error = error
+        else:
+            primary_error.add_note(
+                f"diagnostic server-log read also failed: {type(error).__name__}"
+            )
+    try:
+        server.log_path.unlink()
+    except FileNotFoundError as error:
+        if primary_error is None:
+            primary_error = error
+        else:
+            primary_error.add_note(
+                f"diagnostic server-log cleanup also failed: {type(error).__name__}"
+            )
+    except BaseException as error:
+        if primary_error is None:
+            primary_error = error
+        else:
+            primary_error.add_note(
+                f"diagnostic server-log cleanup also failed: {type(error).__name__}"
+            )
+    if primary_error is not None:
+        raise primary_error
+    if telemetry is None or log_payload is None:
+        raise RuntimeError("diagnostic server cleanup lacks its exact evidence")
+    if server.process.returncode not in (0, -15):
+        raise RuntimeError("diagnostic llama-server cleanup observed an unexpected exit")
+    try:
+        log_text = log_payload.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as error:
+        raise RuntimeError("diagnostic llama-server log is not strict UTF-8") from error
+    if not log_text:
+        raise RuntimeError("diagnostic llama-server log is empty")
+    return log_text, telemetry, finished_monotonic
+
+
+def _diagnostic_props(
+    *,
+    source: DiagnosticSourceEvidence,
+    work_deadline: float,
+) -> int:
+    props, _ = _http_json(
+        DIAGNOSTIC_SERVER_PORT,
+        "GET",
+        "/props",
+        None,
+        timeout=30,
+        work_deadline=work_deadline,
+    )
+    if props.get("chat_template") != source.official_chat_template:
+        raise RuntimeError("llama-server chat template differs from the pinned source asset")
+    build_info = props.get("build_info")
+    if not isinstance(build_info, str) or PINNED_LLAMA_CPP_COMMIT[:7] not in build_info:
+        raise RuntimeError("diagnostic llama-server build identity is unavailable")
+    models, _ = _http_json(
+        DIAGNOSTIC_SERVER_PORT,
+        "GET",
+        "/v1/models",
+        None,
+        timeout=30,
+        work_deadline=work_deadline,
+    )
+    data = models.get("data")
+    if not isinstance(data, list) or len(data) != 1 or not isinstance(data[0], Mapping):
+        raise RuntimeError("diagnostic llama-server model metadata has the wrong shape")
+    meta = data[0].get("meta")
+    if not isinstance(meta, Mapping) or type(meta.get("n_vocab")) is not int:
+        raise RuntimeError("diagnostic llama-server lacks exact vocabulary metadata")
+    vocab_size = int(meta["n_vocab"])
+    if vocab_size <= max(DIAGNOSTIC_EOS_TOKEN_ID, DIAGNOSTIC_COMPARISON_TOKEN_ID):
+        raise RuntimeError("diagnostic llama-server vocabulary is incompatible")
+    return vocab_size
+
+
+def _expected_diagnostic_chat_prompt(instruction: str, item_prompt: str) -> str:
+    return (
+        f"<|message_system|><|content_text|>{instruction}<|end_message|>"
+        "<|message_system|><|content_text|>Thinking effort level: 0<|end_message|>"
+        f"<|message_user|><|content_text|>{item_prompt}<|end_message|>"
+        "<|message_model|>"
+    )
+
+
+def _render_diagnostic_chat_prompt(
+    instruction: str,
+    item_prompt: str,
+    *,
+    work_deadline: float,
+) -> str:
+    request = {
+        "messages": [
+            {"role": "system", "content": instruction},
+            {"role": "user", "content": item_prompt},
+        ],
+        "add_generation_prompt": True,
+        "chat_template_kwargs": {"reasoning_effort": "none"},
+    }
+    response, _ = _http_json(
+        DIAGNOSTIC_SERVER_PORT,
+        "POST",
+        "/apply-template",
+        request,
+        timeout=60,
+        work_deadline=work_deadline,
+    )
+    rendered = response.get("prompt")
+    expected = _expected_diagnostic_chat_prompt(instruction, item_prompt)
+    if not isinstance(rendered, str) or rendered != expected:
+        raise RuntimeError("diagnostic chat rendering differs from the exact protocol")
+    return rendered
+
+
+def _tokenize_diagnostic_prompt(
+    rendered: str,
+    *,
+    vocab_size: int,
+    work_deadline: float,
+) -> tuple[int, ...]:
+    response, _ = _http_json(
+        DIAGNOSTIC_SERVER_PORT,
+        "POST",
+        "/tokenize",
+        {
+            "content": rendered,
+            "add_special": False,
+            "parse_special": True,
+            "with_pieces": False,
+        },
+        timeout=60,
+        work_deadline=work_deadline,
+    )
+    raw_tokens = response.get("tokens")
+    if (
+        not isinstance(raw_tokens, list)
+        or not raw_tokens
+        or any(
+            type(token_id) is not int or not 0 <= token_id < vocab_size for token_id in raw_tokens
+        )
+    ):
+        raise RuntimeError("diagnostic tokenization returned invalid token IDs")
+    return tuple(int(token_id) for token_id in raw_tokens)
+
+
+def _diagnostic_request(
+    input_token_ids: Sequence[int],
+    *,
+    n_predict: int,
+) -> dict[str, Any]:
+    return {
+        "prompt": list(input_token_ids),
+        "n_predict": n_predict,
+        "temperature": -1.0,
+        "seed": 42,
+        "stream": False,
+        "cache_prompt": False,
+        "return_tokens": True,
+        "timings_per_token": True,
+        "ignore_eos": False,
+        "stop": [],
+    }
+
+
+def _validate_diagnostic_completion(
+    payload: Mapping[str, Any],
+    *,
+    response_sha256: str,
+    request_duration_seconds: float,
+    input_token_ids: Sequence[int],
+    vocab_size: int,
+) -> DiagnosticCompletionResult:
+    if payload.get("error") is not None:
+        raise RuntimeError("diagnostic completion returned an error")
+    content = payload.get("content")
+    tokens_raw = payload.get("tokens")
+    tokens_evaluated = payload.get("tokens_evaluated")
+    tokens_predicted = payload.get("tokens_predicted")
+    stop = payload.get("stop")
+    stop_type = payload.get("stop_type")
+    truncated = payload.get("truncated")
+    timings_raw = payload.get("timings")
+    if not isinstance(content, str):
+        raise RuntimeError("diagnostic completion content has the wrong type")
+    if (
+        not isinstance(tokens_raw, list)
+        or not tokens_raw
+        or any(
+            type(token_id) is not int or not 0 <= token_id < vocab_size for token_id in tokens_raw
+        )
+    ):
+        raise RuntimeError("diagnostic completion returned invalid token IDs")
+    if (
+        type(tokens_evaluated) is not int
+        or type(tokens_predicted) is not int
+        or tokens_evaluated != len(input_token_ids)
+        or tokens_predicted != len(tokens_raw)
+    ):
+        raise RuntimeError("diagnostic completion top-level token counts are inconsistent")
+    if stop is not True or stop_type not in {"eos", "limit"}:
+        raise RuntimeError("diagnostic completion did not reach an accepted terminal state")
+    if truncated is not False:
+        raise RuntimeError("diagnostic completion is truncated or lacks exact truncation evidence")
+    if not isinstance(timings_raw, Mapping):
+        raise RuntimeError("diagnostic completion lacks server timing evidence")
+    timing_fields: dict[str, Any] = {}
+    for field in ("prompt_n", "predicted_n"):
+        value = timings_raw.get(field)
+        if type(value) is not int or value <= 0:
+            raise RuntimeError("diagnostic completion timing count is invalid")
+        timing_fields[field] = value
+    for field in (
+        "prompt_ms",
+        "predicted_ms",
+        "prompt_per_second",
+        "predicted_per_second",
+    ):
+        value = timings_raw.get(field)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) <= 0.0
+        ):
+            raise RuntimeError("diagnostic completion timing value is invalid")
+        timing_fields[field] = float(value)
+    timings = MeasurementDiagnosticTimings.model_validate(timing_fields, strict=True)
+    if (
+        timings.prompt_n != tokens_evaluated
+        or timings.predicted_n != tokens_predicted
+        or timings.prompt_n != len(input_token_ids)
+        or timings.predicted_n != len(tokens_raw)
+    ):
+        raise RuntimeError("diagnostic completion timing counts are inconsistent")
+    if (
+        isinstance(request_duration_seconds, bool)
+        or not math.isfinite(request_duration_seconds)
+        or request_duration_seconds <= 0.0
+    ):
+        raise RuntimeError("diagnostic completion duration is invalid")
+    return DiagnosticCompletionResult(
+        content=content,
+        tokens=tuple(int(token_id) for token_id in tokens_raw),
+        tokens_evaluated=tokens_evaluated,
+        tokens_predicted=tokens_predicted,
+        stop=True,
+        stop_type=cast('Literal["eos", "limit"]', stop_type),
+        truncated=False,
+        response_sha256=response_sha256,
+        duration_seconds=request_duration_seconds,
+        timings=timings,
+    )
+
+
+def _run_diagnostic_completion(
+    request: Mapping[str, Any],
+    *,
+    input_token_ids: Sequence[int],
+    vocab_size: int,
+    work_deadline: float,
+) -> DiagnosticCompletionResult:
+    started = time.monotonic()
+    payload, response_sha256 = _http_json(
+        DIAGNOSTIC_SERVER_PORT,
+        "POST",
+        "/completion",
+        request,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+        work_deadline=work_deadline,
+    )
+    duration_seconds = time.monotonic() - started
+    return _validate_diagnostic_completion(
+        payload,
+        response_sha256=response_sha256,
+        request_duration_seconds=duration_seconds,
+        input_token_ids=input_token_ids,
+        vocab_size=vocab_size,
+    )
+
+
+def _extract_diagnostic_content_segment(content: str) -> str:
+    before_sampling_end = content.split(DIAGNOSTIC_END_SAMPLING_MARKER, 1)[0]
+    if DIAGNOSTIC_CONTENT_TEXT_MARKER in before_sampling_end:
+        before_sampling_end = before_sampling_end.rsplit(
+            DIAGNOSTIC_CONTENT_TEXT_MARKER,
+            1,
+        )[1]
+    return before_sampling_end.split(DIAGNOSTIC_END_MESSAGE_MARKER, 1)[0]
+
+
+def _diagnostic_score_detail_sha256(
+    *,
+    whole_score: DiagnosticScoreEvidence,
+    extracted_score: DiagnosticScoreEvidence,
+) -> str:
+    return _sha256_bytes(
+        canonical_diagnostic_json_bytes(
+            {
+                "schema_version": "inkling-bf16-interface-score-detail-v1",
+                "extraction_protocol": (
+                    "last_content_text_segment_before_content_model_end_sampling_or_end"
+                ),
+                "whole_output": asdict(whole_score),
+                "extracted_content_text": asdict(extracted_score),
+            }
+        )
+    )
+
+
+def _parse_diagnostic_runtime_eog_ids(log_text: str) -> tuple[int, ...]:
+    eos_pattern = re.compile(
+        r"^print_info: EOS token\s+=\s+([0-9]+) '[^'\r\n]*'$",
+        flags=re.MULTILINE,
+    )
+    eog_pattern = re.compile(
+        r"^print_info: EOG token\s+=\s+([0-9]+) '[^'\r\n]*'$",
+        flags=re.MULTILINE,
+    )
+    eos_ids = tuple(int(item) for item in eos_pattern.findall(log_text))
+    eog_ids = tuple(int(item) for item in eog_pattern.findall(log_text))
+    if eos_ids != (DIAGNOSTIC_EOS_TOKEN_ID,):
+        raise RuntimeError("authoritative llama-server EOS metadata is not exact")
+    if not eog_ids or len(eog_ids) != len(set(eog_ids)):
+        raise RuntimeError("authoritative llama-server EOG metadata is incomplete")
+    return tuple(sorted(eog_ids))
+
+
+def _forced_diagnostic_probe(
+    token_id: int,
+    *,
+    input_token_ids: Sequence[int],
+    vocab_size: int,
+    work_deadline: float,
+) -> tuple[DiagnosticCompletionResult, str]:
+    request = _diagnostic_request(input_token_ids, n_predict=1)
+    request["logit_bias"] = [[token_id, DIAGNOSTIC_FORCED_LOGIT_BIAS]]
+    request_sha256 = _sha256_bytes(canonical_diagnostic_json_bytes(request))
+    result = _run_diagnostic_completion(
+        request,
+        input_token_ids=input_token_ids,
+        vocab_size=vocab_size,
+        work_deadline=work_deadline,
+    )
+    if result.tokens != (token_id,):
+        raise RuntimeError("forced diagnostic probe did not return its exact token")
+    return result, request_sha256
+
+
+def _run_bf16_diagnostic_server(
+    *,
+    subject: DiagnosticSubjectSpec,
+    source: DiagnosticSourceEvidence,
+    bundle: InklingBF16InterfaceDiagnosticBundle,
+    expected_uuids: Sequence[str],
+    work_deadline: float,
+) -> DiagnosticServerResult:
+    """Load BF16 once, prepare all prompts, then issue sixteen sequential requests."""
+
+    server = _start_diagnostic_server(
+        subject=subject,
+        expected_uuids=expected_uuids,
+        work_deadline=work_deadline,
+    )
+    try:
+        vocab_size = _diagnostic_props(source=source, work_deadline=work_deadline)
+        instruction = bundle.config.protocol.raw_instruction
+        rendered_prompts: dict[tuple[str, str], str] = {}
+        tokenized_prompts: dict[tuple[str, str], tuple[int, ...]] = {}
+        for item in bundle.items:
+            raw_prompt = f"{instruction}\n{item.prompt}"
+            chat_prompt = _render_diagnostic_chat_prompt(
+                instruction,
+                item.prompt,
+                work_deadline=work_deadline,
+            )
+            rendered_prompts[("raw", item.item_id)] = raw_prompt
+            rendered_prompts[("chat_template", item.item_id)] = chat_prompt
+        for prompt_mode in ("raw", "chat_template"):
+            for item in bundle.items:
+                rendered = rendered_prompts[(prompt_mode, item.item_id)]
+                tokenized_prompts[(prompt_mode, item.item_id)] = _tokenize_diagnostic_prompt(
+                    rendered,
+                    vocab_size=vocab_size,
+                    work_deadline=work_deadline,
+                )
+
+        trials: list[DiagnosticPrivateTrial] = []
+        for cell in bundle.config.protocol.cells:
+            for item in bundle.items:
+                ordinal = len(trials) + 1
+                rendered = rendered_prompts[(cell.prompt_mode, item.item_id)]
+                input_token_ids = tokenized_prompts[(cell.prompt_mode, item.item_id)]
+                requested_cap = (
+                    item.max_new_tokens
+                    if cell.max_new_tokens_override is None
+                    else cell.max_new_tokens_override
+                )
+                if item.item_id not in bundle.config.protocol.item_ids:
+                    raise RuntimeError("diagnostic item differs from the reviewed protocol")
+                if item.max_new_tokens not in (4, 8, 16):
+                    raise RuntimeError("diagnostic item has an unreviewed original token cap")
+                if requested_cap not in (4, 8, 16, 64):
+                    raise RuntimeError("diagnostic request has an unreviewed token cap")
+                request = _diagnostic_request(input_token_ids, n_predict=requested_cap)
+                request_sha256 = _sha256_bytes(canonical_diagnostic_json_bytes(request))
+                result = _run_diagnostic_completion(
+                    request,
+                    input_token_ids=input_token_ids,
+                    vocab_size=vocab_size,
+                    work_deadline=work_deadline,
+                )
+                if result.tokens_predicted > requested_cap:
+                    raise RuntimeError("natural diagnostic request exceeded its token cap")
+                if result.stop_type == "limit" and result.tokens_predicted != requested_cap:
+                    raise RuntimeError("limit-stopped diagnostic request missed its token cap")
+                whole_score = evaluate_diagnostic_response(
+                    result.content,
+                    scorer_kind=item.scorer.kind,
+                    expected=item.scorer.expected,
+                )
+                extracted_score = evaluate_diagnostic_response(
+                    _extract_diagnostic_content_segment(result.content),
+                    scorer_kind=item.scorer.kind,
+                    expected=item.scorer.expected,
+                )
+                trials.append(
+                    DiagnosticPrivateTrial(
+                        ordinal=ordinal,
+                        item_id=item.item_id,
+                        cell=cell.name,
+                        prompt_mode=cell.prompt_mode,
+                        cap_mode=cell.cap_mode,
+                        original_max_new_tokens=cast(
+                            "Literal[4, 8, 16]",
+                            item.max_new_tokens,
+                        ),
+                        requested_max_new_tokens=cast(
+                            "Literal[4, 8, 16, 64]",
+                            requested_cap,
+                        ),
+                        reasoning_effort="none",
+                        item_prompt_sha256=_sha256_bytes(item.prompt.encode("utf-8")),
+                        rendered_prompt_sha256=_sha256_bytes(rendered.encode("utf-8")),
+                        request_sha256=request_sha256,
+                        response_sha256=result.response_sha256,
+                        input_token_ids=input_token_ids,
+                        output_token_ids=result.tokens,
+                        tokens_evaluated=result.tokens_evaluated,
+                        tokens_predicted=result.tokens_predicted,
+                        stop=True,
+                        stop_type=result.stop_type,
+                        eog_observed=result.stop_type == "eos",
+                        cap_hit=result.stop_type == "limit",
+                        truncated=False,
+                        whole_output_passed=whole_score.score,
+                        extracted_content_passed=extracted_score.score,
+                        score_detail_sha256=_diagnostic_score_detail_sha256(
+                            whole_score=whole_score,
+                            extracted_score=extracted_score,
+                        ),
+                        request_duration_seconds=result.duration_seconds,
+                        timings=result.timings,
+                    )
+                )
+        if len(trials) != 16:
+            raise RuntimeError("BF16 interface diagnostic did not complete sixteen requests")
+
+        probe_prompt = tokenized_prompts[("raw", bundle.items[0].item_id)]
+        eos_probe, eos_probe_request_sha256 = _forced_diagnostic_probe(
+            DIAGNOSTIC_EOS_TOKEN_ID,
+            input_token_ids=probe_prompt,
+            vocab_size=vocab_size,
+            work_deadline=work_deadline,
+        )
+        comparison_probe, comparison_probe_request_sha256 = _forced_diagnostic_probe(
+            DIAGNOSTIC_COMPARISON_TOKEN_ID,
+            input_token_ids=probe_prompt,
+            vocab_size=vocab_size,
+            work_deadline=work_deadline,
+        )
+    except BaseException as error:
+        try:
+            _stop_diagnostic_server(server)
+        except BaseException as cleanup_error:
+            error.add_note(
+                f"diagnostic llama-server cleanup also failed: {type(cleanup_error).__name__}"
+            )
+        raise
+
+    log_text, telemetry_payload, finished_monotonic = _stop_diagnostic_server(server)
+    text_artifact_load = parse_text_artifact_load_evidence(
+        log_text,
+        expected_first_shard_path=subject.model_path,
+    )
+    runtime_eog_ids = _parse_diagnostic_runtime_eog_ids(log_text)
+    eog = DiagnosticEogEvidence(
+        source_config_sha256=source.source_config_sha256,
+        source_config_eos_token_id=DIAGNOSTIC_EOS_TOKEN_ID,
+        runtime_eog_token_ids=runtime_eog_ids,
+        source_eos_probe=DiagnosticEogTokenProbe(
+            token_id=DIAGNOSTIC_EOS_TOKEN_ID,
+            runtime_is_eog=DIAGNOSTIC_EOS_TOKEN_ID in runtime_eog_ids,
+            forced_token_observed=True,
+            request_sha256=eos_probe_request_sha256,
+            input_token_ids=probe_prompt,
+            generated_token_ids=eos_probe.tokens,
+            stop=True,
+            stop_type=eos_probe.stop_type,
+            truncated=False,
+            response_sha256=eos_probe.response_sha256,
+            request_duration_seconds=eos_probe.duration_seconds,
+            timings=eos_probe.timings,
+        ),
+        comparison_token_probe=DiagnosticEogTokenProbe(
+            token_id=DIAGNOSTIC_COMPARISON_TOKEN_ID,
+            runtime_is_eog=DIAGNOSTIC_COMPARISON_TOKEN_ID in runtime_eog_ids,
+            forced_token_observed=True,
+            request_sha256=comparison_probe_request_sha256,
+            input_token_ids=probe_prompt,
+            generated_token_ids=comparison_probe.tokens,
+            stop=True,
+            stop_type=comparison_probe.stop_type,
+            truncated=False,
+            response_sha256=comparison_probe.response_sha256,
+            request_duration_seconds=comparison_probe.duration_seconds,
+            timings=comparison_probe.timings,
+        ),
+    )
+    if server.monitor.process_id != server.process.pid:
+        raise RuntimeError("diagnostic resource monitor observed a different process")
+    resource_sample_summary = MeasurementResourceSampleSummary.model_validate(
+        _telemetry_window(
+            telemetry_payload,
+            started_monotonic=server.started_monotonic,
+            finished_monotonic=finished_monotonic,
+        ),
+        strict=True,
+    )
+    log_payload = log_text.encode("utf-8")
+    command_sha256 = _sha256_bytes(canonical_diagnostic_json_bytes(list(server.command)))
+    return DiagnosticServerResult(
+        trials=tuple(trials),
+        eog=eog,
+        text_artifact_load=text_artifact_load,
+        command=server.command,
+        command_sha256=command_sha256,
+        server_log_sha256=_sha256_bytes(log_payload),
+        server_log_size_bytes=len(log_payload),
+        server_log_text=log_text,
+        server_process_id=server.process.pid,
+        resource_sample_summary=resource_sample_summary,
+        started_at_utc=server.started_at_utc,
+        completed_at_utc=_utc_now(),
+    )
+
+
+def run_bf16_interface_diagnostic(
+    run_id: str,
+    launch_intent_sha256: str,
+) -> dict[str, Any]:
+    """Run one authorized BF16 interface diagnostic on one exact B300:8 cell."""
+
+    function_started = time.monotonic()
+    work_deadline = function_started + FUNCTION_TIMEOUT_SECONDS - PUBLICATION_RESERVE_SECONDS
+    if RUN_ID_RE.fullmatch(run_id) is None:
+        raise ValueError("diagnostic run ID is invalid")
+    if SHA256_RE.fullmatch(launch_intent_sha256) is None:
+        raise ValueError("diagnostic launch-intent SHA-256 is invalid")
+
+    bundle = _LOCAL_DIAGNOSTIC_BUNDLE
+    if bundle is None:
+        raise RuntimeError("diagnostic runner was not deployed in diagnostic mode")
+    provenance = _validate_remote_diagnostic_provenance(_CONTROL_SHA256)
+    evidence_volume.reload()
+    intent = _load_diagnostic_intent(run_id, launch_intent_sha256)
+    if intent.run_id != run_id or intent.intent_sha256() != launch_intent_sha256:
+        raise RuntimeError("diagnostic launch intent differs from the requested invocation")
+    _validate_diagnostic_paid_attempt_scope(
+        bundle=bundle,
+        provenance=provenance,
+        intent=intent,
+    )
+    invocation = _invocation_ids()
+    acceptance = _wait_for_diagnostic_acceptance(intent, call_id=invocation[0])
+    binding = _claim_diagnostic_attempt(intent, acceptance, invocation)
+
+    completed: list[DiagnosticStageName] = []
+    runtime: MeasurementRuntimeIdentity | None = None
+    hardware: MeasurementHardwareIdentity | None = None
+    staged_subject: DiagnosticSubjectSpec | None = None
+    private_raw_reference: DiagnosticPrivateRawReference | None = None
+    terminal_publication_started = False
+    try:
+        runtime = _runtime_identity(bundle)
+        source = _verify_diagnostic_source_assets(bundle)
+        source_subject = _diagnostic_subject_spec(bundle)
+        _complete_diagnostic_stage(completed, "verify_references")
+
+        hardware_payload = _observe_hardware(runtime)
+        hardware = MeasurementHardwareIdentity.model_validate_json(
+            canonical_measurement_raw_json_bytes(hardware_payload),
+            strict=True,
+        )
+        expected_uuids = tuple(item.uuid for item in hardware.gpus)
+        _complete_diagnostic_stage(completed, "verify_cuda_preflight")
+
+        staged_subject = _stage_diagnostic_subject(
+            source_subject,
+            bundle=bundle,
+            work_deadline=work_deadline,
+        )
+        _complete_diagnostic_stage(completed, "stage_and_rehash_bf16")
+
+        server = _run_bf16_diagnostic_server(
+            subject=staged_subject,
+            source=source,
+            bundle=bundle,
+            expected_uuids=expected_uuids,
+            work_deadline=work_deadline,
+        )
+        _complete_diagnostic_stage(completed, "bf16_interface_diagnostic")
+
+        placement_policy = ExactCudaPlacementPolicy(
+            schema_version="iql-exact-cuda-placement-policy-v1",
+            gpu_count=bundle.config.resources.gpu_count,
+            tensor_split=bundle.config.placement.tensor_split,
+            split_mode=bundle.config.placement.split_mode,
+            text_graph_policy="at_least_one_all_expected_cuda",
+            vision_graph_policy="cuda0_only",
+            audio_graph_policy="cuda0_only",
+        )
+        placement = parse_exact_text_cuda_backend_audit(
+            server.server_log_text,
+            policy=placement_policy,
+        )
+        _complete_diagnostic_stage(completed, "verify_gpu_placement")
+
+        _release_diagnostic_subject(staged_subject)
+        staged_subject = None
+        _complete_diagnostic_stage(completed, "release_bf16")
+
+        runtime_identity_sha256 = diagnostic_runtime_identity_sha256(runtime)
+        raw = DiagnosticPrivateRawEvidence(
+            **_diagnostic_binding_fields(
+                binding,
+                completed_at_utc=server.completed_at_utc,
+            ),
+            model_id=bundle.config.model_id,
+            model_revision=bundle.config.revision,
+            architecture=bundle.config.architecture,
+            protocol_sha256=diagnostic_protocol_sha256(bundle.config),
+            workload_sha256=diagnostic_workload_sha256(bundle.config),
+            bf16_inventory_sha256=bundle.bf16.bf16_inventory_sha256,
+            bf16_shard_count=49,
+            bf16_total_bytes=bundle.bf16.bf16_total_bytes,
+            source_asset_manifest_sha256=source.asset_manifest_sha256,
+            runtime_identity=runtime,
+            runtime_identity_sha256=runtime_identity_sha256,
+            runtime_manifest_sha256=runtime.manifest_sha256,
+            hardware_identity=hardware,
+            hardware_identity_sha256=hardware.identity_sha256,
+            command=server.command,
+            command_sha256=server.command_sha256,
+            server_process_id=server.server_process_id,
+            server_log_sha256=server.server_log_sha256,
+            server_log_size_bytes=server.server_log_size_bytes,
+            text_artifact_load=server.text_artifact_load,
+            backend="CUDA",
+            logical_devices=bundle.config.placement.logical_devices,
+            gpu_device_count=bundle.config.resources.gpu_count,
+            gpu_model_graph_operation_count=placement.gpu_operations,
+            cpu_model_graph_operation_count=0,
+            cpu_fallback_observed=False,
+            resource_sample_summary=server.resource_sample_summary,
+            eog=server.eog,
+            trials=server.trials,
+            prompt_text_recorded=False,
+            output_text_recorded=False,
+            private_token_ids_recorded=True,
+            one_server_load=True,
+            sequential_request_count=16,
+            started_at_utc=server.started_at_utc,
+            diagnostic_only=True,
+            quality_retention_claim_allowed=False,
+            quality_claim_allowed=False,
+            speedup_claim_allowed=False,
+            performance_claim_allowed=False,
+            mtp_included=False,
+            mtp_supported=False,
+            routing_drift_supported=False,
+            single_run_causation_claim_allowed=False,
+        )
+        raw, private_raw_reference = _publish_diagnostic_private_raw(
+            raw,
+            bundle=bundle,
+        )
+        rollup = build_diagnostic_rollup(
+            raw,
+            private_raw_content_sha256=private_raw_reference.content_sha256,
+        )
+        success = DiagnosticSuccessTerminalReceipt(
+            **_diagnostic_binding_fields(
+                binding,
+                completed_at_utc=_utc_now(),
+            ),
+            completed_stages=DIAGNOSTIC_PLANNED_STAGES,
+            model_id=bundle.config.model_id,
+            model_revision=bundle.config.revision,
+            architecture=bundle.config.architecture,
+            bf16_inventory_sha256=bundle.bf16.bf16_inventory_sha256,
+            bf16_shard_count=49,
+            bf16_total_bytes=bundle.bf16.bf16_total_bytes,
+            protocol_sha256=diagnostic_protocol_sha256(bundle.config),
+            workload_sha256=diagnostic_workload_sha256(bundle.config),
+            runtime_identity=runtime,
+            runtime_identity_sha256=runtime_identity_sha256,
+            runtime_manifest_sha256=runtime.manifest_sha256,
+            hardware_identity_sha256=hardware.identity_sha256,
+            command_sha256=server.command_sha256,
+            server_log_sha256=server.server_log_sha256,
+            server_log_size_bytes=server.server_log_size_bytes,
+            private_raw_reference=private_raw_reference,
+            rollup=rollup,
+            rollup_sha256=diagnostic_rollup_sha256(rollup),
+            gpu_placement_verified=True,
+            cpu_fallback_observed=False,
+        )
+        terminal_publication_started = True
+        terminal = _publish_diagnostic_terminal_receipt(success, outcome="success")
+        _complete_diagnostic_stage(completed, "publish")
+        return {
+            "status": "completed",
+            "run_id": run_id,
+            "call_id": binding.call_id,
+            "terminal_receipt": terminal.model_dump(mode="json"),
+            "diagnostic_completed": True,
+            "gpu_placement_verified": True,
+            "cpu_fallback_observed": False,
+            "function_return_is_success_evidence": False,
+        }
+    except BaseException as error:
+        cpu_fallback_observed = isinstance(error, BackendCpuPlacementError)
+        if staged_subject is not None:
+            try:
+                _release_diagnostic_subject(staged_subject)
+            except BaseException as cleanup_error:
+                error.add_note(
+                    f"diagnostic BF16 staging cleanup also failed: {type(cleanup_error).__name__}"
+                )
+        if not terminal_publication_started:
+            try:
+                completed_count = len(completed)
+                failed_stage = DIAGNOSTIC_PLANNED_STAGES[completed_count]
+                if not _is_diagnostic_stage(failed_stage):
+                    raise RuntimeError("control plane returned an unknown diagnostic stage")
+                placement_stage_index = DIAGNOSTIC_PLANNED_STAGES.index("verify_gpu_placement")
+                failure = DiagnosticFailureTerminalReceipt(
+                    **_diagnostic_binding_fields(
+                        binding,
+                        completed_at_utc=_utc_now(),
+                    ),
+                    completed_stages=tuple(completed),
+                    failed_stage=failed_stage,
+                    error_code=_failure_code(error),
+                    error_summary_sha256=_failure_summary_sha256(error),
+                    runtime_identity_sha256=(
+                        diagnostic_runtime_identity_sha256(runtime) if runtime is not None else None
+                    ),
+                    runtime_manifest_sha256=(
+                        runtime.manifest_sha256 if runtime is not None else None
+                    ),
+                    hardware_identity_sha256=(
+                        hardware.identity_sha256 if hardware is not None else None
+                    ),
+                    private_raw_reference=private_raw_reference,
+                    gpu_placement_verified=completed_count > placement_stage_index,
+                    cpu_fallback_observed=cpu_fallback_observed,
+                )
+                terminal_publication_started = True
+                _publish_diagnostic_terminal_receipt(failure, outcome="failure")
+            except BaseException as publication_error:
+                error.add_note(
+                    "immutable diagnostic failure receipt publication also failed: "
+                    f"{type(publication_error).__name__}"
+                )
+        raise
+
+
 def run_measurement(
     run_id: str,
     launch_intent_sha256: str,
@@ -4485,6 +6254,8 @@ def run_measurement(
         raise ValueError("measurement launch-intent SHA-256 is invalid")
 
     bundle = _LOCAL_BUNDLE
+    if bundle is None:
+        raise RuntimeError("measurement runner was not deployed in measurement mode")
     provenance = _validate_remote_provenance(_CONTROL_SHA256)
     evidence_volume.reload()
     intent = _load_intent(run_id, launch_intent_sha256)
@@ -4712,3 +6483,41 @@ def run_measurement(
                     f"{type(publication_error).__name__}"
                 )
         raise
+
+
+if _DIAGNOSTIC_MODE:
+    run_bf16_interface_diagnostic = cast(
+        Any,
+        app.function(
+            image=measurement_image,
+            gpu="B300:8",
+            cpu=16,
+            memory=65_536,
+            ephemeral_disk=2_097_152,
+            retries=0,
+            timeout=FUNCTION_TIMEOUT_SECONDS,
+            startup_timeout=1_800,
+            max_containers=1,
+            single_use_containers=True,
+            block_network=True,
+            volumes=_FUNCTION_VOLUMES,
+        )(run_bf16_interface_diagnostic),
+    )
+else:
+    run_measurement = cast(
+        Any,
+        app.function(
+            image=measurement_image,
+            gpu="B300:8",
+            cpu=16,
+            memory=65_536,
+            ephemeral_disk=2_097_152,
+            retries=0,
+            timeout=FUNCTION_TIMEOUT_SECONDS,
+            startup_timeout=1_800,
+            max_containers=1,
+            single_use_containers=True,
+            block_network=True,
+            volumes=_FUNCTION_VOLUMES,
+        )(run_measurement),
+    )

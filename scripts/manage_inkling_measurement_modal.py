@@ -642,6 +642,8 @@ def _deploy_remote(context: _ReviewedContext) -> MeasurementDeploymentIdentity:
 
     if not recovering:
         environment = os.environ.copy()
+        environment.pop("IQL_BF16_DIAGNOSTIC_CONTROL_PLANE_SHA256", None)
+        environment.pop("IQL_BF16_DIAGNOSTIC_CONTROL_PLANE_PROVENANCE_PATH", None)
         environment["IQL_MEASUREMENT_CONTROL_PLANE_SHA256"] = control_hash
         environment["IQL_MEASUREMENT_CONTROL_PLANE_PROVENANCE_PATH"] = str(context.provenance_path)
         subprocess.run(

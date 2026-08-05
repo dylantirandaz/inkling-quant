@@ -2252,6 +2252,29 @@ class TextTensorLoadEvidence(StrictFrozenModel):
         return self
 
 
+class TextArtifactLoadEvidence(StrictFrozenModel):
+    """Proof that one text-model load opened and accounted for all 49 shards."""
+
+    schema_version: Literal["inkling-text-artifact-load-v1"] = "inkling-text-artifact-load-v1"
+    first_shard_path: StrictStr = Field(min_length=1)
+    additional_shards_loaded: Literal[48]
+    total_shards_loaded: Literal[49]
+    text_shards: TextShardLoadEvidence
+    text_load: TextTensorLoadEvidence
+    all_expected_text_artifacts_loaded: Literal[True] = True
+
+    @field_validator("first_shard_path")
+    @classmethod
+    def artifact_path_is_canonical_absolute(cls, value: str) -> str:
+        return _validated_artifact_load_path(value)
+
+    @model_validator(mode="after")
+    def tensor_inventories_match(self) -> TextArtifactLoadEvidence:
+        if self.text_shards.tensors != self.text_load.tensors:
+            raise ValueError("text tensor inventories differ between metadata and load evidence")
+        return self
+
+
 class ProjectorTensorLoadEvidence(StrictFrozenModel):
     """One modality-specific Inkling projector tensor load."""
 
@@ -2597,25 +2620,20 @@ def parse_backend_audit_evidence_v2(log_text: str) -> BackendAuditEvidenceV2:
     )
 
 
-def parse_artifact_load_evidence(
+def parse_text_artifact_load_evidence(
     log_text: str,
     *,
     expected_first_shard_path: str = EXPECTED_FIRST_Q3_MOUNT_PATH,
-    expected_projector_path: str = EXPECTED_PROJECTOR_MOUNT_PATH,
-) -> ArtifactLoadEvidence:
-    """Parse exact first-shard, split-count, and multimodal-projector loader lines."""
+) -> TextArtifactLoadEvidence:
+    """Parse exact first-shard, split-count, and tensor-accounting loader lines."""
 
     expected_first_shard_path = _validated_artifact_load_path(expected_first_shard_path)
-    expected_projector_path = _validated_artifact_load_path(expected_projector_path)
     first_shards = tuple(_FIRST_SHARD_LOAD_RE.findall(log_text))
     if len(first_shards) != 1 or first_shards[0] != expected_first_shard_path:
         raise ValueError("loader log does not bind the exact first shard")
     additional = tuple(_ADDITIONAL_SHARD_LOAD_RE.findall(log_text))
     if len(additional) != 1 or additional[0] != "48":
         raise ValueError("loader log does not prove the exact additional shard count")
-    projectors = tuple(_PROJECTOR_LOAD_RE.findall(log_text))
-    if len(projectors) != 1 or projectors[0] != expected_projector_path:
-        raise ValueError("loader log does not bind the exact projector")
 
     shard_matches = tuple(_TEXT_SHARDS_RE.findall(log_text))
     if log_text.count(_TEXT_SHARDS_MARKER) != len(shard_matches) or len(shard_matches) != 1:
@@ -2641,6 +2659,31 @@ def parse_artifact_load_evidence(
         size_data=load_values[5],
         mmap=bool(load_values[6]),
     )
+    return TextArtifactLoadEvidence(
+        first_shard_path=expected_first_shard_path,
+        additional_shards_loaded=48,
+        total_shards_loaded=EXPECTED_Q3_SHARD_COUNT,
+        text_shards=text_shards,
+        text_load=text_load,
+    )
+
+
+def parse_artifact_load_evidence(
+    log_text: str,
+    *,
+    expected_first_shard_path: str = EXPECTED_FIRST_Q3_MOUNT_PATH,
+    expected_projector_path: str = EXPECTED_PROJECTOR_MOUNT_PATH,
+) -> ArtifactLoadEvidence:
+    """Parse exact text-shard and multimodal-projector loader evidence."""
+
+    text = parse_text_artifact_load_evidence(
+        log_text,
+        expected_first_shard_path=expected_first_shard_path,
+    )
+    expected_projector_path = _validated_artifact_load_path(expected_projector_path)
+    projectors = tuple(_PROJECTOR_LOAD_RE.findall(log_text))
+    if len(projectors) != 1 or projectors[0] != expected_projector_path:
+        raise ValueError("loader log does not bind the exact projector")
 
     projector_matches = tuple(_PROJECTOR_TENSORS_RE.findall(log_text))
     if (
@@ -2677,12 +2720,12 @@ def parse_artifact_load_evidence(
         n_embd=int(ready[5]),
     )
     return ArtifactLoadEvidence(
-        first_shard_path=expected_first_shard_path,
-        additional_shards_loaded=48,
-        total_shards_loaded=EXPECTED_Q3_SHARD_COUNT,
+        first_shard_path=text.first_shard_path,
+        additional_shards_loaded=text.additional_shards_loaded,
+        total_shards_loaded=text.total_shards_loaded,
         projector_path=expected_projector_path,
-        text_shards=text_shards,
-        text_load=text_load,
+        text_shards=text.text_shards,
+        text_load=text.text_load,
         projector_tensors=projector_tensors,
         projector_ready=projector_ready,
     )
@@ -3490,6 +3533,7 @@ __all__ = [
     "RawLogitAuditRow",
     "ServerCompletionEvidence",
     "SmokeOutputVocabularyConfig",
+    "TextArtifactLoadEvidence",
     "TextShardLoadEvidence",
     "TextTensorLoadEvidence",
     "VerifiedExportArtifact",
@@ -3508,6 +3552,7 @@ __all__ = [
     "parse_nvidia_smi_monitor_csv",
     "parse_raw_logit_audit_evidence",
     "parse_server_completion",
+    "parse_text_artifact_load_evidence",
     "redacted_smoke_config_record",
     "verified_export_reference_sha256",
 ]

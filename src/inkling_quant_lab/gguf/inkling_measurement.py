@@ -18,7 +18,14 @@ from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Final, Literal
 
 import yaml
-from pydantic import Field, StrictFloat, ValidationError, field_validator, model_validator
+from pydantic import (
+    ConfigDict,
+    Field,
+    StrictFloat,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 
@@ -488,6 +495,8 @@ def build_diagnostic_fixture_bytes(
 
 class DiagnosticItem(StrictFrozenModel):
     """One deterministic, machine-scored quality item."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
 
     schema_version: Literal["inkling-quality-diagnostic-item-v1"]
     item_id: str = Field(pattern=r"^[a-z_]+_[0-9]{2}$")
