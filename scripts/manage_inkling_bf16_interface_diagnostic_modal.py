@@ -57,6 +57,7 @@ from inkling_quant_lab.gguf.inkling_bf16_interface_diagnostic import (  # noqa: 
     DiagnosticPrivateRawEvidence,
     DiagnosticPrivateRawReference,
     DiagnosticReviewedInputs,
+    DiagnosticServerLoadClaim,
     DiagnosticSuccessTerminalReceipt,
     DiagnosticTerminalReceipt,
     DiagnosticTerminalReceiptReference,
@@ -66,6 +67,7 @@ from inkling_quant_lab.gguf.inkling_bf16_interface_diagnostic import (  # noqa: 
     build_diagnostic_post_spawn_acceptance,
     build_diagnostic_rollup,
     build_diagnostic_server_command,
+    build_diagnostic_server_load_claim,
     build_diagnostic_terminal_receipt_reference,
     canonical_diagnostic_json_bytes,
     diagnostic_app_name,
@@ -76,6 +78,7 @@ from inkling_quant_lab.gguf.inkling_bf16_interface_diagnostic import (  # noqa: 
     diagnostic_post_spawn_acceptance_path,
     diagnostic_protocol_sha256,
     diagnostic_runtime_identity_sha256,
+    diagnostic_server_load_claim_path,
     diagnostic_workload_sha256,
     load_bf16_interface_diagnostic_bundle,
     parse_diagnostic_private_raw_evidence,
@@ -88,6 +91,7 @@ from inkling_quant_lab.gguf.inkling_bf16_interface_diagnostic import (  # noqa: 
     validate_diagnostic_post_spawn_acceptance,
     validate_diagnostic_private_raw_reference,
     validate_diagnostic_private_trials,
+    validate_diagnostic_server_load_claim,
     validate_diagnostic_terminal_receipt_reference,
     validate_repository_relative_path,
 )
@@ -933,6 +937,7 @@ def _assert_remote_attempt_unconsumed(registry: Any, volume: Any, *, run_id: str
         f"{root}/control/launch-intents",
         f"{root}/control/post-spawn-acceptances",
         f"{root}/control/attempt-claims",
+        f"{root}/control/server-load-claims",
         f"{root}/private/raw",
         f"{root}/terminal/success",
         f"{root}/terminal/failure",
@@ -1264,6 +1269,51 @@ def _bound_attempt_claim(
     return _AttemptInspection(claim=claim, durable=bool(durable))
 
 
+def _bound_server_load_claim(
+    volume: Any,
+    claim: DiagnosticAttemptClaim,
+) -> DiagnosticServerLoadClaim | None:
+    """Read and bind the one durable server-load boundary, when present."""
+
+    relative = diagnostic_server_load_claim_path(
+        claim.run_id,
+        claim.claim_sha256(),
+    )
+    entries = _list_remote_files(
+        volume,
+        PurePosixPath(relative).parent.as_posix(),
+    )
+    if not entries:
+        return None
+    path, size = entries[0]
+    if path != relative:
+        raise RuntimeError("diagnostic server-load claim path is not content addressed")
+    payload = _read_only_remote_file(
+        volume,
+        relative_path=relative,
+        expected_size_bytes=size,
+        maximum_bytes=DIAGNOSTIC_CONTROL_RECORD_MAX_BYTES,
+        label="server-load claim",
+    )
+    strict_diagnostic_json_object(
+        payload,
+        maximum_bytes=DIAGNOSTIC_CONTROL_RECORD_MAX_BYTES,
+    )
+    observed = DiagnosticServerLoadClaim.model_validate_json(payload, strict=True)
+    expected = build_diagnostic_server_load_claim(
+        claim,
+        load_claimed_at_utc=observed.load_claimed_at_utc,
+        input_id=claim.input_id,
+        execution_task_id=observed.execution_task_id,
+    )
+    validate_diagnostic_server_load_claim(
+        payload,
+        expected=expected,
+        evidence_path=relative,
+    )
+    return observed
+
+
 def _provider_state(call_id: str) -> tuple[str, int]:
     modal = _load_modal()
     roots = modal.FunctionCall.from_id(call_id).get_call_graph()
@@ -1311,6 +1361,7 @@ def _validate_private_scope(
     *,
     binding: _LaunchBinding,
     claim: DiagnosticAttemptClaim,
+    server_load_claim: DiagnosticServerLoadClaim,
     bundle: InklingBF16InterfaceDiagnosticBundle,
 ) -> None:
     config = bundle.config
@@ -1337,7 +1388,10 @@ def _validate_private_scope(
         "launch_intent_sha256": binding.intent.intent_sha256(),
         "post_spawn_acceptance_sha256": binding.acceptance.acceptance_sha256(),
         "call_id": binding.acceptance.call_id,
+        "input_id": claim.input_id,
+        "execution_task_id": server_load_claim.execution_task_id,
         "attempt_claim_sha256": claim.claim_sha256(),
+        "server_load_claim_sha256": server_load_claim.claim_sha256(),
         "model_id": config.model_id,
         "model_revision": config.revision,
         "architecture": config.architecture,
@@ -1427,6 +1481,10 @@ def _validate_private_scope(
         raise RuntimeError("private diagnostic command differs from the reviewed server command")
     if _parse_utc_microseconds(raw.started_at_utc) < _parse_utc_microseconds(claim.claimed_at_utc):
         raise RuntimeError("private diagnostic evidence predates its durable attempt")
+    if _parse_utc_microseconds(raw.started_at_utc) < _parse_utc_microseconds(
+        server_load_claim.load_claimed_at_utc
+    ):
+        raise RuntimeError("private diagnostic evidence predates its server-load claim")
 
 
 def _validate_success_scope(
@@ -1450,6 +1508,10 @@ def _validate_success_scope(
     if any(getattr(receipt, field) != value for field, value in expected.items()):
         raise RuntimeError("diagnostic success receipt differs from reviewed scope")
     linked = {
+        "input_id": raw.input_id,
+        "execution_task_id": raw.execution_task_id,
+        "attempt_claim_sha256": raw.attempt_claim_sha256,
+        "server_load_claim_sha256": raw.server_load_claim_sha256,
         "runtime_identity": raw.runtime_identity,
         "runtime_identity_sha256": raw.runtime_identity_sha256,
         "runtime_manifest_sha256": raw.runtime_manifest_sha256,
@@ -1481,9 +1543,12 @@ def _terminal_evidence(
         root = f"runs/{run_id}/{DIAGNOSTIC_STAGE}/terminal/{outcome}"
         for path, size in _list_remote_files(volume, root):
             candidates.append((outcome, path, size))
+    claim = attempt.claim
+    server_load_claim = (
+        _bound_server_load_claim(volume, claim) if claim is not None and attempt.durable else None
+    )
     if not candidates:
         return None
-    claim = attempt.claim
     if len(candidates) != 1 or claim is None or not attempt.durable:
         raise RuntimeError(
             "diagnostic terminal evidence conflicts or lacks a durable attempt claim"
@@ -1515,7 +1580,14 @@ def _terminal_evidence(
         "launch_intent_sha256": binding.intent.intent_sha256(),
         "post_spawn_acceptance_sha256": binding.acceptance.acceptance_sha256(),
         "call_id": binding.acceptance.call_id,
+        "input_id": claim.input_id,
+        "execution_task_id": (
+            server_load_claim.execution_task_id if server_load_claim is not None else None
+        ),
         "attempt_claim_sha256": claim.claim_sha256(),
+        "server_load_claim_sha256": (
+            server_load_claim.claim_sha256() if server_load_claim is not None else None
+        ),
     }
     if any(getattr(receipt, field) != value for field, value in expected_bindings.items()):
         raise RuntimeError("diagnostic terminal receipt differs from accepted attempt")
@@ -1523,9 +1595,21 @@ def _terminal_evidence(
         claim.claimed_at_utc
     ):
         raise RuntimeError("diagnostic terminal receipt predates its durable attempt")
+    if server_load_claim is not None and _parse_utc_microseconds(
+        receipt.completed_at_utc
+    ) < _parse_utc_microseconds(server_load_claim.load_claimed_at_utc):
+        raise RuntimeError("diagnostic terminal receipt predates its server-load claim")
     if receipt.private_raw_reference is not None:
+        if server_load_claim is None:
+            raise RuntimeError("private diagnostic evidence lacks a server-load claim")
         _, raw = _read_private_raw(volume, receipt.private_raw_reference)
-        _validate_private_scope(raw, binding=binding, claim=claim, bundle=bundle)
+        _validate_private_scope(
+            raw,
+            binding=binding,
+            claim=claim,
+            server_load_claim=server_load_claim,
+            bundle=bundle,
+        )
         runtime_links = {
             "runtime_identity_sha256": raw.runtime_identity_sha256,
             "runtime_manifest_sha256": raw.runtime_manifest_sha256,

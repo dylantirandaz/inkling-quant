@@ -99,10 +99,13 @@ DIAGNOSTIC_LAUNCH_CHALLENGE_HASH_DOMAIN: Final = b"inkling-bf16-interface-launch
 DIAGNOSTIC_LAUNCH_INTENT_HASH_DOMAIN: Final = b"inkling-bf16-interface-intent-v1\0"
 DIAGNOSTIC_ACCEPTANCE_HASH_DOMAIN: Final = b"inkling-bf16-interface-acceptance-v1\0"
 DIAGNOSTIC_ATTEMPT_CLAIM_HASH_DOMAIN: Final = b"inkling-bf16-interface-claim-v1\0"
-DIAGNOSTIC_RAW_HASH_DOMAIN: Final = b"inkling-bf16-interface-private-raw-v1\0"
+DIAGNOSTIC_SERVER_LOAD_CLAIM_HASH_DOMAIN: Final = b"inkling-bf16-interface-server-load-claim-v1\0"
+DIAGNOSTIC_RAW_HASH_DOMAIN: Final = b"inkling-bf16-interface-private-raw-v2\0"
+# Keep rollup-v1 trial identities stable while the containing raw record advances.
+DIAGNOSTIC_TRIAL_HASH_DOMAIN: Final = b"inkling-bf16-interface-private-raw-v1\0"
 DIAGNOSTIC_ROLLUP_HASH_DOMAIN: Final = b"inkling-bf16-interface-rollup-v1\0"
-DIAGNOSTIC_SUCCESS_HASH_DOMAIN: Final = b"inkling-bf16-interface-success-v1\0"
-DIAGNOSTIC_FAILURE_HASH_DOMAIN: Final = b"inkling-bf16-interface-failure-v1\0"
+DIAGNOSTIC_SUCCESS_HASH_DOMAIN: Final = b"inkling-bf16-interface-success-v2\0"
+DIAGNOSTIC_FAILURE_HASH_DOMAIN: Final = b"inkling-bf16-interface-failure-v2\0"
 
 _RUN_ID_PATTERN: Final = r"^[a-z0-9][a-z0-9._-]{0,95}$"
 _SHA256_PATTERN: Final = r"^[0-9a-f]{64}$"
@@ -1537,6 +1540,8 @@ class DiagnosticAttemptClaim(_StrictDiagnosticModel):
 class DiagnosticAttemptRegistryProtocol(Protocol):
     def put(self, key: Any, value: Any, *, skip_if_exists: bool = False) -> bool: ...
 
+    def get(self, key: Any, default: Any | None = None) -> Any: ...
+
 
 def build_diagnostic_attempt_claim(
     intent: DiagnosticLaunchIntent,
@@ -1582,11 +1587,48 @@ def build_diagnostic_attempt_claim(
 def claim_diagnostic_attempt(
     registry: DiagnosticAttemptRegistryProtocol,
     claim: DiagnosticAttemptClaim,
-) -> str:
+) -> tuple[DiagnosticAttemptClaim, bool]:
+    """Claim one logical Modal input or adopt its original claim after restart.
+
+    Modal may restart a preempted Function with the same call and input IDs but a
+    new task ID.  The first task's canonical claim remains authoritative.  Every
+    other collision, including re-entry by the original task, fails closed.
+    """
+
     created = registry.put(claim.registry_key, claim.canonical_bytes(), skip_if_exists=True)
-    if created is not True:
+    if type(created) is not bool:
+        raise RuntimeError("diagnostic attempt registry returned an invalid claim result")
+    if created:
+        return claim, False
+
+    try:
+        payload = registry.get(claim.registry_key)
+    except Exception as error:
+        raise RuntimeError("existing diagnostic attempt claim is unreadable") from error
+    if not isinstance(payload, bytes):
+        raise RuntimeError("existing diagnostic attempt claim is missing or invalid")
+    try:
+        existing = _canonical_json_model(payload, DiagnosticAttemptClaim)
+    except (TypeError, ValueError) as error:
+        raise RuntimeError(
+            "existing diagnostic attempt claim is not canonical and valid"
+        ) from error
+    if existing.task_id == claim.task_id:
         raise RuntimeError("The one authorized BF16 diagnostic attempt was already consumed")
-    return claim.claim_sha256()
+
+    excluded = {"claimed_at_utc", "task_id"}
+    existing_scope = existing.model_dump(mode="json", exclude=excluded)
+    requested_scope = claim.model_dump(mode="json", exclude=excluded)
+    if existing_scope != requested_scope:
+        raise RuntimeError(
+            "existing diagnostic attempt belongs to a different Modal input or reviewed scope"
+        )
+    if _utc_datetime(existing.claimed_at_utc, label="existing claim time") > _utc_datetime(
+        claim.claimed_at_utc,
+        label="replacement claim time",
+    ):
+        raise RuntimeError("existing diagnostic attempt claim postdates its replacement task")
+    return existing, True
 
 
 def diagnostic_attempt_claim_path(run_id: str, claim_sha256: str) -> str:
@@ -1616,6 +1658,118 @@ def validate_diagnostic_attempt_claim(
     _require_relative_or_exact_evidence_path(evidence_path, relative)
     if observed != expected:
         raise ValueError("diagnostic attempt claim differs from expected")
+    return observed
+
+
+class DiagnosticServerLoadClaim(_StrictDiagnosticModel):
+    """The one durable boundary immediately before llama-server may load Inkling."""
+
+    schema_version: Literal["inkling-bf16-interface-server-load-claim-v1"] = (
+        "inkling-bf16-interface-server-load-claim-v1"
+    )
+    run_id: StrictStr = Field(pattern=_RUN_ID_PATTERN)
+    stage: Literal["bf16_interface_diagnostic"] = DIAGNOSTIC_STAGE
+    call_id: StrictStr = Field(pattern=_MODAL_CALL_ID_PATTERN)
+    input_id: StrictStr = Field(pattern=_MODAL_INPUT_ID_PATTERN)
+    initial_task_id: StrictStr = Field(pattern=_MODAL_TASK_ID_PATTERN)
+    execution_task_id: StrictStr = Field(pattern=_MODAL_TASK_ID_PATTERN)
+    attempt_claimed_at_utc: StrictStr
+    load_claimed_at_utc: StrictStr
+    attempt_claim_sha256: StrictStr = Field(pattern=_SHA256_PATTERN)
+    launch_intent_sha256: StrictStr = Field(pattern=_SHA256_PATTERN)
+    post_spawn_acceptance_sha256: StrictStr = Field(pattern=_SHA256_PATTERN)
+    reviewed_config_file_sha256: StrictStr = Field(pattern=_SHA256_PATTERN)
+    resolved_config_sha256: StrictStr = Field(pattern=_SHA256_PATTERN)
+    control_plane_sha256: StrictStr = Field(pattern=_SHA256_PATTERN)
+    subject: Literal["bf16"] = "bf16"
+    one_server_load: Literal[True] = True
+
+    @field_validator("attempt_claimed_at_utc", "load_claimed_at_utc")
+    @classmethod
+    def times_are_canonical(cls, value: str) -> str:
+        return _canonical_utc(value, label="diagnostic server-load claim time")
+
+    @model_validator(mode="after")
+    def load_follows_attempt_claim(self) -> DiagnosticServerLoadClaim:
+        if _utc_datetime(
+            self.load_claimed_at_utc,
+            label="server-load claim time",
+        ) < _utc_datetime(
+            self.attempt_claimed_at_utc,
+            label="attempt claim time",
+        ):
+            raise ValueError("diagnostic server-load claim predates the attempt claim")
+        return self
+
+    def canonical_bytes(self) -> bytes:
+        return canonical_diagnostic_json_bytes(self.model_dump(mode="json"))
+
+    def claim_sha256(self) -> str:
+        return _domain_hash(
+            DIAGNOSTIC_SERVER_LOAD_CLAIM_HASH_DOMAIN,
+            self.model_dump(mode="json"),
+        )
+
+
+def build_diagnostic_server_load_claim(
+    attempt: DiagnosticAttemptClaim,
+    *,
+    load_claimed_at_utc: str,
+    input_id: str,
+    execution_task_id: str,
+) -> DiagnosticServerLoadClaim:
+    """Bind the one server load to the exact logical input and executing task."""
+
+    if input_id != attempt.input_id:
+        raise ValueError("diagnostic server-load input differs from its attempt claim")
+    return DiagnosticServerLoadClaim(
+        run_id=attempt.run_id,
+        call_id=attempt.call_id,
+        input_id=input_id,
+        initial_task_id=attempt.task_id,
+        execution_task_id=execution_task_id,
+        attempt_claimed_at_utc=attempt.claimed_at_utc,
+        load_claimed_at_utc=load_claimed_at_utc,
+        attempt_claim_sha256=attempt.claim_sha256(),
+        launch_intent_sha256=attempt.launch_intent_sha256,
+        post_spawn_acceptance_sha256=attempt.post_spawn_acceptance_sha256,
+        reviewed_config_file_sha256=attempt.reviewed_config_file_sha256,
+        resolved_config_sha256=attempt.resolved_config_sha256,
+        control_plane_sha256=attempt.control_plane_sha256,
+    )
+
+
+def diagnostic_server_load_claim_path(run_id: str, attempt_claim_sha256: str) -> str:
+    """Return the single immutable server-load boundary for an attempt claim."""
+
+    _validate_run_id(run_id)
+    _validate_sha256(attempt_claim_sha256, label="diagnostic attempt-claim hash")
+    return PurePosixPath(
+        "runs",
+        run_id,
+        DIAGNOSTIC_STAGE,
+        "control",
+        "server-load-claims",
+        f"{attempt_claim_sha256}.json",
+    ).as_posix()
+
+
+def validate_diagnostic_server_load_claim(
+    payload: bytes,
+    *,
+    expected: DiagnosticServerLoadClaim,
+    evidence_path: str,
+) -> DiagnosticServerLoadClaim:
+    """Validate the exact write-once server-load boundary record."""
+
+    observed = _canonical_json_model(payload, DiagnosticServerLoadClaim)
+    expected_path = diagnostic_server_load_claim_path(
+        observed.run_id,
+        observed.attempt_claim_sha256,
+    )
+    _require_relative_or_exact_evidence_path(evidence_path, expected_path)
+    if observed != expected:
+        raise ValueError("diagnostic server-load claim differs from expected")
     return observed
 
 
@@ -1775,7 +1929,7 @@ class DiagnosticPrivateTrial(_StrictDiagnosticModel):
 
     def private_sha256(self) -> str:
         return _domain_hash(
-            DIAGNOSTIC_RAW_HASH_DOMAIN,
+            DIAGNOSTIC_TRIAL_HASH_DOMAIN,
             {"kind": "trial", "trial": self.model_dump(mode="json")},
         )
 
@@ -1783,8 +1937,8 @@ class DiagnosticPrivateTrial(_StrictDiagnosticModel):
 class DiagnosticPrivateRawEvidence(_StrictDiagnosticModel):
     """Complete private record; token arrays must never be copied into public receipts."""
 
-    schema_version: Literal["inkling-bf16-interface-private-raw-v1"] = (
-        "inkling-bf16-interface-private-raw-v1"
+    schema_version: Literal["inkling-bf16-interface-private-raw-v2"] = (
+        "inkling-bf16-interface-private-raw-v2"
     )
     record_scope: Literal["private_reversible_token_evidence"] = "private_reversible_token_evidence"
     run_id: StrictStr = Field(pattern=_RUN_ID_PATTERN)
@@ -1795,7 +1949,10 @@ class DiagnosticPrivateRawEvidence(_StrictDiagnosticModel):
     launch_intent_sha256: StrictStr = Field(pattern=_SHA256_PATTERN)
     post_spawn_acceptance_sha256: StrictStr = Field(pattern=_SHA256_PATTERN)
     call_id: StrictStr = Field(pattern=_MODAL_CALL_ID_PATTERN)
+    input_id: StrictStr = Field(pattern=_MODAL_INPUT_ID_PATTERN)
+    execution_task_id: StrictStr = Field(pattern=_MODAL_TASK_ID_PATTERN)
     attempt_claim_sha256: StrictStr = Field(pattern=_SHA256_PATTERN)
+    server_load_claim_sha256: StrictStr = Field(pattern=_SHA256_PATTERN)
     model_id: Literal["thinkingmachines/Inkling"]
     model_revision: Literal["86b4d430ab871652a707666b89203a866888c5e5"]
     architecture: Literal["InklingForConditionalGeneration"]
@@ -2266,7 +2423,10 @@ class DiagnosticTerminalBindings(_StrictDiagnosticModel):
     launch_intent_sha256: StrictStr = Field(pattern=_SHA256_PATTERN)
     post_spawn_acceptance_sha256: StrictStr = Field(pattern=_SHA256_PATTERN)
     call_id: StrictStr = Field(pattern=_MODAL_CALL_ID_PATTERN)
+    input_id: StrictStr = Field(pattern=_MODAL_INPUT_ID_PATTERN)
+    execution_task_id: StrictStr | None = Field(default=None, pattern=_MODAL_TASK_ID_PATTERN)
     attempt_claim_sha256: StrictStr = Field(pattern=_SHA256_PATTERN)
+    server_load_claim_sha256: StrictStr | None = Field(default=None, pattern=_SHA256_PATTERN)
     prompt_text_recorded: Literal[False] = False
     output_text_recorded: Literal[False] = False
     compact_receipt_token_ids: Literal[False] = False
@@ -2291,13 +2451,20 @@ class DiagnosticTerminalBindings(_StrictDiagnosticModel):
     def completion_time_is_canonical(cls, value: str) -> str:
         return _canonical_utc(value, label="diagnostic terminal completion time")
 
+    @model_validator(mode="after")
+    def server_load_bindings_are_complete(self) -> DiagnosticTerminalBindings:
+        if (self.execution_task_id is None) != (self.server_load_claim_sha256 is None):
+            raise ValueError("diagnostic server-load task and claim bindings must appear together")
+        return self
+
 
 class DiagnosticSuccessTerminalReceipt(DiagnosticTerminalBindings):
     """Compact terminal success receipt for the BF16 interface diagnostic."""
 
-    schema_version: Literal["inkling-bf16-interface-success-v1"] = (
-        "inkling-bf16-interface-success-v1"
+    schema_version: Literal["inkling-bf16-interface-success-v2"] = (
+        "inkling-bf16-interface-success-v2"
     )
+    server_load_claim_sha256: StrictStr = Field(pattern=_SHA256_PATTERN)
     status: Literal["completed"] = "completed"
     diagnostic_completed: Literal[True] = True
     completed_stages: tuple[DiagnosticStageName, ...]
@@ -2346,8 +2513,8 @@ class DiagnosticSuccessTerminalReceipt(DiagnosticTerminalBindings):
 class DiagnosticFailureTerminalReceipt(DiagnosticTerminalBindings):
     """Fail-closed compact terminal receipt for an incomplete diagnostic attempt."""
 
-    schema_version: Literal["inkling-bf16-interface-failure-v1"] = (
-        "inkling-bf16-interface-failure-v1"
+    schema_version: Literal["inkling-bf16-interface-failure-v2"] = (
+        "inkling-bf16-interface-failure-v2"
     )
     status: Literal["failed"] = "failed"
     diagnostic_completed: Literal[False] = False

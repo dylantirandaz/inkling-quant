@@ -133,6 +133,7 @@ from inkling_quant_lab.gguf.inkling_bf16_interface_diagnostic import (  # noqa: 
     DIAGNOSTIC_EOS_TOKEN_ID,
     DIAGNOSTIC_FUNCTION_NAME,
     DIAGNOSTIC_PLANNED_STAGES,
+    DIAGNOSTIC_STAGE,
     DiagnosticAttemptClaim,
     DiagnosticControlPlaneProvenance,
     DiagnosticEogEvidence,
@@ -143,6 +144,7 @@ from inkling_quant_lab.gguf.inkling_bf16_interface_diagnostic import (  # noqa: 
     DiagnosticPrivateRawEvidence,
     DiagnosticPrivateRawReference,
     DiagnosticPrivateTrial,
+    DiagnosticServerLoadClaim,
     DiagnosticStageName,
     DiagnosticSuccessTerminalReceipt,
     DiagnosticTerminalReceiptReference,
@@ -152,6 +154,7 @@ from inkling_quant_lab.gguf.inkling_bf16_interface_diagnostic import (  # noqa: 
     build_diagnostic_private_raw_reference,
     build_diagnostic_rollup,
     build_diagnostic_server_command,
+    build_diagnostic_server_load_claim,
     build_diagnostic_terminal_receipt_reference,
     canonical_diagnostic_json_bytes,
     claim_diagnostic_attempt,
@@ -162,6 +165,7 @@ from inkling_quant_lab.gguf.inkling_bf16_interface_diagnostic import (  # noqa: 
     diagnostic_protocol_sha256,
     diagnostic_rollup_sha256,
     diagnostic_runtime_identity_sha256,
+    diagnostic_server_load_claim_path,
     diagnostic_workload_sha256,
     load_bf16_interface_diagnostic_bundle,
     parse_diagnostic_private_raw_evidence,
@@ -173,6 +177,7 @@ from inkling_quant_lab.gguf.inkling_bf16_interface_diagnostic import (  # noqa: 
     validate_diagnostic_post_spawn_acceptance,
     validate_diagnostic_private_raw_reference,
     validate_diagnostic_private_trials,
+    validate_diagnostic_server_load_claim,
     validate_diagnostic_terminal_receipt_reference,
 )
 from inkling_quant_lab.gguf.inkling_matched_execution import (  # noqa: E402
@@ -344,6 +349,8 @@ class DiagnosticInvocationBinding:
     claim: DiagnosticAttemptClaim
     claim_sha256: str
     call_id: str
+    input_id: str
+    execution_task_id: str
 
 
 @dataclass(frozen=True)
@@ -4862,14 +4869,15 @@ def _claim_diagnostic_attempt(
         or created_at != intent.deployment.attempt_registry_created_at_utc
     ):
         raise RuntimeError("sealed diagnostic attempt registry identity changed")
-    claim = build_diagnostic_attempt_claim(
+    candidate_claim = build_diagnostic_attempt_claim(
         intent,
         acceptance,
         claimed_at_utc=_utc_now(),
         input_id=input_id,
         task_id=task_id,
     )
-    claim_sha256 = claim_diagnostic_attempt(registry, claim)
+    claim, resumed = claim_diagnostic_attempt(registry, candidate_claim)
+    claim_sha256 = claim.claim_sha256()
     relative = diagnostic_attempt_claim_path(intent.run_id, claim_sha256)
     _commit_and_verify({relative: claim.canonical_bytes()})
     validate_diagnostic_attempt_claim(
@@ -4881,12 +4889,93 @@ def _claim_diagnostic_attempt(
         claim_sha256=claim_sha256,
         evidence_path=relative,
     )
+    _require_unused_diagnostic_execution(intent.run_id)
+    if resumed:
+        print(
+            "Adopted the original attempt claim after a provider restart of the same Modal input."
+        )
     return DiagnosticInvocationBinding(
         intent=intent,
         acceptance=acceptance,
         claim=claim,
         claim_sha256=claim_sha256,
         call_id=call_id,
+        input_id=input_id,
+        execution_task_id=task_id,
+    )
+
+
+def _evidence_directory_has_entries(relative: str) -> bool:
+    """Inspect one mounted Volume directory without following symbolic links."""
+
+    _, path = _evidence_path_binding(relative)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        descriptor = os.open(path, flags)
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        raise RuntimeError("diagnostic evidence boundary directory is unsafe") from error
+    try:
+        if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise RuntimeError("diagnostic evidence boundary is not a directory")
+        return bool(os.listdir(descriptor))
+    finally:
+        os.close(descriptor)
+
+
+def _require_unused_diagnostic_execution(run_id: str) -> None:
+    """Allow restart only before any server-load or result evidence exists."""
+
+    evidence_volume.reload()
+    root = PurePosixPath("runs", run_id, DIAGNOSTIC_STAGE)
+    protected_roots = (
+        root / "control" / "server-load-claims",
+        root / "private" / "raw",
+        root / "terminal" / "success",
+        root / "terminal" / "failure",
+    )
+    occupied = tuple(
+        path.as_posix()
+        for path in protected_roots
+        if _evidence_directory_has_entries(path.as_posix())
+    )
+    if occupied:
+        raise RuntimeError(
+            "diagnostic execution already crossed its one-server-load or terminal boundary: "
+            + ", ".join(occupied)
+        )
+
+
+def _claim_diagnostic_server_load(
+    binding: DiagnosticInvocationBinding,
+) -> DiagnosticServerLoadClaim:
+    """Commit the one durable boundary before llama-server may load Inkling."""
+
+    claim = build_diagnostic_server_load_claim(
+        binding.claim,
+        load_claimed_at_utc=_utc_now(),
+        input_id=binding.input_id,
+        execution_task_id=binding.execution_task_id,
+    )
+    relative = diagnostic_server_load_claim_path(
+        binding.intent.run_id,
+        binding.claim_sha256,
+    )
+    payload = claim.canonical_bytes()
+    _commit_and_verify({relative: payload})
+    return validate_diagnostic_server_load_claim(
+        _read_regular_bytes(
+            _evidence_path(relative),
+            maximum_bytes=DIAGNOSTIC_CONTROL_RECORD_MAX_BYTES,
+        ),
+        expected=claim,
+        evidence_path=relative,
     )
 
 
@@ -4941,6 +5030,7 @@ def _diagnostic_binding_fields(
     binding: DiagnosticInvocationBinding,
     *,
     completed_at_utc: str,
+    server_load_claim: DiagnosticServerLoadClaim | None,
 ) -> dict[str, Any]:
     reviewed = binding.intent.reviewed_inputs
     return {
@@ -4951,7 +5041,12 @@ def _diagnostic_binding_fields(
         "launch_intent_sha256": binding.intent.intent_sha256(),
         "post_spawn_acceptance_sha256": binding.acceptance.acceptance_sha256(),
         "call_id": binding.call_id,
+        "input_id": binding.input_id,
+        "execution_task_id": (binding.execution_task_id if server_load_claim is not None else None),
         "attempt_claim_sha256": binding.claim_sha256,
+        "server_load_claim_sha256": (
+            server_load_claim.claim_sha256() if server_load_claim is not None else None
+        ),
         "completed_at_utc": completed_at_utc,
     }
 
@@ -6042,6 +6137,8 @@ def run_bf16_interface_diagnostic(
     runtime: MeasurementRuntimeIdentity | None = None
     hardware: MeasurementHardwareIdentity | None = None
     staged_subject: DiagnosticSubjectSpec | None = None
+    server_load_publication_started = False
+    server_load_claim: DiagnosticServerLoadClaim | None = None
     private_raw_reference: DiagnosticPrivateRawReference | None = None
     terminal_publication_started = False
     try:
@@ -6065,6 +6162,8 @@ def run_bf16_interface_diagnostic(
         )
         _complete_diagnostic_stage(completed, "stage_and_rehash_bf16")
 
+        server_load_publication_started = True
+        server_load_claim = _claim_diagnostic_server_load(binding)
         server = _run_bf16_diagnostic_server(
             subject=staged_subject,
             source=source,
@@ -6098,6 +6197,7 @@ def run_bf16_interface_diagnostic(
             **_diagnostic_binding_fields(
                 binding,
                 completed_at_utc=server.completed_at_utc,
+                server_load_claim=server_load_claim,
             ),
             model_id=bundle.config.model_id,
             model_revision=bundle.config.revision,
@@ -6156,6 +6256,7 @@ def run_bf16_interface_diagnostic(
             **_diagnostic_binding_fields(
                 binding,
                 completed_at_utc=_utc_now(),
+                server_load_claim=server_load_claim,
             ),
             completed_stages=DIAGNOSTIC_PLANNED_STAGES,
             model_id=bundle.config.model_id,
@@ -6192,7 +6293,7 @@ def run_bf16_interface_diagnostic(
             "cpu_fallback_observed": False,
             "function_return_is_success_evidence": False,
         }
-    except BaseException as error:
+    except Exception as error:
         cpu_fallback_observed = isinstance(error, BackendCpuPlacementError)
         if staged_subject is not None:
             try:
@@ -6201,7 +6302,10 @@ def run_bf16_interface_diagnostic(
                 error.add_note(
                     f"diagnostic BF16 staging cleanup also failed: {type(cleanup_error).__name__}"
                 )
-        if not terminal_publication_started:
+        server_load_publication_unknown = (
+            server_load_publication_started and server_load_claim is None
+        )
+        if not terminal_publication_started and not server_load_publication_unknown:
             try:
                 completed_count = len(completed)
                 failed_stage = DIAGNOSTIC_PLANNED_STAGES[completed_count]
@@ -6212,6 +6316,7 @@ def run_bf16_interface_diagnostic(
                     **_diagnostic_binding_fields(
                         binding,
                         completed_at_utc=_utc_now(),
+                        server_load_claim=server_load_claim,
                     ),
                     completed_stages=tuple(completed),
                     failed_stage=failed_stage,
