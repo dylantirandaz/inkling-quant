@@ -927,22 +927,27 @@ def _validated_call_id(call: Any) -> str:
     return call_id
 
 
+def _remote_evidence_is_present(volume: Any, root: str) -> bool:
+    """Report whether the run's remote evidence root already holds a file.
+
+    One recursive listing replaces one listing for each evidence directory.  The
+    directory-by-directory probe exceeded the Modal VolumeListFiles burst limit
+    and stopped the launch before it could spawn the diagnostic.
+    """
+    modal = _load_modal()
+    try:
+        entries = volume.listdir(_remote_path(root), recursive=True)
+    except (FileNotFoundError, modal.exception.NotFoundError):
+        return False
+    return any(getattr(getattr(entry, "type", None), "name", None) == "FILE" for entry in entries)
+
+
 def _assert_remote_attempt_unconsumed(registry: Any, volume: Any, *, run_id: str) -> None:
     key = diagnostic_attempt_registry_key(run_id)
     present = registry.contains(key)
     if type(present) is not bool:
         raise RuntimeError("Modal attempt registry returned an invalid presence value")
-    root = f"runs/{run_id}/{DIAGNOSTIC_STAGE}"
-    evidence_roots = (
-        f"{root}/control/launch-intents",
-        f"{root}/control/post-spawn-acceptances",
-        f"{root}/control/attempt-claims",
-        f"{root}/control/server-load-claims",
-        f"{root}/private/raw",
-        f"{root}/terminal/success",
-        f"{root}/terminal/failure",
-    )
-    if present or any(_list_remote_files(volume, path) for path in evidence_roots):
+    if present or _remote_evidence_is_present(volume, f"runs/{run_id}/{DIAGNOSTIC_STAGE}"):
         raise RuntimeError("remote evidence shows that the diagnostic attempt was consumed")
 
 
