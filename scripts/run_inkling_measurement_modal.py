@@ -401,7 +401,7 @@ class DiagnosticSubjectSpec:
 class DiagnosticSourceEvidence:
     source_config_sha256: str
     asset_manifest_sha256: str
-    official_chat_template: str
+    expected_server_chat_template: str
 
 
 @dataclass(frozen=True)
@@ -5286,6 +5286,23 @@ def _release_diagnostic_subject(subject: DiagnosticSubjectSpec) -> None:
         raise RuntimeError("diagnostic BF16 directory remained after release")
 
 
+def _expected_server_chat_template(official_chat_template: str) -> str:
+    """Return the template text llama-server reports for the official source asset.
+
+    The pinned llama.cpp jinja lexer normalizes carriage returns and then drops one
+    trailing line feed before it stores the template source that ``/props`` reports,
+    so the official asset text is never byte-identical to the runtime value when the
+    asset ends in a newline.  Carriage returns are rejected instead of normalized:
+    the asset is SHA-256 pinned and has none, so normalizing them here would add an
+    unexercised second rule.
+    """
+    if "\r" in official_chat_template:
+        raise RuntimeError("official source chat template contains a carriage return")
+    if official_chat_template.endswith("\n"):
+        return official_chat_template[:-1]
+    return official_chat_template
+
+
 def _verify_diagnostic_source_assets(
     bundle: InklingBF16InterfaceDiagnosticBundle,
 ) -> DiagnosticSourceEvidence:
@@ -5393,6 +5410,7 @@ def _verify_diagnostic_source_assets(
         official_chat_template = payloads[source_assets.chat_template.path].decode("utf-8")
     except UnicodeDecodeError as error:
         raise RuntimeError("official source chat template is not strict UTF-8") from error
+    expected_server_chat_template = _expected_server_chat_template(official_chat_template)
     asset_manifest = {
         "schema_version": "inkling-bf16-interface-source-assets-v1",
         "assets": [identity.model_dump(mode="json") for identity in identities],
@@ -5400,7 +5418,7 @@ def _verify_diagnostic_source_assets(
     return DiagnosticSourceEvidence(
         source_config_sha256=_sha256_bytes(config_payload),
         asset_manifest_sha256=_sha256_bytes(canonical_diagnostic_json_bytes(asset_manifest)),
-        official_chat_template=official_chat_template,
+        expected_server_chat_template=expected_server_chat_template,
     )
 
 
@@ -5598,8 +5616,11 @@ def _diagnostic_props(
         timeout=30,
         work_deadline=work_deadline,
     )
-    if props.get("chat_template") != source.official_chat_template:
-        raise RuntimeError("llama-server chat template differs from the pinned source asset")
+    chat_template = props.get("chat_template")
+    if not isinstance(chat_template, str) or chat_template != source.expected_server_chat_template:
+        raise RuntimeError(
+            "llama-server chat template differs from the exact pinned runtime representation"
+        )
     build_info = props.get("build_info")
     if not isinstance(build_info, str) or PINNED_LLAMA_CPP_COMMIT[:7] not in build_info:
         raise RuntimeError("diagnostic llama-server build identity is unavailable")
