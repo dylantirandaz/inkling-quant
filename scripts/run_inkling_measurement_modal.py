@@ -201,6 +201,7 @@ from inkling_quant_lab.gguf.inkling_measurement import (  # noqa: E402
     load_measurement_bundle,
     measurement_protocol_sha256,
     measurement_workload_sha256,
+    render_measurement_diagnostic_prompt,
 )
 from inkling_quant_lab.gguf.inkling_measurement_control import (  # noqa: E402
     MEASUREMENT_ATTEMPT_REGISTRY_NAME,
@@ -2957,11 +2958,16 @@ def _run_diagnostics(
     results: list[dict[str, Any]] = []
     for item in bundle.diagnostic_items:
         fixture = build_diagnostic_fixture_bytes(item.fixture)
-        prompt_text = f"{bundle.config.quality.prompt_template}\n{item.prompt}"
-        prompt: object = prompt_text
+        render = render_measurement_diagnostic_prompt(
+            prompt_template=bundle.config.quality.prompt_template,
+            item_prompt=item.prompt,
+            prompt_interface=bundle.config.quality.prompt_interface,
+            has_media=fixture is not None,
+        )
+        prompt: object = render.prompt_text
         if fixture is not None:
             prompt = {
-                "prompt_string": f"{marker}\n{prompt_text}",
+                "prompt_string": render.prompt_string,
                 "multimodal_data": [base64.b64encode(fixture).decode("ascii")],
             }
         request = {
@@ -3013,7 +3019,7 @@ def _run_diagnostics(
                 "suite": item.suite,
                 "modality": item.modality,
                 "request_body_sha256": request_body_sha256,
-                "prompt_sha256": _sha256_bytes(prompt_text.encode("utf-8")),
+                "prompt_sha256": _sha256_bytes(render.prompt_text.encode("utf-8")),
                 "fixture_sha256": (None if fixture is None else _sha256_bytes(fixture)),
                 "fixture_size_bytes": None if fixture is None else len(fixture),
                 "seed": item.seed,
@@ -4288,6 +4294,7 @@ def _publish_subject_evidence(
     validate_measurement_diagnostic_evidence(
         bundle.diagnostic_items,
         prompt_template=bundle.config.quality.prompt_template,
+        prompt_interface=bundle.config.quality.prompt_interface,
         raw_trials=raw_trials,
     )
     quality = recompute_subject_quality_summary(token_nll, raw_trials)
@@ -4418,6 +4425,7 @@ def _publish_subject_evidence(
     validate_measurement_diagnostic_evidence(
         bundle.diagnostic_items,
         prompt_template=bundle.config.quality.prompt_template,
+        prompt_interface=bundle.config.quality.prompt_interface,
         raw_trials=readback_trials,
     )
     readback_quality = recompute_subject_quality_summary(

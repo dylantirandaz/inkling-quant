@@ -31,9 +31,10 @@ from pydantic import (
 
 from inkling_quant_lab.config import StrictFrozenModel
 from inkling_quant_lab.gguf.inkling_measurement import (
-    MEASUREMENT_MEDIA_MARKER,
     DiagnosticItem,
+    MeasurementPromptInterface,
     build_diagnostic_fixture_bytes,
+    render_measurement_diagnostic_prompt,
 )
 from inkling_quant_lab.gguf.inkling_measurement_execution import (
     PINNED_LLAMA_CPP_BUILD_COMMIT,
@@ -2528,6 +2529,7 @@ def validate_measurement_diagnostic_evidence(
     diagnostic_items: tuple[DiagnosticItem, ...],
     *,
     prompt_template: str,
+    prompt_interface: MeasurementPromptInterface,
     raw_trials: MeasurementRawTrialsEvidence,
 ) -> MeasurementRawTrialsEvidence:
     """Bind raw diagnostic results to the exact checked dataset and scorers."""
@@ -2546,15 +2548,20 @@ def validate_measurement_diagnostic_evidence(
         raw_trials.diagnostics,
         strict=True,
     ):
-        prompt_text = f"{prompt_template}\n{checked.prompt}"
-        prompt = prompt_text.encode()
         fixture = build_diagnostic_fixture_bytes(checked.fixture)
+        render = render_measurement_diagnostic_prompt(
+            prompt_template=prompt_template,
+            item_prompt=checked.prompt,
+            prompt_interface=prompt_interface,
+            has_media=fixture is not None,
+        )
+        prompt = render.prompt_text.encode()
         expected_fixture_sha256 = None if fixture is None else hashlib.sha256(fixture).hexdigest()
         expected_fixture_size_bytes = None if fixture is None else len(fixture)
-        request_prompt: object = prompt_text
+        request_prompt: object = render.prompt_text
         if fixture is not None:
             request_prompt = {
-                "prompt_string": f"{MEASUREMENT_MEDIA_MARKER}\n{prompt_text}",
+                "prompt_string": render.prompt_string,
                 "multimodal_data": [base64.b64encode(fixture).decode("ascii")],
             }
         expected_request_body_sha256 = hashlib.sha256(

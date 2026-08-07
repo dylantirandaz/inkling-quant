@@ -92,6 +92,7 @@ quality:
   perplexity_scored_tokens: 16320
   printed_perplexity_absolute_tolerance: 0.0000501
   prompt_template: Answer the task directly and emit only the response form requested by the task.
+  prompt_interface: chat_template_system_effort_none_then_user_then_generation_prompt
   seeds: [42]
   temperature: 0.0
   partial_results_allowed: false

@@ -13,9 +13,10 @@ import wave
 import zlib
 from collections import Counter
 from collections.abc import Hashable, Mapping
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Any, Final, Literal
+from typing import Annotated, Any, Final, Literal, TypeAlias
 
 import yaml
 from pydantic import (
@@ -55,6 +56,12 @@ MEASUREMENT_MEDIA_MARKER: Final = "<__media_iql_smoke_v1__>"
 CORPUS_REFERENCE_HASH_DOMAIN: Final = b"inkling-wikitext2-raw-test-reference-v2\0"
 MEASUREMENT_PROTOCOL_HASH_DOMAIN: Final = b"inkling-measurement-protocol-identity-v1\0"
 MEASUREMENT_WORKLOAD_HASH_DOMAIN: Final = b"inkling-measurement-workload-identity-v1\0"
+MEASUREMENT_CHAT_SYSTEM_TOKEN: Final = "<|message_system|>"
+MEASUREMENT_CHAT_USER_TOKEN: Final = "<|message_user|>"
+MEASUREMENT_CHAT_MODEL_TOKEN: Final = "<|message_model|>"
+MEASUREMENT_CHAT_TEXT_TOKEN: Final = "<|content_text|>"
+MEASUREMENT_CHAT_END_MESSAGE_TOKEN: Final = "<|end_message|>"
+MEASUREMENT_CHAT_EFFORT_TEXT: Final = "Thinking effort level: 0"
 
 _SUITES: Final = (
     "text",
@@ -493,6 +500,74 @@ def build_diagnostic_fixture_bytes(
     return output.getvalue()
 
 
+MeasurementPromptInterface: TypeAlias = Literal[
+    "raw_instruction_then_lf_then_item_prompt",
+    "chat_template_system_effort_none_then_user_then_generation_prompt",
+]
+
+
+@dataclass(frozen=True)
+class MeasurementDiagnosticPromptRender:
+    """The exact text a diagnostic request sends for one prompt interface.
+
+    ``prompt_text`` carries the interface-rendered prompt without media, and
+    ``prompt_string`` adds the media marker where llama.cpp substitutes the
+    projected media.  The two are equal for a text-only item.
+    """
+
+    prompt_text: str
+    prompt_string: str
+
+
+def render_measurement_diagnostic_prompt(
+    *,
+    prompt_template: str,
+    item_prompt: str,
+    prompt_interface: MeasurementPromptInterface,
+    has_media: bool,
+) -> MeasurementDiagnosticPromptRender:
+    """Render one diagnostic prompt for the configured server prompt interface.
+
+    The chat interface reproduces the official Inkling template for a system
+    instruction, the reasoning-effort system turn, an optional media user turn,
+    the item user turn, and the generation prompt.  llama.cpp inserts
+    ``<|content_image|>`` or ``<|content_audio_input|>`` and its closing token at
+    the media marker, so the marker stands alone inside its user block.
+    """
+
+    match prompt_interface:
+        case "raw_instruction_then_lf_then_item_prompt":
+            prompt_text = f"{prompt_template}\n{item_prompt}"
+            prompt_string = (
+                f"{MEASUREMENT_MEDIA_MARKER}\n{prompt_text}" if has_media else prompt_text
+            )
+        case "chat_template_system_effort_none_then_user_then_generation_prompt":
+            system_turns = (
+                f"{MEASUREMENT_CHAT_SYSTEM_TOKEN}{MEASUREMENT_CHAT_TEXT_TOKEN}"
+                f"{prompt_template}{MEASUREMENT_CHAT_END_MESSAGE_TOKEN}"
+                f"{MEASUREMENT_CHAT_SYSTEM_TOKEN}{MEASUREMENT_CHAT_TEXT_TOKEN}"
+                f"{MEASUREMENT_CHAT_EFFORT_TEXT}{MEASUREMENT_CHAT_END_MESSAGE_TOKEN}"
+            )
+            item_turn = (
+                f"{MEASUREMENT_CHAT_USER_TOKEN}{MEASUREMENT_CHAT_TEXT_TOKEN}"
+                f"{item_prompt}{MEASUREMENT_CHAT_END_MESSAGE_TOKEN}"
+            )
+            prompt_text = f"{system_turns}{item_turn}{MEASUREMENT_CHAT_MODEL_TOKEN}"
+            media_turn = (
+                f"{MEASUREMENT_CHAT_USER_TOKEN}{MEASUREMENT_MEDIA_MARKER}"
+                f"{MEASUREMENT_CHAT_END_MESSAGE_TOKEN}"
+            )
+            prompt_string = (
+                f"{system_turns}{media_turn}{item_turn}{MEASUREMENT_CHAT_MODEL_TOKEN}"
+                if has_media
+                else prompt_text
+            )
+    return MeasurementDiagnosticPromptRender(
+        prompt_text=prompt_text,
+        prompt_string=prompt_string,
+    )
+
+
 class DiagnosticItem(StrictFrozenModel):
     """One deterministic, machine-scored quality item."""
 
@@ -551,6 +626,7 @@ class QualityConfig(StrictFrozenModel):
     prompt_template: Literal[
         "Answer the task directly and emit only the response form requested by the task."
     ]
+    prompt_interface: MeasurementPromptInterface
     seeds: tuple[Literal[42]]
     temperature: StrictFloat
     partial_results_allowed: Literal[False]
@@ -1163,6 +1239,8 @@ __all__ = [
     "DiagnosticItem",
     "InklingMeasurementBundle",
     "InklingMeasurementConfig",
+    "MeasurementDiagnosticPromptRender",
+    "MeasurementPromptInterface",
     "build_diagnostic_fixture_bytes",
     "load_corpus_reference",
     "load_diagnostic_items",
@@ -1171,4 +1249,5 @@ __all__ = [
     "measurement_protocol_sha256",
     "measurement_workload_sha256",
     "parse_measurement_config_bytes",
+    "render_measurement_diagnostic_prompt",
 ]
