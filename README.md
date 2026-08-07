@@ -124,6 +124,43 @@ The raw evidence stays unchanged on the Modal volume.
 It is not stored in Git history.
 The records contain no prompt text or model output text.
 
+### BF16 prompt-interface diagnostic
+
+The BF16 accuracy floor above raised one question: does the failure come from the prompt
+interface? A
+[separate diagnostic plan](configs/experiments/inkling_bf16_interface_diagnostic_modal.yaml)
+answers it. It sends the same four diagnostic items to the BF16 subject in four cells: a raw
+prompt and the official chat template, each with the original token cap and a fixed cap of 64
+tokens. One server load serves all sixteen requests.
+
+The diagnostic completed on eight NVIDIA B300 GPUs on 2026-08-07. The
+[immutable terminal receipt](docs/experiments/inkling-bf16-interface-diagnostic-8xb300.json)
+contains the full recorded result. The Git file is byte-for-byte equal to the downloaded
+receipt. Its file SHA-256 is
+`7adb849943fbb3a1f8a23fbe1820770ebfe0a85fbcf2b8f3316c71e79916aa6f`.
+Its domain-separated content SHA-256 is
+`33ad99160a7e203f4047b61b1fe80dc00b1d26bad5a779a34dc2ee5611fd8531`.
+
+| Cell | Prompt | Cap | Passed | Ended in an EOG token | Hit the cap |
+|---|---|---|---:|---:|---:|
+| `raw_original` | raw instruction | original | 0 of 4 | 1 of 4 | 3 of 4 |
+| `raw_64` | raw instruction | 64 tokens | 0 of 4 | 1 of 4 | 3 of 4 |
+| `chat_original` | official chat template | original | 4 of 4 | 4 of 4 | 0 of 4 |
+| `chat_64` | official chat template | 64 tokens | 4 of 4 | 4 of 4 | 0 of 4 |
+
+The prompt interface controls the result for this exact cell. The raw prompt passed no item and
+usually ran to the token cap. The official chat template passed every item and always stopped on
+a runtime end-of-generation token. The cap value changed nothing.
+
+The runtime holds two end-of-generation tokens. Both the source configuration EOS token
+`200006` and the comparison token `199999` are end-of-generation tokens in the runtime, and a
+forced-token probe confirmed each one. All model graph work stayed on the eight expected CUDA
+devices, and the run observed no CPU fallback.
+
+This is a prompt-interface diagnostic for one exact matrix cell. It is not a quality-retention
+result and not a performance comparison. It cannot be applied to a different model, runtime,
+hardware, or protocol.
+
 The Git repository does not contain the model files.
 The files are too large for Git, and the project does not upload model weights by default.
 
@@ -298,6 +335,9 @@ These tracked files define the workflow:
 - [Matched measurement Modal manager](scripts/manage_inkling_measurement_modal.py)
 - [Matched measurement Modal runner](scripts/run_inkling_measurement_modal.py)
 - [Matched measurement result](docs/experiments/inkling-q3-k-m-measurement-8xb300.json)
+- [BF16 interface diagnostic configuration](configs/experiments/inkling_bf16_interface_diagnostic_modal.yaml)
+- [BF16 interface diagnostic Modal manager](scripts/manage_inkling_bf16_interface_diagnostic_modal.py)
+- [BF16 interface diagnostic result](docs/experiments/inkling-bf16-interface-diagnostic-8xb300.json)
 
 ## Configuration
 
