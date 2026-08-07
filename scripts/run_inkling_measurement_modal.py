@@ -5878,20 +5878,20 @@ def _diagnostic_score_detail_sha256(
 
 
 def _parse_diagnostic_runtime_eog_ids(log_text: str) -> tuple[int, ...]:
-    eos_pattern = re.compile(
-        r"^print_info: EOS token\s+=\s+([0-9]+) '[^'\r\n]*'$",
-        flags=re.MULTILINE,
-    )
-    eog_pattern = re.compile(
-        r"^print_info: EOG token\s+=\s+([0-9]+) '[^'\r\n]*'$",
-        flags=re.MULTILINE,
-    )
+    """Read the authoritative EOS and EOG token IDs from the server load log.
+
+    The pinned build prefixes every log line with a timestamp and a level, so the
+    patterns match the line body and reject a match that crosses a line, exactly
+    like the proven loader-evidence patterns.
+    """
+    eos_pattern = re.compile(r"print_info: EOS token\s+=\s+([0-9]+) '[^'\r\n]*'")
+    eog_pattern = re.compile(r"print_info: EOG token\s+=\s+([0-9]+) '[^'\r\n]*'")
     eos_ids = tuple(int(item) for item in eos_pattern.findall(log_text))
     eog_ids = tuple(int(item) for item in eog_pattern.findall(log_text))
     if eos_ids != (DIAGNOSTIC_EOS_TOKEN_ID,):
-        raise RuntimeError("authoritative llama-server EOS metadata is not exact")
+        raise RuntimeError(f"authoritative llama-server EOS metadata is not exact: {eos_ids}")
     if not eog_ids or len(eog_ids) != len(set(eog_ids)):
-        raise RuntimeError("authoritative llama-server EOG metadata is incomplete")
+        raise RuntimeError(f"authoritative llama-server EOG metadata is incomplete: {eog_ids}")
     return tuple(sorted(eog_ids))
 
 
