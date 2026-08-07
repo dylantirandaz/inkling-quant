@@ -2586,8 +2586,8 @@ def _telemetry_window(
         "window_finished_monotonic_seconds": finished_monotonic,
         "sample_count": len(samples),
         "max_sampled_host_rss_bytes": max_sampled_host_rss,
-        "max_sampled_per_gpu_memory_bytes": list(memory),
-        "max_sampled_per_gpu_utilization_percent": list(utilization),
+        "max_sampled_per_gpu_memory_bytes": memory,
+        "max_sampled_per_gpu_utilization_percent": utilization,
     }
 
 

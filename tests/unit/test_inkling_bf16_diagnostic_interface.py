@@ -14,11 +14,15 @@ from __future__ import annotations
 
 import ast
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
 import pytest
+
+from inkling_quant_lab.gguf.inkling_measurement_raw_evidence import (
+    MeasurementResourceSampleSummary,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -66,6 +70,37 @@ def _load_log(eos_ids: Sequence[int], eog_ids: Sequence[int]) -> str:
     lines += [f"print_info: EOS token             = {item} '<|eos|>'" for item in eos_ids]
     lines += [f"print_info: EOG token             = {item} '<|eog|>'" for item in eog_ids]
     return _server_log(*lines)
+
+
+def _telemetry_window(
+    telemetry: Mapping[str, object],
+    *,
+    started_monotonic: float,
+    finished_monotonic: float,
+) -> dict[str, object]:
+    build = _runner_function(
+        "_telemetry_window",
+        {"Mapping": Mapping, "cast": cast, "RuntimeError": RuntimeError},
+    )
+    return cast(
+        "dict[str, object]",
+        build(
+            telemetry,
+            started_monotonic=started_monotonic,
+            finished_monotonic=finished_monotonic,
+        ),
+    )
+
+
+def _telemetry_sample(sampled_at: float) -> dict[str, object]:
+    return {
+        "sampled_at_monotonic_seconds": sampled_at,
+        "host_rss_bytes": 4 * 1024**3,
+        "gpus": [
+            {"memory_used_mib": 190_000 + index, "utilization_percent": 40 + index}
+            for index in range(8)
+        ],
+    }
 
 
 def test_single_trailing_line_feed_is_dropped() -> None:
@@ -131,3 +166,18 @@ def test_match_never_crosses_a_line() -> None:
 
     with pytest.raises(RuntimeError, match=r"EOS metadata is not exact: \(\)"):
         _runtime_eog_ids(broken)
+
+
+def test_telemetry_window_validates_in_python_strict_mode() -> None:
+    telemetry = {"samples": [_telemetry_sample(10.0), _telemetry_sample(20.0)]}
+
+    window = _telemetry_window(telemetry, started_monotonic=5.0, finished_monotonic=25.0)
+    summary = MeasurementResourceSampleSummary.model_validate(window, strict=True)
+
+    assert summary.sample_count == 2
+    assert summary.max_sampled_per_gpu_memory_bytes == tuple(
+        (190_000 + index) * 1024 * 1024 for index in range(8)
+    )
+    assert summary.max_sampled_per_gpu_utilization_percent == tuple(
+        float(40 + index) for index in range(8)
+    )
